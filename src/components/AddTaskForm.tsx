@@ -50,7 +50,7 @@ export default function AddTaskForm({ companies, onAdded }: Props) {
     return (
       <button
         onClick={() => setOpen(true)}
-        className="w-full flex items-center gap-2 p-4 bg-white border border-dashed border-gray-200 rounded-lg text-sm text-gray-400 hover:border-gray-300 hover:text-gray-600 transition-colors"
+        className="w-full flex items-center gap-2 p-4 bg-[#1c1c1c] border border-dashed border-[#2a2a2a] rounded-lg text-sm text-[#888888] hover:border-[#555555] hover:text-[#e8e8e8] transition-colors"
       >
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -63,7 +63,7 @@ export default function AddTaskForm({ companies, onAdded }: Props) {
   return (
     <form
       onSubmit={handleSubmit}
-      className="bg-white border border-gray-200 rounded-lg p-4 space-y-3"
+      className="bg-[#1c1c1c] border border-[#2a2a2a] rounded-lg p-4 space-y-3"
     >
       <input
         autoFocus
@@ -71,14 +71,14 @@ export default function AddTaskForm({ companies, onAdded }: Props) {
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         placeholder="Task title"
-        className="w-full text-sm font-medium border-0 outline-none placeholder:text-gray-300 text-gray-900"
+        className="w-full text-sm font-medium border-0 outline-none placeholder:text-[#444444] text-[#e8e8e8] bg-transparent"
       />
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <select
           value={companyId}
           onChange={(e) => setCompanyId(e.target.value)}
-          className="text-xs border border-gray-200 rounded px-2 py-1.5 text-gray-600 focus:outline-none focus:border-gray-400 bg-white"
+          className="text-xs border border-[#2a2a2a] rounded px-2 py-1.5 text-[#e8e8e8] focus:outline-none focus:border-[#7F77DD] bg-[#1c1c1c]"
         >
           <option value="">No company</option>
           {companies.map((c) => (
@@ -89,7 +89,7 @@ export default function AddTaskForm({ companies, onAdded }: Props) {
         <select
           value={priority}
           onChange={(e) => setPriority(e.target.value as Priority)}
-          className="text-xs border border-gray-200 rounded px-2 py-1.5 text-gray-600 focus:outline-none focus:border-gray-400 bg-white"
+          className="text-xs border border-[#2a2a2a] rounded px-2 py-1.5 text-[#e8e8e8] focus:outline-none focus:border-[#7F77DD] bg-[#1c1c1c]"
         >
           <option value="urgente">Urgente</option>
           <option value="normal">Normal</option>
@@ -100,7 +100,7 @@ export default function AddTaskForm({ companies, onAdded }: Props) {
           type="date"
           value={dueDate}
           onChange={(e) => setDueDate(e.target.value)}
-          className="text-xs border border-gray-200 rounded px-2 py-1.5 text-gray-600 focus:outline-none focus:border-gray-400"
+          className="text-xs border border-[#2a2a2a] rounded px-2 py-1.5 text-[#e8e8e8] focus:outline-none focus:border-[#7F77DD] bg-[#1c1c1c]"
         />
       </div>
 
@@ -109,7 +109,7 @@ export default function AddTaskForm({ companies, onAdded }: Props) {
         onChange={(e) => setNotes(e.target.value)}
         placeholder="Notes (optional)"
         rows={2}
-        className="w-full text-xs border border-gray-200 rounded px-2.5 py-1.5 text-gray-600 focus:outline-none focus:border-gray-400 placeholder:text-gray-300 resize-none"
+        className="w-full text-xs border border-[#2a2a2a] rounded px-2.5 py-1.5 text-[#888888] focus:outline-none focus:border-[#7F77DD] placeholder:text-[#444444] resize-none bg-[#0f0f0f]"
       />
 
       <div className="grid grid-cols-2 gap-2">
@@ -118,14 +118,14 @@ export default function AddTaskForm({ companies, onAdded }: Props) {
           value={linkUrl}
           onChange={(e) => setLinkUrl(e.target.value)}
           placeholder="Link URL (optional)"
-          className="text-xs border border-gray-200 rounded px-2.5 py-1.5 text-gray-600 focus:outline-none focus:border-gray-400 placeholder:text-gray-300"
+          className="text-xs border border-[#2a2a2a] rounded px-2.5 py-1.5 text-[#888888] focus:outline-none focus:border-[#7F77DD] placeholder:text-[#444444] bg-[#0f0f0f]"
         />
         <input
           type="text"
           value={linkLabel}
           onChange={(e) => setLinkLabel(e.target.value)}
           placeholder="Link label"
-          className="text-xs border border-gray-200 rounded px-2.5 py-1.5 text-gray-600 focus:outline-none focus:border-gray-400 placeholder:text-gray-300"
+          className="text-xs border border-[#2a2a2a] rounded px-2.5 py-1.5 text-[#888888] focus:outline-none focus:border-[#7F77DD] placeholder:text-[#444444] bg-[#0f0f0f]"
         />
       </div>
 
@@ -133,14 +133,14 @@ export default function AddTaskForm({ companies, onAdded }: Props) {
         <button
           type="submit"
           disabled={saving || !title.trim()}
-          className="px-4 py-1.5 bg-gray-900 text-white text-sm rounded hover:bg-gray-700 disabled:opacity-40 transition-colors"
+          className="px-4 py-1.5 bg-[#7F77DD] text-white text-sm rounded hover:bg-[#6b62d0] disabled:opacity-40 transition-colors"
         >
           {saving ? 'Saving...' : 'Add task'}
         </button>
         <button
           type="button"
           onClick={() => setOpen(false)}
-          className="px-4 py-1.5 text-sm text-gray-400 hover:text-gray-600 transition-colors"
+          className="px-4 py-1.5 text-sm text-[#888888] hover:text-[#e8e8e8] transition-colors"
         >
           Cancel
         </button>

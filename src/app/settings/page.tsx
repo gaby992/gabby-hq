@@ -93,32 +93,32 @@ export default function SettingsPage() {
   }
 
   if (loading) {
-    return <div className="text-sm text-gray-400 py-8 text-center">Loading...</div>
+    return <div className="text-sm text-[#888888] py-8 text-center">Loading...</div>
   }
 
   return (
     <div className="space-y-10">
       <div>
-        <h1 className="text-lg font-semibold text-gray-900">Settings</h1>
+        <h1 className="text-lg font-semibold text-[#e8e8e8]">Settings</h1>
       </div>
 
       {/* Companies */}
       <section className="space-y-4">
-        <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">Companies</h2>
+        <h2 className="text-sm font-semibold text-[#888888] uppercase tracking-wider">Companies</h2>
 
-        <form onSubmit={handleAddCompany} className="bg-white border border-gray-200 rounded-lg p-4 flex flex-wrap gap-2 items-end">
+        <form onSubmit={handleAddCompany} className="bg-[#1c1c1c] border border-[#2a2a2a] rounded-lg p-4 flex flex-wrap gap-2 items-end">
           <div className="flex-1 min-w-40">
-            <label className="text-xs text-gray-500 block mb-1">Name</label>
+            <label className="text-xs text-[#888888] block mb-1">Name</label>
             <input
               type="text"
               value={companyName}
               onChange={(e) => setCompanyName(e.target.value)}
               placeholder="Company name"
-              className="w-full text-sm border border-gray-200 rounded px-2.5 py-1.5 focus:outline-none focus:border-gray-400 placeholder:text-gray-300"
+              className="w-full text-sm border border-[#2a2a2a] rounded px-2.5 py-1.5 focus:outline-none focus:border-[#7F77DD] placeholder:text-[#444444] bg-[#0f0f0f] text-[#e8e8e8]"
             />
           </div>
           <div>
-            <label className="text-xs text-gray-500 block mb-1">Color</label>
+            <label className="text-xs text-[#888888] block mb-1">Color</label>
             <div className="flex gap-1.5">
               {COLOR_OPTIONS.map(([name, hex]) => (
                 <button
@@ -126,7 +126,7 @@ export default function SettingsPage() {
                   type="button"
                   onClick={() => setCompanyColor(name)}
                   title={name}
-                  className={`w-6 h-6 rounded-full transition-transform ${companyColor === name ? 'scale-125 ring-2 ring-offset-1 ring-gray-400' : 'hover:scale-110'}`}
+                  className={`w-6 h-6 rounded-full transition-transform ${companyColor === name ? 'scale-125 ring-2 ring-offset-2 ring-[#7F77DD] ring-offset-[#1c1c1c]' : 'hover:scale-110'}`}
                   style={{ backgroundColor: hex }}
                 />
               ))}
@@ -136,7 +136,7 @@ export default function SettingsPage() {
             <button
               type="submit"
               disabled={savingCompany || !companyName.trim()}
-              className="px-4 py-1.5 bg-gray-900 text-white text-sm rounded hover:bg-gray-700 disabled:opacity-40 transition-colors"
+              className="px-4 py-1.5 bg-[#7F77DD] text-white text-sm rounded hover:bg-[#6b62d0] disabled:opacity-40 transition-colors"
             >
               {editingCompany ? 'Update' : 'Add'}
             </button>
@@ -144,7 +144,7 @@ export default function SettingsPage() {
               <button
                 type="button"
                 onClick={() => { setEditingCompany(null); setCompanyName(''); setCompanyColor('teal') }}
-                className="px-3 py-1.5 text-sm text-gray-400 hover:text-gray-600"
+                className="px-3 py-1.5 text-sm text-[#888888] hover:text-[#e8e8e8]"
               >
                 Cancel
               </button>
@@ -154,30 +154,30 @@ export default function SettingsPage() {
 
         <div className="space-y-2">
           {companies.length === 0 && (
-            <p className="text-sm text-gray-400">No companies yet.</p>
+            <p className="text-sm text-[#888888]">No companies yet.</p>
           )}
           {companies.map((c) => {
             const color = COMPANY_COLORS[c.color] ?? '#888780'
             return (
-              <div key={c.id} className="bg-white border border-gray-200 rounded-lg px-4 py-3 flex items-center gap-3">
+              <div key={c.id} className="bg-[#1c1c1c] border border-[#2a2a2a] rounded-lg px-4 py-3 flex items-center gap-3">
                 <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
-                <span className="text-sm font-medium text-gray-900 flex-1">{c.name}</span>
-                <span className="text-xs text-gray-400">{c.color}</span>
+                <span className="text-sm font-medium text-[#e8e8e8] flex-1">{c.name}</span>
+                <span className="text-xs text-[#888888]">{c.color}</span>
                 <button
                   onClick={() => startEditCompany(c)}
-                  className="text-xs text-gray-400 hover:text-gray-700 transition-colors"
+                  className="text-xs text-[#888888] hover:text-[#e8e8e8] transition-colors"
                 >
                   Edit
                 </button>
                 {confirmDeleteCompany === c.id ? (
                   <div className="flex items-center gap-1.5">
-                    <button onClick={() => deleteCompany(c.id)} className="text-xs text-red-500 hover:text-red-600 font-medium">Delete</button>
-                    <button onClick={() => setConfirmDeleteCompany(null)} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+                    <button onClick={() => deleteCompany(c.id)} className="text-xs text-red-500 hover:text-red-400 font-medium">Delete</button>
+                    <button onClick={() => setConfirmDeleteCompany(null)} className="text-xs text-[#555555] hover:text-[#888888]">Cancel</button>
                   </div>
                 ) : (
                   <button
                     onClick={() => setConfirmDeleteCompany(c.id)}
-                    className="text-gray-300 hover:text-red-400 transition-colors"
+                    className="text-[#555555] hover:text-red-400 transition-colors"
                   >
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -192,35 +192,35 @@ export default function SettingsPage() {
 
       {/* API Keys */}
       <section className="space-y-4">
-        <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">API Keys</h2>
+        <h2 className="text-sm font-semibold text-[#888888] uppercase tracking-wider">API Keys</h2>
 
-        <form onSubmit={handleGenerateKey} className="bg-white border border-gray-200 rounded-lg p-4 flex gap-2 items-end">
+        <form onSubmit={handleGenerateKey} className="bg-[#1c1c1c] border border-[#2a2a2a] rounded-lg p-4 flex gap-2 items-end">
           <div className="flex-1">
-            <label className="text-xs text-gray-500 block mb-1">Label</label>
+            <label className="text-xs text-[#888888] block mb-1">Label</label>
             <input
               type="text"
               value={keyLabel}
               onChange={(e) => setKeyLabel(e.target.value)}
               placeholder="e.g. Claude desktop"
-              className="w-full text-sm border border-gray-200 rounded px-2.5 py-1.5 focus:outline-none focus:border-gray-400 placeholder:text-gray-300"
+              className="w-full text-sm border border-[#2a2a2a] rounded px-2.5 py-1.5 focus:outline-none focus:border-[#7F77DD] placeholder:text-[#444444] bg-[#0f0f0f] text-[#e8e8e8]"
             />
           </div>
           <button
             type="submit"
             disabled={savingKey || !keyLabel.trim()}
-            className="px-4 py-1.5 bg-gray-900 text-white text-sm rounded hover:bg-gray-700 disabled:opacity-40 transition-colors"
+            className="px-4 py-1.5 bg-[#7F77DD] text-white text-sm rounded hover:bg-[#6b62d0] disabled:opacity-40 transition-colors"
           >
             Generate
           </button>
         </form>
 
         {newKeyValue && (
-          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-            <p className="text-xs text-green-700 font-medium mb-1">New API key — copy it now, it won&apos;t be shown again:</p>
-            <code className="text-sm font-mono text-green-800 break-all">{newKeyValue}</code>
+          <div className="bg-[#0d2110] border border-green-900 rounded-lg p-4">
+            <p className="text-xs text-green-400 font-medium mb-1">New API key — copy it now, it won&apos;t be shown again:</p>
+            <code className="text-sm font-mono text-green-300 break-all">{newKeyValue}</code>
             <button
               onClick={() => setNewKeyValue(null)}
-              className="mt-2 text-xs text-green-600 hover:text-green-800 block"
+              className="mt-2 text-xs text-green-500 hover:text-green-300 block"
             >
               Dismiss
             </button>
@@ -229,26 +229,26 @@ export default function SettingsPage() {
 
         <div className="space-y-2">
           {apiKeys.length === 0 && (
-            <p className="text-sm text-gray-400">No API keys yet.</p>
+            <p className="text-sm text-[#888888]">No API keys yet.</p>
           )}
           {apiKeys.map((k) => (
-            <div key={k.id} className="bg-white border border-gray-200 rounded-lg px-4 py-3 flex items-center gap-3">
+            <div key={k.id} className="bg-[#1c1c1c] border border-[#2a2a2a] rounded-lg px-4 py-3 flex items-center gap-3">
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-900">{k.label}</p>
-                <p className="text-xs text-gray-400 font-mono truncate">{k.key_hash.slice(0, 12)}••••••••</p>
+                <p className="text-sm font-medium text-[#e8e8e8]">{k.label}</p>
+                <p className="text-xs text-[#888888] font-mono truncate">{k.key_hash.slice(0, 12)}••••••••</p>
               </div>
-              <span className="text-xs text-gray-400">
+              <span className="text-xs text-[#888888]">
                 {new Date(k.created_at).toLocaleDateString()}
               </span>
               {confirmDeleteKey === k.id ? (
                 <div className="flex items-center gap-1.5">
-                  <button onClick={() => deleteApiKey(k.id)} className="text-xs text-red-500 hover:text-red-600 font-medium">Delete</button>
-                  <button onClick={() => setConfirmDeleteKey(null)} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+                  <button onClick={() => deleteApiKey(k.id)} className="text-xs text-red-500 hover:text-red-400 font-medium">Delete</button>
+                  <button onClick={() => setConfirmDeleteKey(null)} className="text-xs text-[#555555] hover:text-[#888888]">Cancel</button>
                 </div>
               ) : (
                 <button
                   onClick={() => setConfirmDeleteKey(k.id)}
-                  className="text-gray-300 hover:text-red-400 transition-colors"
+                  className="text-[#555555] hover:text-red-400 transition-colors"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -262,9 +262,9 @@ export default function SettingsPage() {
 
       {/* API Docs */}
       <section className="space-y-4">
-        <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">API Reference</h2>
-        <div className="bg-white border border-gray-200 rounded-lg p-4 space-y-4">
-          <p className="text-xs text-gray-500">All endpoints require <code className="bg-gray-50 px-1 rounded font-mono">x-api-key</code> header.</p>
+        <h2 className="text-sm font-semibold text-[#888888] uppercase tracking-wider">API Reference</h2>
+        <div className="bg-[#1c1c1c] border border-[#2a2a2a] rounded-lg p-4 space-y-4">
+          <p className="text-xs text-[#888888]">All endpoints require <code className="bg-[#0f0f0f] px-1 rounded font-mono text-[#e8e8e8]">x-api-key</code> header.</p>
 
           {[
             { method: 'POST', path: '/api/tasks', desc: 'Create a new task', body: '{ title, priority, company_id?, due_date?, notes?, link_url?, link_label? }' },
@@ -273,15 +273,15 @@ export default function SettingsPage() {
             { method: 'POST', path: '/api/radar', desc: 'Create a radar item', body: '{ titulo, descripcion?, categoria?, estado? }' },
             { method: 'GET', path: '/api/radar?search=keyword', desc: 'Search radar items', body: '' },
           ].map(({ method, path, desc, body }) => (
-            <div key={path} className="border-t border-gray-100 pt-3 first:border-0 first:pt-0">
+            <div key={path} className="border-t border-[#2a2a2a] pt-3 first:border-0 first:pt-0">
               <div className="flex items-center gap-2 mb-1">
-                <span className={`text-xs font-bold font-mono px-1.5 py-0.5 rounded ${method === 'GET' ? 'bg-blue-50 text-blue-600' : method === 'POST' ? 'bg-green-50 text-green-600' : 'bg-amber-50 text-amber-600'}`}>
+                <span className={`text-xs font-bold font-mono px-1.5 py-0.5 rounded ${method === 'GET' ? 'bg-[#1e1a3d] text-[#7F77DD]' : method === 'POST' ? 'bg-[#0d2110] text-green-400' : 'bg-[#2d1f00] text-amber-400'}`}>
                   {method}
                 </span>
-                <code className="text-xs font-mono text-gray-700">{path}</code>
+                <code className="text-xs font-mono text-[#e8e8e8]">{path}</code>
               </div>
-              <p className="text-xs text-gray-500">{desc}</p>
-              {body && <pre className="text-xs text-gray-400 bg-gray-50 rounded p-2 mt-1 overflow-x-auto">{body}</pre>}
+              <p className="text-xs text-[#888888]">{desc}</p>
+              {body && <pre className="text-xs text-[#888888] bg-[#0f0f0f] rounded p-2 mt-1 overflow-x-auto">{body}</pre>}
             </div>
           ))}
         </div>

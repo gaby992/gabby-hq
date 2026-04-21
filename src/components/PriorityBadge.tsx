@@ -1,9 +1,9 @@
 import { Priority, PRIORITY_LABELS } from '@/types'
 
 const styles: Record<Priority, string> = {
-  urgente: 'bg-red-50 text-red-600',
-  normal: 'bg-blue-50 text-blue-600',
-  cuando: 'bg-gray-100 text-gray-500',
+  urgente: 'bg-red-950/60 text-red-400',
+  normal: 'bg-[#1e1a3d] text-[#7F77DD]',
+  cuando: 'bg-[#2a2a2a] text-[#888888]',
 }
 
 export default function PriorityBadge({ priority }: { priority: Priority }) {

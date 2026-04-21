@@ -61,7 +61,7 @@ export default function TasksPage() {
   }
 
   if (loading) {
-    return <div className="text-sm text-gray-400 py-8 text-center">Loading...</div>
+    return <div className="text-sm text-[#888888] py-8 text-center">Loading...</div>
   }
 
   const isShowingCompleted = filter === 'completadas'
@@ -79,8 +79,8 @@ export default function TasksPage() {
             onClick={() => setFilter(id)}
             className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
               filter === id
-                ? 'bg-gray-900 text-white'
-                : 'bg-white border border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                ? 'bg-[#7F77DD] text-white'
+                : 'bg-[#1c1c1c] border border-[#2a2a2a] text-[#888888] hover:border-[#555555] hover:text-[#e8e8e8]'
             }`}
           >
             {label}
@@ -96,7 +96,7 @@ export default function TasksPage() {
 
       {/* Task list */}
       {displayTasks.length === 0 && (
-        <div className="text-sm text-gray-400 text-center py-12">
+        <div className="text-sm text-[#888888] text-center py-12">
           {isShowingCompleted ? 'No completed tasks yet.' : 'No tasks. Add one above.'}
         </div>
       )}
@@ -110,7 +110,7 @@ export default function TasksPage() {
       ) : (
         groupByPriority(displayTasks).map(({ priority, tasks: group }) => (
           <div key={priority}>
-            <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+            <h2 className="text-xs font-semibold text-[#888888] uppercase tracking-wider mb-2">
               {PRIORITY_LABELS[priority]}
             </h2>
             <div className="space-y-2">

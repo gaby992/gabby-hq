@@ -26,7 +26,7 @@ export default function DueDateLabel({ date }: Props) {
   return (
     <span
       className={`text-xs ${
-        isOverdue ? 'text-red-500 font-medium' : isToday ? 'text-amber-600 font-medium' : 'text-gray-400'
+        isOverdue ? 'text-red-400 font-medium' : isToday ? 'text-amber-400 font-medium' : 'text-[#888888]'
       }`}
     >
       {label}
