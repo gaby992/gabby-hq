@@ -79,9 +79,11 @@ export default function SettingsPage() {
     if (!keyLabel.trim()) return
     setSavingKey(true)
     const key = generateApiKey()
-    await supabase.from('api_keys').insert({ label: keyLabel.trim(), key_hash: key })
-    setNewKeyValue(key)
-    setKeyLabel('')
+    const { error } = await supabase.from('api_keys').insert({ label: keyLabel.trim(), key_hash: key })
+    if (!error) {
+      setNewKeyValue(key)
+      setKeyLabel('')
+    }
     setSavingKey(false)
     fetchData()
   }
@@ -238,7 +240,7 @@ export default function SettingsPage() {
                 <p className="text-xs text-[#888888] font-mono truncate">{k.key_hash.slice(0, 12)}••••••••</p>
               </div>
               <span className="text-xs text-[#888888]">
-                {new Date(k.created_at).toLocaleDateString()}
+                {new Date(k.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
               </span>
               {confirmDeleteKey === k.id ? (
                 <div className="flex items-center gap-1.5">
