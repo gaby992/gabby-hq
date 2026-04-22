@@ -35,16 +35,16 @@ export default function TasksPage() {
   useEffect(() => { fetchData() }, [fetchData])
 
   const filteredTasks = tasks.filter((t) => {
-    if (filter === 'all') return t.status !== 'completed'
-    if (filter === 'completadas') return t.status === 'completed'
+    if (filter === 'all') return !t.done
+    if (filter === 'completadas') return t.done
     if (filter === 'urgente' || filter === 'normal' || filter === 'cuando')
-      return t.status !== 'completed' && t.priority === filter
+      return !t.done && t.priority === filter
     // company filter
-    return t.status !== 'completed' && t.company_id === filter
+    return !t.done && t.company_id === filter
   })
 
-  const pendingTasks = tasks.filter((t) => t.status !== 'completed')
-  const completedTasks = tasks.filter((t) => t.status === 'completed')
+  const pendingTasks = tasks.filter((t) => !t.done)
+  const completedTasks = tasks.filter((t) => t.done)
 
   const filterButtons = [
     { id: 'all', label: 'Todas' },

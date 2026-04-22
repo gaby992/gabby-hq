@@ -25,14 +25,14 @@ export default function AddTaskForm({ companies, onAdded }: Props) {
     if (!title.trim()) return
     setSaving(true)
     await supabase.from('tasks').insert({
-      title: title.trim(),
+      text: title.trim(),
       company_id: companyId || null,
       priority,
       due_date: dueDate || null,
       notes: notes.trim() || null,
       link_url: linkUrl.trim() || null,
       link_label: linkLabel.trim() || null,
-      status: 'pending',
+      done: false,
     })
     setTitle('')
     setCompanyId('')

@@ -8,16 +8,16 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json()
-  const { title, priority, company_id, due_date, notes, link_url, link_label } = body
+  const { text, priority, company_id, due_date, notes, link_url, link_label } = body
 
-  if (!title || !priority) {
-    return NextResponse.json({ error: 'title and priority are required' }, { status: 400 })
+  if (!text || !priority) {
+    return NextResponse.json({ error: 'text and priority are required' }, { status: 400 })
   }
 
   const supabase = createServerClient()
   const { data, error } = await supabase
     .from('tasks')
-    .insert({ title, priority, company_id: company_id ?? null, due_date: due_date ?? null, notes: notes ?? null, link_url: link_url ?? null, link_label: link_label ?? null, status: 'pending' })
+    .insert({ text, priority, company_id: company_id ?? null, due_date: due_date ?? null, notes: notes ?? null, link_url: link_url ?? null, link_label: link_label ?? null, done: false })
     .select()
     .single()
 

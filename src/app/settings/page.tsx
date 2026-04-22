@@ -79,7 +79,7 @@ export default function SettingsPage() {
     if (!keyLabel.trim()) return
     setSavingKey(true)
     const key = generateApiKey()
-    const { error } = await supabase.from('api_keys').insert({ label: keyLabel.trim(), key_hash: key })
+    const { error } = await supabase.from('api_keys').insert({ label: keyLabel.trim(), key })
     if (!error) {
       setNewKeyValue(key)
       setKeyLabel('')
@@ -237,7 +237,7 @@ export default function SettingsPage() {
             <div key={k.id} className="bg-[#1c1c1c] border border-[#2a2a2a] rounded-lg px-4 py-3 flex items-center gap-3">
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-[#e8e8e8]">{k.label}</p>
-                <p className="text-xs text-[#888888] font-mono truncate">{k.key_hash.slice(0, 12)}••••••••</p>
+                <p className="text-xs text-[#888888] font-mono truncate">{k.key.slice(0, 12)}••••••••</p>
               </div>
               <span className="text-xs text-[#888888]">
                 {new Date(k.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}

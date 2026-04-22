@@ -1,7 +1,5 @@
 export type Priority = 'urgente' | 'normal' | 'cuando'
 
-export type TaskStatus = 'pending' | 'completed'
-
 export interface Company {
   id: string
   name: string
@@ -12,21 +10,22 @@ export interface Company {
 export interface Subtask {
   id: string
   task_id: string
-  title: string
-  completed: boolean
+  text: string
+  done: boolean
+  position?: number
   created_at: string
 }
 
 export interface Task {
   id: string
   company_id: string | null
-  title: string
+  text: string
   priority: Priority
   due_date: string | null
   notes: string | null
   link_url: string | null
   link_label: string | null
-  status: TaskStatus
+  done: boolean
   created_at: string
   company?: Company
   subtasks?: Subtask[]
@@ -46,7 +45,7 @@ export interface RadarItem {
 export interface ApiKey {
   id: string
   label: string
-  key_hash: string
+  key: string
   created_at: string
 }
 

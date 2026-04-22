@@ -19,12 +19,12 @@ export default function TaskCard({ task, onUpdate }: Props) {
   const [confirmDelete, setConfirmDelete] = useState(false)
 
   const subtasks = task.subtasks ?? []
-  const completedCount = subtasks.filter((s) => s.completed).length
+  const completedCount = subtasks.filter((s) => s.done).length
 
   async function toggleDone() {
     await supabase
       .from('tasks')
-      .update({ status: task.status === 'completed' ? 'pending' : 'completed' })
+      .update({ done: !task.done })
       .eq('id', task.id)
     onUpdate()
   }
@@ -37,7 +37,7 @@ export default function TaskCard({ task, onUpdate }: Props) {
   async function toggleSubtask(subtask: Subtask) {
     await supabase
       .from('subtasks')
-      .update({ completed: !subtask.completed })
+      .update({ done: !subtask.done })
       .eq('id', subtask.id)
     onUpdate()
   }
@@ -46,7 +46,7 @@ export default function TaskCard({ task, onUpdate }: Props) {
     e.preventDefault()
     if (!newSubtask.trim()) return
     setAddingSubtask(true)
-    await supabase.from('subtasks').insert({ task_id: task.id, title: newSubtask.trim(), completed: false })
+    await supabase.from('subtasks').insert({ task_id: task.id, text: newSubtask.trim(), done: false })
     setNewSubtask('')
     setAddingSubtask(false)
     onUpdate()
@@ -57,7 +57,7 @@ export default function TaskCard({ task, onUpdate }: Props) {
     onUpdate()
   }
 
-  const isCompleted = task.status === 'completed'
+  const isCompleted = task.done
 
   return (
     <div className={`bg-[#1c1c1c] border rounded-lg transition-all ${isCompleted ? 'border-[#2a2a2a] opacity-60' : 'border-[#2a2a2a]'}`}>
@@ -83,7 +83,7 @@ export default function TaskCard({ task, onUpdate }: Props) {
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2 mb-1">
             <span className={`text-sm font-medium ${isCompleted ? 'line-through text-[#555555]' : 'text-[#e8e8e8]'}`}>
-              {task.title}
+              {task.text}
             </span>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -135,17 +135,17 @@ export default function TaskCard({ task, onUpdate }: Props) {
                   <button
                     onClick={() => toggleSubtask(s)}
                     className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 transition-colors ${
-                      s.completed ? 'bg-[#7F77DD] border-[#7F77DD]' : 'border-[#2a2a2a] hover:border-[#888888]'
+                      s.done ? 'bg-[#7F77DD] border-[#7F77DD]' : 'border-[#2a2a2a] hover:border-[#888888]'
                     }`}
                   >
-                    {s.completed && (
+                    {s.done && (
                       <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                       </svg>
                     )}
                   </button>
-                  <span className={`text-sm flex-1 ${s.completed ? 'line-through text-[#555555]' : 'text-[#888888]'}`}>
-                    {s.title}
+                  <span className={`text-sm flex-1 ${s.done ? 'line-through text-[#555555]' : 'text-[#888888]'}`}>
+                    {s.text}
                   </span>
                   <button
                     onClick={() => deleteSubtask(s.id)}
