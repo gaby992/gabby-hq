@@ -40,7 +40,7 @@ const STATUS_FILTERS: { value: string; label: string; param: string }[] = [
   { value: 'nuevo', label: 'Nuevo', param: 'nuevo' },
   { value: 'registrado', label: 'Registrado', param: 'registrado' },
   { value: 'pasado_a_chelsea', label: 'For Chelsea', param: 'pasado_a_chelsea' },
-  { value: 'lo_resuelvo_yo', label: "I'll handle it", param: 'lo_resuelvo_yo' },
+  { value: 'lo_resuelvo_yo', label: 'Mine / Handling', param: 'lo_resuelvo_yo' },
   { value: 'archivado', label: 'Archived', param: 'archivado' },
   { value: 'resuelto', label: 'Resolved', param: 'resuelto' },
 ]

@@ -1,10 +1,46 @@
 import { NextResponse } from 'next/server'
 import { createInboxClient } from '@/lib/supabase-inboxim'
+import { createServerClient } from '@/lib/supabase-server'
 import { isValidSession } from '@/lib/session'
 import { URGENCIA_ORDER } from '@/types'
 import type { ImTriaje, ImUrgencia, InboxAction } from '@/types'
 
 const DEFAULT_STATUS = ['nuevo', 'registrado']
+
+// "I'll handle it" also creates a GabbyHQ task (in the app's own Supabase),
+// one per triage row, deduped by the gmail_message_id referenced in notes.
+async function createGabbyTasks(rows: ImTriaje[]) {
+  const gabby = createServerClient()
+  for (const row of rows) {
+    if (!row.gmail_message_id) continue
+    const ref = `gmail:${row.gmail_message_id}`
+
+    const { data: existing } = await gabby
+      .from('tasks')
+      .select('id')
+      .ilike('notes', `%${ref}%`)
+      .limit(1)
+    if (existing && existing.length > 0) continue
+
+    const notes = [
+      row.remitente ? `De: ${row.remitente}` : null,
+      row.resumen_ia || null,
+      `Ref: ${ref}`,
+    ]
+      .filter(Boolean)
+      .join('\n\n')
+
+    const { error } = await gabby.from('tasks').insert({
+      text: row.asunto || '(sin asunto)',
+      priority: 'normal',
+      notes,
+      done: false,
+    })
+    // Best-effort: the triage status change already succeeded; don't fail the
+    // whole request if a single task insert errors — surface it in the logs.
+    if (error) console.error('createGabbyTasks insert failed:', error.message)
+  }
+}
 
 // Central definition of what each row action writes — mirrors the Telegram bot.
 function actionUpdate(action: InboxAction, now: string): Record<string, unknown> | null {
@@ -94,5 +130,10 @@ export async function PATCH(request: Request) {
     .select()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  if (action === 'ill_handle' && data) {
+    await createGabbyTasks(data as ImTriaje[])
+  }
+
   return NextResponse.json(data)
 }
