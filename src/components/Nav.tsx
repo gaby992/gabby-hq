@@ -5,9 +5,13 @@ import { usePathname, useRouter } from 'next/navigation'
 
 const links = [
   { href: '/', label: 'Tasks' },
+  { href: '/inbox', label: 'Inbox IM' },
   { href: '/radar', label: 'Radar' },
   { href: '/settings', label: 'Settings' },
 ]
+
+// The Inbox IM entry stays highlighted across its three sub-views.
+const INBOX_PATHS = ['/inbox', '/chelsea', '/rules']
 
 export default function Nav() {
   const pathname = usePathname()
@@ -24,19 +28,23 @@ export default function Nav() {
         <span className="font-semibold text-[#e8e8e8] text-sm tracking-tight">GabbyHQ</span>
         <div className="flex items-center gap-1">
           <nav className="flex gap-1">
-            {links.map(({ href, label }) => (
-              <Link
-                key={href}
-                href={href}
-                className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
-                  pathname === href
-                    ? 'bg-[#7F77DD]/20 text-[#7F77DD] font-medium'
-                    : 'text-[#888888] hover:text-[#e8e8e8] hover:bg-[#2a2a2a]'
-                }`}
-              >
-                {label}
-              </Link>
-            ))}
+            {links.map(({ href, label }) => {
+              const active =
+                href === '/inbox' ? INBOX_PATHS.includes(pathname) : pathname === href
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                    active
+                      ? 'bg-[#7F77DD]/20 text-[#7F77DD] font-medium'
+                      : 'text-[#888888] hover:text-[#e8e8e8] hover:bg-[#2a2a2a]'
+                  }`}
+                >
+                  {label}
+                </Link>
+              )
+            })}
           </nav>
           <button
             onClick={handleLogout}

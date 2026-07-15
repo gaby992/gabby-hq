@@ -8,7 +8,7 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json()
-  const { text, priority, company_id, due_date, notes, link_url, link_label } = body
+  const { text, priority, company_id, due_date, start_date, notes, link_url, link_label } = body
 
   if (!text || !priority) {
     return NextResponse.json({ error: 'text and priority are required' }, { status: 400 })
@@ -17,7 +17,7 @@ export async function POST(request: Request) {
   const supabase = createServerClient()
   const { data, error } = await supabase
     .from('tasks')
-    .insert({ text, priority, company_id: company_id ?? null, due_date: due_date ?? null, notes: notes ?? null, link_url: link_url ?? null, link_label: link_label ?? null, done: false })
+    .insert({ text, priority, company_id: company_id ?? null, due_date: due_date ?? null, start_date: start_date ?? null, notes: notes ?? null, link_url: link_url ?? null, link_label: link_label ?? null, done: false })
     .select()
     .single()
 

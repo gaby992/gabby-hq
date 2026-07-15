@@ -15,6 +15,7 @@ export default function AddTaskForm({ companies, onAdded }: Props) {
   const [companyId, setCompanyId] = useState('')
   const [priority, setPriority] = useState<Priority>('normal')
   const [dueDate, setDueDate] = useState('')
+  const [startDate, setStartDate] = useState('')
   const [notes, setNotes] = useState('')
   const [linkUrl, setLinkUrl] = useState('')
   const [linkLabel, setLinkLabel] = useState('')
@@ -29,6 +30,7 @@ export default function AddTaskForm({ companies, onAdded }: Props) {
       company_id: companyId || null,
       priority,
       due_date: dueDate || null,
+      start_date: startDate || null,
       notes: notes.trim() || null,
       link_url: linkUrl.trim() || null,
       link_label: linkLabel.trim() || null,
@@ -38,6 +40,7 @@ export default function AddTaskForm({ companies, onAdded }: Props) {
     setCompanyId('')
     setPriority('normal')
     setDueDate('')
+    setStartDate('')
     setNotes('')
     setLinkUrl('')
     setLinkLabel('')
@@ -96,12 +99,25 @@ export default function AddTaskForm({ companies, onAdded }: Props) {
           <option value="cuando">Cuando pueda</option>
         </select>
 
-        <input
-          type="date"
-          value={dueDate}
-          onChange={(e) => setDueDate(e.target.value)}
-          className="text-xs border border-[#2a2a2a] rounded px-2 py-1.5 text-[#e8e8e8] focus:outline-none focus:border-[#7F77DD] bg-[#1c1c1c]"
-        />
+        <label className="flex flex-col gap-0.5">
+          <span className="text-[10px] text-[#555555] uppercase tracking-wide">Due</span>
+          <input
+            type="date"
+            value={dueDate}
+            onChange={(e) => setDueDate(e.target.value)}
+            className="text-xs border border-[#2a2a2a] rounded px-2 py-1.5 text-[#e8e8e8] focus:outline-none focus:border-[#7F77DD] bg-[#1c1c1c]"
+          />
+        </label>
+
+        <label className="flex flex-col gap-0.5">
+          <span className="text-[10px] text-[#555555] uppercase tracking-wide">Start</span>
+          <input
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+            className="text-xs border border-[#2a2a2a] rounded px-2 py-1.5 text-[#e8e8e8] focus:outline-none focus:border-[#7F77DD] bg-[#1c1c1c]"
+          />
+        </label>
       </div>
 
       <textarea

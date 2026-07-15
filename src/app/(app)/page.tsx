@@ -5,6 +5,7 @@ import { Task, Company, Priority } from '@/types'
 import { supabase } from '@/lib/supabase'
 import AddTaskForm from '@/components/AddTaskForm'
 import TaskCard from '@/components/TaskCard'
+import CopyButton from '@/components/CopyButton'
 
 const PRIORITY_ORDER: Priority[] = ['urgente', 'normal', 'cuando']
 const PRIORITY_LABELS: Record<Priority, string> = {
@@ -17,6 +18,7 @@ export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [companies, setCompanies] = useState<Company[]>([])
   const [filter, setFilter] = useState<string>('all')
+  const [sortMode, setSortMode] = useState<'priority' | 'due'>('priority')
   const [loading, setLoading] = useState(true)
 
   const fetchData = useCallback(async () => {
@@ -60,6 +62,35 @@ export default function TasksPage() {
     })).filter((g) => g.tasks.length > 0)
   }
 
+  // Ascending by due_date; tasks without a due date sink to the bottom.
+  function sortByDue(taskList: Task[]) {
+    return [...taskList].sort((a, b) => {
+      if (!a.due_date && !b.due_date) return 0
+      if (!a.due_date) return 1
+      if (!b.due_date) return -1
+      return a.due_date < b.due_date ? -1 : a.due_date > b.due_date ? 1 : 0
+    })
+  }
+
+  // Plain-text pending list grouped by priority, for pasting elsewhere.
+  function buildPendingText(): string {
+    const today = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    const lines: string[] = [`GABBY'S PENDING — ${today}`]
+    for (const p of PRIORITY_ORDER) {
+      const bucket = pendingTasks.filter((t) => t.priority === p)
+      if (bucket.length === 0) continue
+      lines.push('', `${PRIORITY_LABELS[p].toUpperCase()}:`)
+      for (const t of bucket) {
+        const company = t.company ? ` (${t.company.name})` : ''
+        const due = t.due_date
+          ? ` — due ${new Date(t.due_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+          : ''
+        lines.push(`- ${t.text}${company}${due}`)
+      }
+    }
+    return lines.join('\n')
+  }
+
   if (loading) {
     return <div className="text-sm text-[#888888] py-8 text-center">Loading...</div>
   }
@@ -94,6 +125,28 @@ export default function TasksPage() {
         ))}
       </div>
 
+      {/* Sort + copy controls */}
+      {!isShowingCompleted && (
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex gap-1">
+            {(['priority', 'due'] as const).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => setSortMode(mode)}
+                className={`px-2.5 py-1 rounded text-xs transition-colors ${
+                  sortMode === mode
+                    ? 'bg-[#2a2a2a] text-[#e8e8e8]'
+                    : 'text-[#555555] hover:text-[#888888]'
+                }`}
+              >
+                {mode === 'priority' ? 'By priority' : 'By due date'}
+              </button>
+            ))}
+          </div>
+          {pendingTasks.length > 0 && <CopyButton text={buildPendingText} label="Copy pending" />}
+        </div>
+      )}
+
       {/* Task list */}
       {displayTasks.length === 0 && (
         <div className="text-sm text-[#888888] text-center py-12">
@@ -101,9 +154,9 @@ export default function TasksPage() {
         </div>
       )}
 
-      {isShowingCompleted ? (
+      {isShowingCompleted || sortMode === 'due' ? (
         <div className="space-y-2">
-          {displayTasks.map((task) => (
+          {(sortMode === 'due' && !isShowingCompleted ? sortByDue(displayTasks) : displayTasks).map((task) => (
             <TaskCard key={task.id} task={task} onUpdate={fetchData} />
           ))}
         </div>
