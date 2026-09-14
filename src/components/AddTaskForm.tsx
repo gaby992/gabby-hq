@@ -7,10 +7,17 @@ import { supabase } from '@/lib/supabase'
 interface Props {
   companies: Company[]
   onAdded: () => void
+  /** Lets /tasks hide the "Por dónde voy" button while this form is expanded. */
+  onOpenChange?: (open: boolean) => void
 }
 
-export default function AddTaskForm({ companies, onAdded }: Props) {
-  const [open, setOpen] = useState(false)
+export default function AddTaskForm({ companies, onAdded, onOpenChange }: Props) {
+  const [open, setOpenState] = useState(false)
+
+  function setOpen(v: boolean) {
+    setOpenState(v)
+    onOpenChange?.(v)
+  }
   const [title, setTitle] = useState('')
   const [companyId, setCompanyId] = useState('')
   const [priority, setPriority] = useState<Priority>('normal')

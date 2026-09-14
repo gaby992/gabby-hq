@@ -2,11 +2,12 @@
 
 import { Suspense, useEffect, useState, useCallback } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { Task, Company, Priority } from '@/types'
+import { Task, Company, Priority, NotaEmpresa } from '@/types'
 import { supabase } from '@/lib/supabase'
 import AddTaskForm from '@/components/AddTaskForm'
 import TaskCard from '@/components/TaskCard'
 import CopyButton from '@/components/CopyButton'
+import CompanyNotePanel from '@/components/CompanyNotePanel'
 import { todayYmd } from '@/lib/dates'
 
 const PRIORITY_ORDER: Priority[] = ['urgente', 'normal', 'cuando']
@@ -24,18 +25,23 @@ function TasksPageContent() {
   const [filter, setFilter] = useState<string>(searchParams.get('company') ?? 'all')
   const [sortMode, setSortMode] = useState<'priority' | 'due'>('priority')
   const [loading, setLoading] = useState(true)
+  const [notas, setNotas] = useState<NotaEmpresa[]>([])
+  const [noteOpen, setNoteOpen] = useState(false)
+  const [addOpen, setAddOpen] = useState(false)
   const today = todayYmd()
 
   const fetchData = useCallback(async () => {
-    const [{ data: tasksData }, { data: companiesData }] = await Promise.all([
+    const [{ data: tasksData }, { data: companiesData }, { data: notasData }] = await Promise.all([
       supabase
         .from('tasks')
         .select('*, company:companies(*), subtasks(*)')
         .order('created_at', { ascending: false }),
       supabase.from('companies').select('*').order('name'),
+      supabase.from('notas_empresa').select('*'),
     ])
     setTasks(tasksData ?? [])
     setCompanies(companiesData ?? [])
+    setNotas((notasData as NotaEmpresa[]) ?? [])
     setLoading(false)
   }, [])
 
@@ -105,7 +111,32 @@ function TasksPageContent() {
 
   return (
     <div className="space-y-6">
-      <AddTaskForm companies={companies} onAdded={fetchData} />
+      {noteOpen ? (
+        <CompanyNotePanel
+          companies={companies}
+          notas={notas}
+          // 4e: when the company filter is active, start on that company.
+          initialCompanyId={companies.find((c) => c.id === filter)?.id}
+          onSaved={(nota) =>
+            setNotas((prev) => [...prev.filter((n) => n.company_id !== nota.company_id), nota])
+          }
+          onClose={() => setNoteOpen(false)}
+        />
+      ) : (
+        <div className="flex gap-2 items-start">
+          <div className="flex-1 min-w-0">
+            <AddTaskForm companies={companies} onAdded={fetchData} onOpenChange={setAddOpen} />
+          </div>
+          {!addOpen && companies.length > 0 && (
+            <button
+              onClick={() => setNoteOpen(true)}
+              className="flex-shrink-0 flex items-center gap-2 p-4 bg-[#1c1c1c] border border-dashed border-[#2a2a2a] rounded-lg text-sm text-[#888888] hover:border-[#555555] hover:text-[#e8e8e8] transition-colors whitespace-nowrap"
+            >
+              📝 Por dónde voy
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Filter bar */}
       <div className="flex flex-wrap gap-1.5">

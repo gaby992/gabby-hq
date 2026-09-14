@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { NotaEmpresa } from '@/types'
-import { supabase } from '@/lib/supabase'
+import { saveNota } from '@/lib/notas'
 import { daysSince, relativeDaysEs } from '@/lib/dates'
 
 interface Props {
@@ -62,14 +62,7 @@ export default function CompanyNote({ companyId, nota, onSaved }: Props) {
 
     setSaving(true)
     setError(null)
-    const { data, error: err } = await supabase
-      .from('notas_empresa')
-      .upsert(
-        { company_id: companyId, nota: draft, updated_at: new Date().toISOString() },
-        { onConflict: 'company_id' }
-      )
-      .select()
-      .single()
+    const { data, error: err } = await saveNota(companyId, draft)
     setSaving(false)
 
     if (err) {
@@ -78,7 +71,7 @@ export default function CompanyNote({ companyId, nota, onSaved }: Props) {
       return
     }
     setEditing(false)
-    onSaved(data as NotaEmpresa)
+    if (data) onSaved(data)
   }
 
   if (editing) {

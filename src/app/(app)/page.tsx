@@ -26,6 +26,8 @@ export default function HoyPage() {
   const [notasError, setNotasError] = useState<string | null>(null)
   const [inboxCount, setInboxCount] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
+  // 5c: blocks the user manually expanded from their collapsed one-liner.
+  const [forceOpen, setForceOpen] = useState<Set<string>>(new Set())
 
   const today = todayYmd()
 
@@ -152,29 +154,44 @@ export default function HoyPage() {
 
       {/* ── One block per company ── */}
       {blocks.map((block) => {
+        const key = block.id ?? 'none'
         const hasNote = (block.nota?.nota?.trim().length ?? 0) > 0
-        const collapsed = !hasNote && block.openCount === 0
+        // A block only collapses with NO note AND no pending tasks, so a note
+        // can never be hidden behind an empty task list.
+        const collapsed = !hasNote && block.openCount === 0 && !forceOpen.has(key)
         const shown = block.focus.slice(0, MAX_TASKS_PER_BLOCK)
         const more = block.focus.length - shown.length
 
         if (collapsed) {
           return (
-            <div key={block.id ?? 'none'} className="flex items-center gap-2 px-1 text-xs text-[#555555]">
+            <div key={key} className="flex items-center gap-2 px-1 text-xs text-[#555555]">
               <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: block.color }} />
-              <span>{block.name}</span>
+              <button
+                onClick={() => setForceOpen((prev) => new Set(prev).add(key))}
+                className="hover:text-[#e8e8e8] transition-colors"
+              >
+                {block.name}
+              </button>
               <span className="text-[#444444]">— sin pendientes</span>
             </div>
           )
         }
 
         return (
-          <section key={block.id ?? 'none'} className="space-y-3">
+          <section key={key} className="space-y-3">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: block.color }} />
               <h2 className="text-sm font-semibold" style={{ color: block.color }}>{block.name}</h2>
-              <span className="text-xs text-[#555555]">
-                {block.openCount} {block.openCount === 1 ? 'pendiente' : 'pendientes'}
-              </span>
+              {block.openCount > 0 ? (
+                <Link
+                  href={block.id ? `/tasks?company=${block.id}` : '/tasks'}
+                  className="text-xs text-[#555555] hover:text-[#7F77DD] hover:underline transition-colors"
+                >
+                  {block.openCount} {block.openCount === 1 ? 'pendiente' : 'pendientes'}
+                </Link>
+              ) : (
+                <span className="text-xs text-[#555555]">sin pendientes</span>
+              )}
             </div>
 
             {/* "Por dónde iba" — above everything else in the block. */}
