@@ -31,6 +31,14 @@ export default function AddTaskForm({ companies, onAdded, onOpenChange }: Props)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // 8: picking Urgente ticks ★ on its own — if it's on fire it almost always
+  // matters too. Only ever turns it on, so Gabby can untick it right after and
+  // it stays unticked.
+  function changePriority(next: Priority) {
+    setPriority(next)
+    if (next === 'urgente') setImportante(true)
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!title.trim()) return
@@ -112,7 +120,7 @@ export default function AddTaskForm({ companies, onAdded, onOpenChange }: Props)
 
         <select
           value={priority}
-          onChange={(e) => setPriority(e.target.value as Priority)}
+          onChange={(e) => changePriority(e.target.value as Priority)}
           className="text-xs border border-[#2a2a2a] rounded px-2 py-1.5 text-[#e8e8e8] focus:outline-none focus:border-[#7F77DD] bg-[#1c1c1c]"
         >
           <option value="urgente">Urgente</option>

@@ -63,6 +63,13 @@ export default function TaskCard({ task, companies, onUpdate, today }: Props) {
     setEditing(true)
   }
 
+  // 8: picking Urgente ticks ★ on its own — if it's on fire it almost always
+  // matters too. Only ever turns it on, so unticking it afterwards sticks.
+  function changePriority(next: Priority) {
+    setPriority(next)
+    if (next === 'urgente') setImportante(true)
+  }
+
   async function saveEdits() {
     if (!text.trim()) {
       setError('El título no puede quedar vacío.')
@@ -208,7 +215,7 @@ export default function TaskCard({ task, companies, onUpdate, today }: Props) {
                   <label className={labelClass}>Prioridad</label>
                   <select
                     value={priority}
-                    onChange={(e) => setPriority(e.target.value as Priority)}
+                    onChange={(e) => changePriority(e.target.value as Priority)}
                     className={fieldClass}
                   >
                     {PRIORITIES.map((p) => (

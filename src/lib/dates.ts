@@ -21,13 +21,6 @@ export function parseYmd(value: string): Date {
   return new Date(y, m - 1, d)
 }
 
-/** Shifts a 'YYYY-MM-DD' by whole days, staying in local time. */
-export function addDays(value: string, days: number): string {
-  const d = parseYmd(value)
-  d.setDate(d.getDate() + days)
-  return ymd(d)
-}
-
 /** "2026-09-15" → "15 sep". Hand-rolled so SSR and the browser always agree. */
 export function formatShortEs(value: string): string {
   const d = parseYmd(value)

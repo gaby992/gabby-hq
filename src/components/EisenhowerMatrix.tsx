@@ -7,12 +7,9 @@ import { supabase } from '@/lib/supabase'
 import CompanyBadge from './CompanyBadge'
 import DueDateLabel from './DueDateLabel'
 import ImportantBadge from './ImportantBadge'
-import { addDays } from '@/lib/dates'
 
 /** Items shown before the "+N más" link takes over. */
 const MAX_ITEMS = 5
-/** "Los próximos 7 días" — the C3/C4 line for un-starred `normal` tasks. */
-const SOON_DAYS = 7
 
 type QuadrantId = 1 | 2 | 3 | 4
 
@@ -42,24 +39,17 @@ interface Props {
 
 /**
  * Which quadrant a task belongs to. Evaluated C1 → C2 → C3 → C4, first match
- * wins, so every task lands in exactly one. The branches below are ordered to
- * match that, and between them they cover every priority/star/date combination.
+ * wins, so every task lands in exactly one. The branches are ordered to match
+ * that, and between them they cover every priority/star/date combination.
+ *
+ * Note this is what resolves the overlaps: a "cuando pueda" task that is
+ * starred is caught by C2 before C4 ever sees it.
  */
-export function quadrantFor(task: Task, today: string, soonCutoff: string): QuadrantId {
-  const due = task.due_date
-
-  // C1 takes anything already on fire, starred or not.
-  if (due && due <= today) return 1
-  if (task.priority === 'urgente' && task.importante) return 1
-
-  // C2 takes the rest of what's starred — future date or no date at all.
-  if (task.importante) return 2
-
-  if (task.priority === 'urgente') return 3
-  // An un-starred `normal` task is an interruption until its date is far off.
-  // This is deliberate: it's the nudge to go star what actually builds.
-  if (task.priority === 'normal') return due && due > soonCutoff ? 4 : 3
-
+export function quadrantFor(task: Task, today: string): QuadrantId {
+  // C1 is "lo que vence": overdue or due today, whatever its priority.
+  if (task.due_date && task.due_date <= today) return 1
+  if (task.priority === 'urgente' || task.importante) return 2
+  if (task.priority === 'normal') return 3
   return 4 // 'cuando', un-starred
 }
 
@@ -95,39 +85,30 @@ export default function EisenhowerMatrix({
   // Ids being written to, so a double click can't fire two updates.
   const [completing, setCompleting] = useState<Set<string>>(new Set())
 
-  const soonCutoff = addDays(today, SOON_DAYS)
-
   const buckets: Record<QuadrantId, Task[]> = { 1: [], 2: [], 3: [], 4: [] }
-  for (const task of tasks) buckets[quadrantFor(task, today, soonCutoff)].push(task)
+  for (const task of tasks) buckets[quadrantFor(task, today)].push(task)
 
-  // ── C1: vencidas más viejas primero, luego hoy, luego urgentes ──
-  const c1 = [
-    ...buckets[1].filter((t) => t.due_date && t.due_date < today).sort(byDueAsc),
-    ...buckets[1].filter((t) => t.due_date === today),
-    ...buckets[1].filter((t) => !t.due_date || t.due_date > today),
-  ]
-
-  // ── C2: the notes come first, always — they're the point of this quadrant ──
+  // ── C1: the notes come first, always — that's where the last session left off ──
   const notaItems: Item[] = companies.flatMap((company) => {
     const nota = notas.find((n) => n.company_id === company.id)
     const line = nota?.nota?.trim().split('\n')[0]?.trim()
     if (!line) return []
     return [{ kind: 'nota' as const, key: `nota-${company.id}`, company, line }]
   })
-  // Con fecha primero, más cercana arriba; luego las sin fecha.
-  const c2 = [...buckets[2]].sort(byDueAsc)
-
-  // ── C3: urgentes primero, luego las normales ──
-  const c3 = [
-    ...buckets[3].filter((t) => t.priority === 'urgente').sort(byDueAsc),
-    ...buckets[3].filter((t) => t.priority !== 'urgente').sort(byDueAsc),
+  // Then what's due: oldest overdue first, then today's.
+  const c1 = [
+    ...buckets[1].filter((t) => t.due_date! < today).sort(byDueAsc),
+    ...buckets[1].filter((t) => t.due_date === today),
   ]
 
-  // ── C4: "cuando pueda" primero, luego las normales lejanas, luego Radar ──
-  const c4 = [
-    ...buckets[4].filter((t) => t.priority === 'cuando').sort(byDueAsc),
-    ...buckets[4].filter((t) => t.priority !== 'cuando').sort(byDueAsc),
-  ]
+  // ── C2: urgentes+★ primero, luego urgentes, luego ★ ──
+  const rank = (t: Task) => (t.priority === 'urgente' ? (t.importante ? 0 : 1) : 2)
+  const c2 = [...buckets[2]].sort((a, b) => rank(a) - rank(b) || byDueAsc(a, b))
+
+  const c3 = [...buckets[3]].sort(byDueAsc)
+
+  // ── C4: "cuando pueda", luego Radar ──
+  const c4 = [...buckets[4]].sort(byDueAsc)
   // Every radar row, whatever its `estado` — nothing is filtered out by type.
   const radarItems: Item[] = radar.map((r) => ({ kind: 'radar' as const, key: `radar-${r.id}`, radar: r }))
 
@@ -207,24 +188,24 @@ export default function EisenhowerMatrix({
     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
       <Quadrant
         id={1}
-        title="Hoy sí o sí"
-        subtitle="Urgente e importante"
-        items={asItems(c1)}
+        title="Arranca por aquí"
+        subtitle="Por dónde ibas + lo que vence"
+        items={[...notaItems, ...asItems(c1)]}
         render={renderItem}
       />
 
       <Quadrant
         id={2}
         title="Construir"
-        subtitle="Importante, no urgente — aquí se vive"
-        items={[...notaItems, ...asItems(c2)]}
+        subtitle="Urgente o importante"
+        items={asItems(c2)}
         render={renderItem}
       />
 
       <Quadrant
         id={3}
-        title="Interrupciones"
-        subtitle="Urgente, no importante — ¿se puede delegar?"
+        title="Lo demás"
+        subtitle="Normal — ¿se puede delegar?"
         items={asItems(c3)}
         render={renderItem}
         // Fixed first line. Same number as the summary strip because both read

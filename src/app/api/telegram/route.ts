@@ -107,8 +107,11 @@ export async function POST(request: Request) {
         (c) => c.name.toLowerCase() === words[1]?.toLowerCase()
       )
       const rawText = words.slice(companyMatch ? 2 : 1).join(' ')
-      const { importante, cleaned: withoutStar } = extractImportante(rawText)
+      const { importante: saidImportante, cleaned: withoutStar } = extractImportante(rawText)
       const { dueDate, cleaned: taskText } = extractDueDate(withoutStar)
+      // 8: same rule as the forms — `urgente` implies ★. From Telegram there's
+      // no way to untick it, so overriding it is an app-side edit.
+      const importante = saidImportante || priority === 'urgente'
 
       if (!taskText) {
         await sendMessage(chatId, `Uso: ${priority} [empresa] <descripción>`)
