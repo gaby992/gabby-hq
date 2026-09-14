@@ -23,6 +23,8 @@ export interface Task {
   priority: Priority
   due_date: string | null
   start_date: string | null
+  /** Second axis, independent of `priority`: does this build something? */
+  importante: boolean
   notes: string | null
   link_url: string | null
   link_label: string | null

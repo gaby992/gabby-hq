@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Company, Priority } from '@/types'
 import { supabase } from '@/lib/supabase'
+import ImportanteCheckbox from './ImportanteCheckbox'
 
 interface Props {
   companies: Company[]
@@ -21,6 +22,7 @@ export default function AddTaskForm({ companies, onAdded, onOpenChange }: Props)
   const [title, setTitle] = useState('')
   const [companyId, setCompanyId] = useState('')
   const [priority, setPriority] = useState<Priority>('normal')
+  const [importante, setImportante] = useState(false)
   const [dueDate, setDueDate] = useState('')
   const [startDate, setStartDate] = useState('')
   const [notes, setNotes] = useState('')
@@ -38,6 +40,7 @@ export default function AddTaskForm({ companies, onAdded, onOpenChange }: Props)
       text: title.trim(),
       company_id: companyId || null,
       priority,
+      importante,
       due_date: dueDate || null,
       start_date: startDate || null,
       notes: notes.trim() || null,
@@ -56,6 +59,7 @@ export default function AddTaskForm({ companies, onAdded, onOpenChange }: Props)
     setTitle('')
     setCompanyId('')
     setPriority('normal')
+    setImportante(false)
     setDueDate('')
     setStartDate('')
     setNotes('')
@@ -136,6 +140,14 @@ export default function AddTaskForm({ companies, onAdded, onOpenChange }: Props)
           />
         </label>
       </div>
+
+      {/* Sits directly under the priority selector: the second axis, not a
+          fifth priority level. */}
+      <ImportanteCheckbox
+        checked={importante}
+        onChange={setImportante}
+        hint="— construye a largo plazo"
+      />
 
       <textarea
         value={notes}

@@ -5,6 +5,8 @@ import { Task, Subtask, Company, Priority, PRIORITY_LABELS } from '@/types'
 import CompanyBadge from './CompanyBadge'
 import PriorityBadge from './PriorityBadge'
 import DueDateLabel from './DueDateLabel'
+import ImportantBadge from './ImportantBadge'
+import ImportanteCheckbox from './ImportanteCheckbox'
 import { supabase } from '@/lib/supabase'
 
 interface Props {
@@ -39,6 +41,7 @@ export default function TaskCard({ task, companies, onUpdate, today }: Props) {
   const [text, setText] = useState(task.text)
   const [companyId, setCompanyId] = useState(task.company_id ?? '')
   const [priority, setPriority] = useState<Priority>(task.priority)
+  const [importante, setImportante] = useState(task.importante ?? false)
   const [dueDate, setDueDate] = useState(task.due_date ?? '')
   const [notes, setNotes] = useState(task.notes ?? '')
   const [saving, setSaving] = useState(false)
@@ -53,6 +56,7 @@ export default function TaskCard({ task, companies, onUpdate, today }: Props) {
     setText(task.text)
     setCompanyId(task.company_id ?? '')
     setPriority(task.priority)
+    setImportante(task.importante ?? false)
     setDueDate(task.due_date ?? '')
     setNotes(task.notes ?? '')
     setError(null)
@@ -73,6 +77,7 @@ export default function TaskCard({ task, companies, onUpdate, today }: Props) {
         text: text.trim(),
         company_id: companyId || null,
         priority,
+        importante,
         due_date: dueDate || null, // empty input clears the date
         notes: nextNotes.trim() || null,
       })
@@ -150,6 +155,7 @@ export default function TaskCard({ task, companies, onUpdate, today }: Props) {
           <div className="flex flex-wrap items-center gap-2">
             {task.company && <CompanyBadge company={task.company} size="xs" />}
             <PriorityBadge priority={task.priority} />
+            <ImportantBadge importante={task.importante} />
             <DueDateLabel date={task.due_date} today={today} />
             {subtasks.length > 0 && (
               <span className="text-xs text-[#888888]">{completedCount}/{subtasks.length} subtasks</span>
@@ -233,6 +239,8 @@ export default function TaskCard({ task, companies, onUpdate, today }: Props) {
                   </div>
                 </div>
               </div>
+
+              <ImportanteCheckbox checked={importante} onChange={setImportante} />
 
               <div>
                 <label className={labelClass}>Notas</label>

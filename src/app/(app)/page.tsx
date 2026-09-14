@@ -2,10 +2,11 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
-import { Task, Company, NotaEmpresa, COMPANY_COLORS } from '@/types'
+import { Task, Company, NotaEmpresa, RadarItem, COMPANY_COLORS } from '@/types'
 import { supabase } from '@/lib/supabase'
 import TaskCard from '@/components/TaskCard'
 import CompanyNote from '@/components/CompanyNote'
+import EisenhowerMatrix from '@/components/EisenhowerMatrix'
 import { todayYmd } from '@/lib/dates'
 
 const MAX_TASKS_PER_BLOCK = 5
@@ -23,6 +24,7 @@ export default function HoyPage() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [companies, setCompanies] = useState<Company[]>([])
   const [notas, setNotas] = useState<NotaEmpresa[]>([])
+  const [radar, setRadar] = useState<RadarItem[]>([])
   const [notasError, setNotasError] = useState<string | null>(null)
   const [inboxCount, setInboxCount] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
@@ -32,7 +34,7 @@ export default function HoyPage() {
   const today = todayYmd()
 
   const fetchData = useCallback(async () => {
-    const [{ data: tasksData }, { data: companiesData }, notasRes] = await Promise.all([
+    const [{ data: tasksData }, { data: companiesData }, notasRes, { data: radarData }] = await Promise.all([
       supabase
         .from('tasks')
         .select('*, company:companies(*), subtasks(*)')
@@ -40,11 +42,14 @@ export default function HoyPage() {
         .order('created_at', { ascending: false }),
       supabase.from('companies').select('*').order('name'),
       supabase.from('notas_empresa').select('*'),
+      // 7/C4 reads Radar as-is — every estado, no filtering by type.
+      supabase.from('radar').select('*').order('created_at', { ascending: false }),
     ])
 
     setTasks(tasksData ?? [])
     setCompanies(companiesData ?? [])
     setNotas((notasRes.data as NotaEmpresa[]) ?? [])
+    setRadar((radarData as RadarItem[]) ?? [])
     // Surface it rather than silently rendering every block noteless — the most
     // likely cause is that the notas_empresa migration hasn't been run yet.
     setNotasError(notasRes.error?.message ?? null)
@@ -65,6 +70,22 @@ export default function HoyPage() {
   }, [])
 
   useEffect(() => { fetchData(); fetchInboxCount() }, [fetchData, fetchInboxCount])
+
+  /**
+   * 7/C2: clicking a "por dónde iba" note in the matrix jumps to that
+   * company's block below. A company with a note is never collapsed, but
+   * forceOpen makes that independent of the collapse rule.
+   */
+  function revealCompany(companyId: string) {
+    setForceOpen((prev) => new Set(prev).add(companyId))
+    // Wait for the render that un-collapsed the block before measuring it.
+    requestAnimationFrame(() => {
+      document.getElementById(`block-${companyId}`)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      })
+    })
+  }
 
   function upsertNota(nota: NotaEmpresa) {
     setNotas((prev) => {
@@ -118,6 +139,18 @@ export default function HoyPage() {
 
   return (
     <div className="space-y-6">
+      {/* ── Eisenhower matrix — above the strip and the company blocks ── */}
+      <EisenhowerMatrix
+        tasks={tasks}
+        companies={companies}
+        notas={notas}
+        radar={radar}
+        inboxCount={inboxCount}
+        today={today}
+        onUpdate={fetchData}
+        onRevealCompany={revealCompany}
+      />
+
       {/* ── Summary strip ── */}
       <div className="bg-[#1c1c1c] border border-[#2a2a2a] rounded-lg px-4 py-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
         <span className={totalOverdue > 0 ? 'text-red-400 font-medium' : 'text-[#555555]'}>
@@ -164,7 +197,7 @@ export default function HoyPage() {
 
         if (collapsed) {
           return (
-            <div key={key} className="flex items-center gap-2 px-1 text-xs text-[#555555]">
+            <div id={`block-${key}`} key={key} className="flex items-center gap-2 px-1 text-xs text-[#555555]">
               <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: block.color }} />
               <button
                 onClick={() => setForceOpen((prev) => new Set(prev).add(key))}
@@ -178,7 +211,9 @@ export default function HoyPage() {
         }
 
         return (
-          <section key={key} className="space-y-3">
+          // scroll-mt keeps the heading clear of the sticky nav when the
+          // matrix scrolls us here.
+          <section id={`block-${key}`} key={key} className="space-y-3 scroll-mt-20">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: block.color }} />
               <h2 className="text-sm font-semibold" style={{ color: block.color }}>{block.name}</h2>

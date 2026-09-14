@@ -53,6 +53,21 @@ function extractDueDate(text: string): { dueDate: string | null; cleaned: string
   return { dueDate: ymd(due), cleaned }
 }
 
+// 6e: "importante" anywhere in the task text is a command, not part of the
+// title — flag the second axis and drop the word. Applied only to the task
+// branch: `radar` rows have no such column, so there the word stays as typed.
+const IMPORTANTE = /\b(?:importante|important)\b/gi
+
+function extractImportante(text: string): { importante: boolean; cleaned: string } {
+  if (!IMPORTANTE.test(text)) {
+    IMPORTANTE.lastIndex = 0 // the /g flag makes .test() stateful
+    return { importante: false, cleaned: text }
+  }
+  IMPORTANTE.lastIndex = 0
+  const cleaned = text.replace(IMPORTANTE, '').replace(/\s{2,}/g, ' ').trim()
+  return { importante: true, cleaned }
+}
+
 async function sendMessage(chatId: number, text: string) {
   await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
     method: 'POST',
@@ -92,7 +107,8 @@ export async function POST(request: Request) {
         (c) => c.name.toLowerCase() === words[1]?.toLowerCase()
       )
       const rawText = words.slice(companyMatch ? 2 : 1).join(' ')
-      const { dueDate, cleaned: taskText } = extractDueDate(rawText)
+      const { importante, cleaned: withoutStar } = extractImportante(rawText)
+      const { dueDate, cleaned: taskText } = extractDueDate(withoutStar)
 
       if (!taskText) {
         await sendMessage(chatId, `Uso: ${priority} [empresa] <descripción>`)
@@ -102,6 +118,7 @@ export async function POST(request: Request) {
       const { error } = await supabase.from('tasks').insert({
         text: taskText,
         priority,
+        importante,
         company_id: companyMatch?.id ?? null,
         due_date: dueDate,
         done: false,
@@ -110,12 +127,13 @@ export async function POST(request: Request) {
 
       const label = companyMatch ? ` · ${companyMatch.name}` : ''
       const dueLabel = dueDate ? ` · due ${dueDate}` : ''
-      await sendMessage(chatId, `✓ ${priority}${label}${dueLabel}: "${taskText}"`)
+      const starLabel = importante ? ' ★' : ''
+      await sendMessage(chatId, `✓ ${priority}${label}${dueLabel}${starLabel}: "${taskText}"`)
 
     } else {
       await sendMessage(
         chatId,
-        'Formato:\n  urgente/normal/cuando [empresa] tarea [para el viernes]\n  radar descripción\n\nFechas: hoy · mañana · para el <día> · due <weekday>\nEmpresas: IM · DATAVIA · PD · Personal'
+        'Formato:\n  urgente/normal/cuando [empresa] tarea [importante] [para el viernes]\n  radar descripción\n\nFechas: hoy · mañana · para el <día> · due <weekday>\n★ Importante: escribe "importante" en la tarea\nEmpresas: IM · DATAVIA · PD · Personal'
       )
     }
   } catch (err) {
