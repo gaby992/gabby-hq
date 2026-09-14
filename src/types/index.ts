@@ -32,6 +32,14 @@ export interface Task {
   subtasks?: Subtask[]
 }
 
+/** "Por dónde iba" — free text only. One live row per company, overwritten. */
+export interface NotaEmpresa {
+  id: string
+  company_id: string
+  nota: string
+  updated_at: string
+}
+
 export type RadarEstado = 'idea' | 'explorando' | 'en progreso' | 'descartado'
 
 export interface RadarItem {

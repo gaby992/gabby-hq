@@ -4,7 +4,8 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 
 const links = [
-  { href: '/', label: 'Tasks' },
+  { href: '/', label: 'Hoy' },
+  { href: '/tasks', label: 'Tasks' },
   { href: '/inbox', label: 'Inbox IM' },
   { href: '/radar', label: 'Radar' },
   { href: '/settings', label: 'Settings' },

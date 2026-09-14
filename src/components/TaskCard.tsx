@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Task, Subtask } from '@/types'
+import { Task, Subtask, Company, Priority, PRIORITY_LABELS } from '@/types'
 import CompanyBadge from './CompanyBadge'
 import PriorityBadge from './PriorityBadge'
 import DueDateLabel from './DueDateLabel'
@@ -9,23 +9,85 @@ import { supabase } from '@/lib/supabase'
 
 interface Props {
   task: Task
+  companies: Company[]
   onUpdate: () => void
+  /** Current 'YYYY-MM-DD', passed down so a whole list agrees on "today". */
+  today?: string
 }
 
-export default function TaskCard({ task, onUpdate }: Props) {
+const PRIORITIES: Priority[] = ['urgente', 'normal', 'cuando']
+
+// n8n's bidirectional dedup keys off this line inside `notes`. If Gabby edits
+// the notes of an inbox-sourced task and drops it, put it back — losing it
+// would make the workflow re-import the same email as a new task.
+const GMAIL_REF = /^Ref: gmail:\S+$/m
+
+function preserveGmailRef(original: string | null, edited: string): string {
+  const ref = original?.match(GMAIL_REF)?.[0]
+  if (!ref || edited.includes(ref)) return edited
+  return edited.trimEnd() ? `${edited.trimEnd()}\n\n${ref}` : ref
+}
+
+export default function TaskCard({ task, companies, onUpdate, today }: Props) {
   const [expanded, setExpanded] = useState(false)
   const [newSubtask, setNewSubtask] = useState('')
   const [addingSubtask, setAddingSubtask] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
+  // Inline edit
+  const [editing, setEditing] = useState(false)
+  const [text, setText] = useState(task.text)
+  const [companyId, setCompanyId] = useState(task.company_id ?? '')
+  const [priority, setPriority] = useState<Priority>(task.priority)
+  const [dueDate, setDueDate] = useState(task.due_date ?? '')
+  const [notes, setNotes] = useState(task.notes ?? '')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
   const subtasks = task.subtasks ?? []
   const completedCount = subtasks.filter((s) => s.done).length
+  const isCompleted = task.done
+  const fromInbox = GMAIL_REF.test(task.notes ?? '')
+
+  function startEditing() {
+    setText(task.text)
+    setCompanyId(task.company_id ?? '')
+    setPriority(task.priority)
+    setDueDate(task.due_date ?? '')
+    setNotes(task.notes ?? '')
+    setError(null)
+    setEditing(true)
+  }
+
+  async function saveEdits() {
+    if (!text.trim()) {
+      setError('El título no puede quedar vacío.')
+      return
+    }
+    setSaving(true)
+    setError(null)
+    const nextNotes = preserveGmailRef(task.notes, notes)
+    const { error: err } = await supabase
+      .from('tasks')
+      .update({
+        text: text.trim(),
+        company_id: companyId || null,
+        priority,
+        due_date: dueDate || null, // empty input clears the date
+        notes: nextNotes.trim() || null,
+      })
+      .eq('id', task.id)
+    setSaving(false)
+    if (err) {
+      setError(err.message)
+      return
+    }
+    setEditing(false)
+    onUpdate()
+  }
 
   async function toggleDone() {
-    await supabase
-      .from('tasks')
-      .update({ done: !task.done })
-      .eq('id', task.id)
+    await supabase.from('tasks').update({ done: !task.done }).eq('id', task.id)
     onUpdate()
   }
 
@@ -35,10 +97,7 @@ export default function TaskCard({ task, onUpdate }: Props) {
   }
 
   async function toggleSubtask(subtask: Subtask) {
-    await supabase
-      .from('subtasks')
-      .update({ done: !subtask.done })
-      .eq('id', subtask.id)
+    await supabase.from('subtasks').update({ done: !subtask.done }).eq('id', subtask.id)
     onUpdate()
   }
 
@@ -57,7 +116,9 @@ export default function TaskCard({ task, onUpdate }: Props) {
     onUpdate()
   }
 
-  const isCompleted = task.done
+  const fieldClass =
+    'w-full text-xs border border-[#2a2a2a] rounded px-2.5 py-1.5 text-[#e8e8e8] bg-[#0f0f0f] focus:outline-none focus:border-[#7F77DD] placeholder:text-[#444444]'
+  const labelClass = 'text-[10px] text-[#555555] uppercase tracking-wide block mb-1'
 
   return (
     <div className={`bg-[#1c1c1c] border rounded-lg transition-all ${isCompleted ? 'border-[#2a2a2a] opacity-60' : 'border-[#2a2a2a]'}`}>
@@ -89,7 +150,7 @@ export default function TaskCard({ task, onUpdate }: Props) {
           <div className="flex flex-wrap items-center gap-2">
             {task.company && <CompanyBadge company={task.company} size="xs" />}
             <PriorityBadge priority={task.priority} />
-            <DueDateLabel date={task.due_date} />
+            <DueDateLabel date={task.due_date} today={today} />
             {subtasks.length > 0 && (
               <span className="text-xs text-[#888888]">{completedCount}/{subtasks.length} subtasks</span>
             )}
@@ -108,23 +169,133 @@ export default function TaskCard({ task, onUpdate }: Props) {
       {/* Expanded detail */}
       {expanded && (
         <div className="border-t border-[#2a2a2a] px-4 pb-4 pt-3 space-y-3">
-          {task.notes && (
-            <p className="text-sm text-[#888888] whitespace-pre-wrap">{task.notes}</p>
-          )}
+          {/* ── Details: read-only, or the inline edit form ── */}
+          {editing ? (
+            <div className="space-y-3">
+              <div>
+                <label className={labelClass}>Título</label>
+                <input
+                  autoFocus
+                  type="text"
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  className={`${fieldClass} text-sm font-medium`}
+                />
+              </div>
 
-          {task.link_url && (
-            <a
-              href={task.link_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              className="inline-flex items-center gap-1.5 text-xs text-[#7F77DD] hover:text-[#9b95e8] font-medium"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-              </svg>
-              {task.link_label || task.link_url}
-            </a>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div>
+                  <label className={labelClass}>Empresa</label>
+                  <select
+                    value={companyId}
+                    onChange={(e) => setCompanyId(e.target.value)}
+                    className={fieldClass}
+                  >
+                    <option value="">Sin empresa</option>
+                    {companies.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className={labelClass}>Prioridad</label>
+                  <select
+                    value={priority}
+                    onChange={(e) => setPriority(e.target.value as Priority)}
+                    className={fieldClass}
+                  >
+                    {PRIORITIES.map((p) => (
+                      <option key={p} value={p}>{PRIORITY_LABELS[p]}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className={labelClass}>Fecha límite</label>
+                  <div className="flex gap-1">
+                    <input
+                      type="date"
+                      value={dueDate}
+                      onChange={(e) => setDueDate(e.target.value)}
+                      className={fieldClass}
+                    />
+                    {dueDate && (
+                      <button
+                        type="button"
+                        onClick={() => setDueDate('')}
+                        title="Quitar fecha"
+                        className="px-2 text-xs text-[#555555] hover:text-red-400 transition-colors"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className={labelClass}>Notas</label>
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  rows={3}
+                  placeholder="Notas (opcional)"
+                  className={`${fieldClass} resize-y text-[#888888]`}
+                />
+                {fromInbox && (
+                  <p className="text-[10px] text-[#555555] mt-1">
+                    Tarea creada desde Inbox IM — la línea <code className="text-[#888888]">Ref: gmail:…</code> se conserva automáticamente.
+                  </p>
+                )}
+              </div>
+
+              {error && <p className="text-xs text-red-400">{error}</p>}
+
+              <div className="flex gap-2">
+                <button
+                  onClick={saveEdits}
+                  disabled={saving}
+                  className="px-4 py-1.5 bg-[#7F77DD] text-white text-sm rounded hover:bg-[#6b62d0] disabled:opacity-40 transition-colors"
+                >
+                  {saving ? 'Guardando...' : 'Guardar'}
+                </button>
+                <button
+                  onClick={() => { setEditing(false); setError(null) }}
+                  className="px-4 py-1.5 text-sm text-[#888888] hover:text-[#e8e8e8] transition-colors"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              {task.notes && (
+                <p className="text-sm text-[#888888] whitespace-pre-wrap">{task.notes}</p>
+              )}
+
+              {task.link_url && (
+                <a
+                  href={task.link_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="inline-flex items-center gap-1.5 text-xs text-[#7F77DD] hover:text-[#9b95e8] font-medium"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                  </svg>
+                  {task.link_label || task.link_url}
+                </a>
+              )}
+
+              <button
+                onClick={startEditing}
+                className="text-xs text-[#7F77DD] hover:text-[#9b95e8] font-medium transition-colors"
+              >
+                Editar detalles
+              </button>
+            </>
           )}
 
           {/* Subtasks */}

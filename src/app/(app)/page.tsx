@@ -1,179 +1,214 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
-import { Task, Company, Priority } from '@/types'
+import Link from 'next/link'
+import { Task, Company, NotaEmpresa, COMPANY_COLORS } from '@/types'
 import { supabase } from '@/lib/supabase'
-import AddTaskForm from '@/components/AddTaskForm'
 import TaskCard from '@/components/TaskCard'
-import CopyButton from '@/components/CopyButton'
+import CompanyNote from '@/components/CompanyNote'
+import { todayYmd } from '@/lib/dates'
 
-const PRIORITY_ORDER: Priority[] = ['urgente', 'normal', 'cuando']
-const PRIORITY_LABELS: Record<Priority, string> = {
-  urgente: 'Urgente',
-  normal: 'Normal',
-  cuando: 'Cuando pueda',
+const MAX_TASKS_PER_BLOCK = 5
+
+interface Block {
+  id: string | null
+  name: string
+  color: string
+  openCount: number
+  focus: Task[]
+  nota: NotaEmpresa | null
 }
 
-export default function TasksPage() {
+export default function HoyPage() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [companies, setCompanies] = useState<Company[]>([])
-  const [filter, setFilter] = useState<string>('all')
-  const [sortMode, setSortMode] = useState<'priority' | 'due'>('priority')
+  const [notas, setNotas] = useState<NotaEmpresa[]>([])
+  const [notasError, setNotasError] = useState<string | null>(null)
+  const [inboxCount, setInboxCount] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
 
+  const today = todayYmd()
+
   const fetchData = useCallback(async () => {
-    const [{ data: tasksData }, { data: companiesData }] = await Promise.all([
+    const [{ data: tasksData }, { data: companiesData }, notasRes] = await Promise.all([
       supabase
         .from('tasks')
         .select('*, company:companies(*), subtasks(*)')
+        .eq('done', false)
         .order('created_at', { ascending: false }),
       supabase.from('companies').select('*').order('name'),
+      supabase.from('notas_empresa').select('*'),
     ])
+
     setTasks(tasksData ?? [])
     setCompanies(companiesData ?? [])
+    setNotas((notasRes.data as NotaEmpresa[]) ?? [])
+    // Surface it rather than silently rendering every block noteless — the most
+    // likely cause is that the notas_empresa migration hasn't been run yet.
+    setNotasError(notasRes.error?.message ?? null)
     setLoading(false)
   }, [])
 
-  useEffect(() => { fetchData() }, [fetchData])
+  // Read-only count of mail still awaiting a decision. Reuses GET /api/inbox so
+  // this number can never drift from what /inbox itself shows. Never writes.
+  const fetchInboxCount = useCallback(async () => {
+    try {
+      const res = await fetch('/api/inbox')
+      if (!res.ok) return
+      const rows = await res.json()
+      if (Array.isArray(rows)) setInboxCount(rows.length)
+    } catch {
+      // Inbox-IM unreachable — just omit that part of the summary strip.
+    }
+  }, [])
 
-  const filteredTasks = tasks.filter((t) => {
-    if (filter === 'all') return !t.done
-    if (filter === 'completadas') return t.done
-    if (filter === 'urgente' || filter === 'normal' || filter === 'cuando')
-      return !t.done && t.priority === filter
-    // company filter
-    return !t.done && t.company_id === filter
-  })
+  useEffect(() => { fetchData(); fetchInboxCount() }, [fetchData, fetchInboxCount])
 
-  const pendingTasks = tasks.filter((t) => !t.done)
-  const completedTasks = tasks.filter((t) => t.done)
-
-  const filterButtons = [
-    { id: 'all', label: 'Todas' },
-    { id: 'urgente', label: 'Urgente' },
-    ...companies.map((c) => ({ id: c.id, label: c.name })),
-    { id: 'completadas', label: 'Completadas' },
-  ]
-
-  function groupByPriority(taskList: Task[]) {
-    return PRIORITY_ORDER.map((p) => ({
-      priority: p,
-      tasks: taskList.filter((t) => t.priority === p),
-    })).filter((g) => g.tasks.length > 0)
-  }
-
-  // Ascending by due_date; tasks without a due date sink to the bottom.
-  function sortByDue(taskList: Task[]) {
-    return [...taskList].sort((a, b) => {
-      if (!a.due_date && !b.due_date) return 0
-      if (!a.due_date) return 1
-      if (!b.due_date) return -1
-      return a.due_date < b.due_date ? -1 : a.due_date > b.due_date ? 1 : 0
+  function upsertNota(nota: NotaEmpresa) {
+    setNotas((prev) => {
+      const rest = prev.filter((n) => n.company_id !== nota.company_id)
+      return [...rest, nota]
     })
   }
 
-  // Plain-text pending list grouped by priority, for pasting elsewhere.
-  function buildPendingText(): string {
-    const today = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-    const lines: string[] = [`GABBY'S PENDING — ${today}`]
-    for (const p of PRIORITY_ORDER) {
-      const bucket = pendingTasks.filter((t) => t.priority === p)
-      if (bucket.length === 0) continue
-      lines.push('', `${PRIORITY_LABELS[p].toUpperCase()}:`)
-      for (const t of bucket) {
-        const company = t.company ? ` (${t.company.name})` : ''
-        const due = t.due_date
-          ? ` — due ${new Date(t.due_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
-          : ''
-        lines.push(`- ${t.text}${company}${due}`)
-      }
-    }
-    return lines.join('\n')
+  /** Overdue (oldest first) → due today → urgent with no date. Capped later. */
+  function focusFor(open: Task[]): Task[] {
+    const overdue = open
+      .filter((t) => t.due_date && t.due_date < today)
+      .sort((a, b) => (a.due_date! < b.due_date! ? -1 : 1))
+    const dueToday = open.filter((t) => t.due_date === today)
+    const urgentNoDate = open.filter((t) => !t.due_date && t.priority === 'urgente')
+    return [...overdue, ...dueToday, ...urgentNoDate]
   }
+
+  const blocks: Block[] = companies.map((c) => {
+    const open = tasks.filter((t) => t.company_id === c.id)
+    return {
+      id: c.id,
+      name: c.name,
+      color: COMPANY_COLORS[c.color] ?? '#888780',
+      openCount: open.length,
+      focus: focusFor(open),
+      nota: notas.find((n) => n.company_id === c.id) ?? null,
+    }
+  })
+
+  // Tasks created by the Inbox-IM "I'll handle it" button carry no company.
+  // Without this block they would be invisible here.
+  const orphans = tasks.filter((t) => !t.company_id)
+  if (orphans.length > 0) {
+    blocks.push({
+      id: null,
+      name: 'Sin empresa',
+      color: '#888780',
+      openCount: orphans.length,
+      focus: focusFor(orphans),
+      nota: null,
+    })
+  }
+
+  const totalOverdue = tasks.filter((t) => t.due_date && t.due_date < today).length
+  const totalToday = tasks.filter((t) => t.due_date === today).length
 
   if (loading) {
     return <div className="text-sm text-[#888888] py-8 text-center">Loading...</div>
   }
 
-  const isShowingCompleted = filter === 'completadas'
-  const displayTasks = filteredTasks
-
   return (
     <div className="space-y-6">
-      <AddTaskForm companies={companies} onAdded={fetchData} />
-
-      {/* Filter bar */}
-      <div className="flex flex-wrap gap-1.5">
-        {filterButtons.map(({ id, label }) => (
-          <button
-            key={id}
-            onClick={() => setFilter(id)}
-            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-              filter === id
-                ? 'bg-[#7F77DD] text-white'
-                : 'bg-[#1c1c1c] border border-[#2a2a2a] text-[#888888] hover:border-[#555555] hover:text-[#e8e8e8]'
-            }`}
-          >
-            {label}
-            {id === 'all' && pendingTasks.length > 0 && (
-              <span className="ml-1.5 text-[10px] opacity-60">{pendingTasks.length}</span>
-            )}
-            {id === 'completadas' && completedTasks.length > 0 && (
-              <span className="ml-1.5 text-[10px] opacity-60">{completedTasks.length}</span>
-            )}
-          </button>
-        ))}
+      {/* ── Summary strip ── */}
+      <div className="bg-[#1c1c1c] border border-[#2a2a2a] rounded-lg px-4 py-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+        <span className={totalOverdue > 0 ? 'text-red-400 font-medium' : 'text-[#555555]'}>
+          {totalOverdue} {totalOverdue === 1 ? 'vencida' : 'vencidas'}
+        </span>
+        <span className="text-[#2a2a2a]">·</span>
+        <span className={totalToday > 0 ? 'text-amber-400 font-medium' : 'text-[#555555]'}>
+          {totalToday} {totalToday === 1 ? 'vence hoy' : 'vencen hoy'}
+        </span>
+        {inboxCount !== null && (
+          <>
+            <span className="text-[#2a2a2a]">·</span>
+            <Link
+              href="/inbox"
+              className={`hover:underline ${inboxCount > 0 ? 'text-[#7F77DD] font-medium' : 'text-[#555555]'}`}
+            >
+              {inboxCount} {inboxCount === 1 ? 'correo esperando decisión' : 'correos esperando decisión'}
+            </Link>
+          </>
+        )}
       </div>
 
-      {/* Sort + copy controls */}
-      {!isShowingCompleted && (
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex gap-1">
-            {(['priority', 'due'] as const).map((mode) => (
-              <button
-                key={mode}
-                onClick={() => setSortMode(mode)}
-                className={`px-2.5 py-1 rounded text-xs transition-colors ${
-                  sortMode === mode
-                    ? 'bg-[#2a2a2a] text-[#e8e8e8]'
-                    : 'text-[#555555] hover:text-[#888888]'
-                }`}
-              >
-                {mode === 'priority' ? 'By priority' : 'By due date'}
-              </button>
-            ))}
-          </div>
-          {pendingTasks.length > 0 && <CopyButton text={buildPendingText} label="Copy pending" />}
-        </div>
+      {notasError && (
+        <p className="text-xs text-red-400">
+          No se pudieron cargar las notas: {notasError}
+        </p>
       )}
 
-      {/* Task list */}
-      {displayTasks.length === 0 && (
-        <div className="text-sm text-[#888888] text-center py-12">
-          {isShowingCompleted ? 'No completed tasks yet.' : 'No tasks. Add one above.'}
-        </div>
+      {blocks.length === 0 && (
+        <p className="text-sm text-[#888888] text-center py-12">
+          No hay empresas todavía. Créalas en Settings.
+        </p>
       )}
 
-      {isShowingCompleted || sortMode === 'due' ? (
-        <div className="space-y-2">
-          {(sortMode === 'due' && !isShowingCompleted ? sortByDue(displayTasks) : displayTasks).map((task) => (
-            <TaskCard key={task.id} task={task} onUpdate={fetchData} />
-          ))}
-        </div>
-      ) : (
-        groupByPriority(displayTasks).map(({ priority, tasks: group }) => (
-          <div key={priority}>
-            <h2 className="text-xs font-semibold text-[#888888] uppercase tracking-wider mb-2">
-              {PRIORITY_LABELS[priority]}
-            </h2>
-            <div className="space-y-2">
-              {group.map((task) => (
-                <TaskCard key={task.id} task={task} onUpdate={fetchData} />
-              ))}
+      {/* ── One block per company ── */}
+      {blocks.map((block) => {
+        const hasNote = (block.nota?.nota?.trim().length ?? 0) > 0
+        const collapsed = !hasNote && block.openCount === 0
+        const shown = block.focus.slice(0, MAX_TASKS_PER_BLOCK)
+        const more = block.focus.length - shown.length
+
+        if (collapsed) {
+          return (
+            <div key={block.id ?? 'none'} className="flex items-center gap-2 px-1 text-xs text-[#555555]">
+              <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: block.color }} />
+              <span>{block.name}</span>
+              <span className="text-[#444444]">— sin pendientes</span>
             </div>
-          </div>
-        ))
-      )}
+          )
+        }
+
+        return (
+          <section key={block.id ?? 'none'} className="space-y-3">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: block.color }} />
+              <h2 className="text-sm font-semibold" style={{ color: block.color }}>{block.name}</h2>
+              <span className="text-xs text-[#555555]">
+                {block.openCount} {block.openCount === 1 ? 'pendiente' : 'pendientes'}
+              </span>
+            </div>
+
+            {/* "Por dónde iba" — above everything else in the block. */}
+            {block.id && (
+              <CompanyNote companyId={block.id} nota={block.nota} onSaved={upsertNota} />
+            )}
+
+            {shown.length > 0 ? (
+              <div className="space-y-2">
+                {shown.map((task) => (
+                  <TaskCard
+                    key={task.id}
+                    task={task}
+                    companies={companies}
+                    onUpdate={fetchData}
+                    today={today}
+                  />
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-[#555555] pl-1">Nada vencido ni urgente para hoy.</p>
+            )}
+
+            {more > 0 && (
+              <Link
+                href={block.id ? `/tasks?company=${block.id}` : '/tasks'}
+                className="inline-block text-xs text-[#7F77DD] hover:text-[#9b95e8] font-medium"
+              >
+                +{more} más
+              </Link>
+            )}
+          </section>
+        )
+      })}
     </div>
   )
 }

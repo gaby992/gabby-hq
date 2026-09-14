@@ -41,7 +41,9 @@ function extractDueDate(text: string): { dueDate: string | null; cleaned: string
     due = new Date(base)
     due.setDate(base.getDate() + 1)
   } else if (token in WEEKDAYS) {
-    const diff = (WEEKDAYS[token] - base.getDay() + 7) % 7
+    // Naming a weekday always means the NEXT one: "para el lunes" said on a
+    // Monday is next Monday, not today. Today has its own tokens (hoy/today).
+    const diff = (WEEKDAYS[token] - base.getDay() + 7) % 7 || 7
     due = new Date(base)
     due.setDate(base.getDate() + diff)
   }
@@ -113,7 +115,7 @@ export async function POST(request: Request) {
     } else {
       await sendMessage(
         chatId,
-        'Formato:\n  urgente/normal/cuando [empresa] tarea\n  radar descripción\n\nEmpresas: IM · DATAVIA · PD · Personal'
+        'Formato:\n  urgente/normal/cuando [empresa] tarea [para el viernes]\n  radar descripción\n\nFechas: hoy · mañana · para el <día> · due <weekday>\nEmpresas: IM · DATAVIA · PD · Personal'
       )
     }
   } catch (err) {

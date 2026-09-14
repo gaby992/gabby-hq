@@ -20,12 +20,14 @@ export default function AddTaskForm({ companies, onAdded }: Props) {
   const [linkUrl, setLinkUrl] = useState('')
   const [linkLabel, setLinkLabel] = useState('')
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!title.trim()) return
     setSaving(true)
-    await supabase.from('tasks').insert({
+    setError(null)
+    const { error: err } = await supabase.from('tasks').insert({
       text: title.trim(),
       company_id: companyId || null,
       priority,
@@ -36,6 +38,14 @@ export default function AddTaskForm({ companies, onAdded }: Props) {
       link_label: linkLabel.trim() || null,
       done: false,
     })
+    // Surface failures instead of clearing the form on a silent error — a
+    // missing column or an RLS rule would otherwise just look like "nothing
+    // saved".
+    if (err) {
+      setSaving(false)
+      setError(err.message)
+      return
+    }
     setTitle('')
     setCompanyId('')
     setPriority('normal')
@@ -144,6 +154,8 @@ export default function AddTaskForm({ companies, onAdded }: Props) {
           className="text-xs border border-[#2a2a2a] rounded px-2.5 py-1.5 text-[#888888] focus:outline-none focus:border-[#7F77DD] placeholder:text-[#444444] bg-[#0f0f0f]"
         />
       </div>
+
+      {error && <p className="text-xs text-red-400">{error}</p>}
 
       <div className="flex gap-2 pt-1">
         <button
