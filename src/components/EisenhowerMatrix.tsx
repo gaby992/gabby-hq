@@ -1,15 +1,23 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { Task, Company, NotaEmpresa, RadarItem } from '@/types'
 import { supabase } from '@/lib/supabase'
+import { relativeDaysEs } from '@/lib/dates'
 import CompanyBadge from './CompanyBadge'
 import DueDateLabel from './DueDateLabel'
 import ImportantBadge from './ImportantBadge'
 
 /** Items shown before the "+N más" link takes over. */
 const MAX_ITEMS = 5
+
+/**
+ * Lines of a note shown in C1 before "ver más" takes over. Spelled out as a
+ * whole class name — Tailwind scans the source as text, so a built-up
+ * `line-clamp-${n}` would never make it into the CSS.
+ */
+const NOTE_CLAMP = 'line-clamp-6'
 
 type QuadrantId = 1 | 2 | 3 | 4
 
@@ -20,7 +28,7 @@ type QuadrantId = 1 | 2 | 3 | 4
  */
 type Item =
   | { kind: 'task'; key: string; task: Task }
-  | { kind: 'nota'; key: string; company: Company; line: string }
+  | { kind: 'nota'; key: string; company: Company; nota: NotaEmpresa; text: string }
   | { kind: 'radar'; key: string; radar: RadarItem }
 
 interface Props {
@@ -91,9 +99,11 @@ export default function EisenhowerMatrix({
   // ── C1: the notes come first, always — that's where the last session left off ──
   const notaItems: Item[] = companies.flatMap((company) => {
     const nota = notas.find((n) => n.company_id === company.id)
-    const line = nota?.nota?.trim().split('\n')[0]?.trim()
-    if (!line) return []
-    return [{ kind: 'nota' as const, key: `nota-${company.id}`, company, line }]
+    // Whole note, line breaks and all — the first line alone loses the "y luego
+    // hay que…" that usually sits underneath it.
+    const text = nota?.nota?.trim()
+    if (!nota || !text) return []
+    return [{ kind: 'nota' as const, key: `nota-${company.id}`, company, nota, text }]
   })
   // Then what's due: oldest overdue first, then today's.
   const c1 = [
@@ -128,20 +138,13 @@ export default function EisenhowerMatrix({
   function renderItem(item: Item) {
     if (item.kind === 'nota') {
       return (
-        <button
+        <MatrixNote
           key={item.key}
-          onClick={() => onRevealCompany(item.company.id)}
-          className="group w-full text-left flex items-start gap-2"
-          title="Ir al bloque de esta empresa"
-        >
-          <span className="text-xs leading-5 flex-shrink-0">📝</span>
-          <span className="min-w-0 flex-1">
-            <CompanyBadge company={item.company} size="xs" />
-            <span className="block text-xs leading-5 text-[#7F77DD] group-hover:text-[#9b95e8] truncate transition-colors">
-              {item.line}
-            </span>
-          </span>
-        </button>
+          company={item.company}
+          nota={item.nota}
+          text={item.text}
+          onReveal={onRevealCompany}
+        />
       )
     }
 
@@ -235,6 +238,70 @@ export default function EisenhowerMatrix({
         render={renderItem}
         foot="¿Algo de aquí merece subir a Construir?"
       />
+    </div>
+  )
+}
+
+interface MatrixNoteProps {
+  company: Company
+  nota: NotaEmpresa
+  text: string
+  onReveal: (companyId: string) => void
+}
+
+/**
+ * A "por dónde iba" note inside C1: the full text, clamped to six lines until
+ * "ver más" opens it in place. Editing still happens in the company block
+ * further down — the badge is the way there.
+ */
+function MatrixNote({ company, nota, text, onReveal }: MatrixNoteProps) {
+  const [expanded, setExpanded] = useState(false)
+  const [clamped, setClamped] = useState(false)
+  const textRef = useRef<HTMLParagraphElement>(null)
+
+  // Whether the clamp actually hides anything depends on where the lines wrap,
+  // so it has to be measured; counting '\n' would miss a long wrapped line.
+  useEffect(() => {
+    if (expanded) return
+    const el = textRef.current
+    if (!el) return
+
+    const measure = () => setClamped(el.scrollHeight > el.clientHeight + 1)
+    measure()
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [text, expanded])
+
+  return (
+    <div className="flex items-start gap-2">
+      <span className="text-xs leading-5 flex-shrink-0">📝</span>
+      <div className="min-w-0 flex-1">
+        <button
+          onClick={() => onReveal(company.id)}
+          title="Ir al bloque de esta empresa"
+          className="hover:opacity-80 transition-opacity"
+        >
+          <CompanyBadge company={company} size="xs" />
+        </button>
+        {/* whitespace-pre-wrap: she writes paragraphs with dashed bullets. */}
+        <p
+          ref={textRef}
+          className={`text-xs leading-5 text-[#7F77DD] whitespace-pre-wrap break-words ${
+            expanded ? '' : NOTE_CLAMP
+          }`}
+        >
+          {text}
+        </p>
+        {clamped && !expanded && (
+          <button
+            onClick={() => setExpanded(true)}
+            className="text-[11px] text-[#7F77DD] hover:text-[#9b95e8] font-medium transition-colors"
+          >
+            ver más
+          </button>
+        )}
+        <p className="text-[10px] text-[#555555] mt-0.5">escrita {relativeDaysEs(nota.updated_at)}</p>
+      </div>
     </div>
   )
 }
