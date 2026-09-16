@@ -68,6 +68,12 @@ function extractImportante(text: string): { importante: boolean; cleaned: string
   return { importante: true, cleaned }
 }
 
+// 11: "para Chelsea: llamar al proveedor" — delegating from the phone. The
+// company is matched by name (case-insensitive) like the positional form, so
+// this works for any company, not just Chelsea. Checked after the priority
+// keywords, so "urgente Chelsea …" keeps its old meaning.
+const PARA_EMPRESA = /^para\s+([^:]+):\s*(.+)$/i
+
 async function sendMessage(chatId: number, text: string) {
   await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
     method: 'POST',
@@ -133,10 +139,46 @@ export async function POST(request: Request) {
       const starLabel = importante ? ' ★' : ''
       await sendMessage(chatId, `✓ ${priority}${label}${dueLabel}${starLabel}: "${taskText}"`)
 
+    } else if (PARA_EMPRESA.test(text)) {
+      const [, rawCompany, rawText] = text.match(PARA_EMPRESA)!
+      const wanted = rawCompany.trim()
+
+      const { data: companies } = await supabase.from('companies').select('id, name')
+      const target = companies?.find(
+        (c) => c.name.trim().toLowerCase() === wanted.toLowerCase()
+      )
+      if (!target) {
+        await sendMessage(chatId, `No existe la empresa "${wanted}". Créala en Settings.`)
+        return NextResponse.json({ ok: true })
+      }
+
+      const { importante, cleaned: withoutStar } = extractImportante(rawText)
+      const { dueDate, cleaned: taskText } = extractDueDate(withoutStar)
+      if (!taskText) {
+        await sendMessage(chatId, `Uso: para ${target.name}: <descripción>`)
+        return NextResponse.json({ ok: true })
+      }
+
+      // Delegated work is `normal` unless she says "importante" — there's no
+      // priority word in this form, and it isn't on fire by default.
+      const { error } = await supabase.from('tasks').insert({
+        text: taskText,
+        priority: 'normal',
+        importante,
+        company_id: target.id,
+        due_date: dueDate,
+        done: false,
+      })
+      if (error) throw error
+
+      const dueLabel = dueDate ? ` · due ${dueDate}` : ''
+      const starLabel = importante ? ' ★' : ''
+      await sendMessage(chatId, `✓ ${target.name}${dueLabel}${starLabel}: "${taskText}"`)
+
     } else {
       await sendMessage(
         chatId,
-        'Formato:\n  urgente/normal/cuando [empresa] tarea [importante] [para el viernes]\n  radar descripción\n\nFechas: hoy · mañana · para el <día> · due <weekday>\n★ Importante: escribe "importante" en la tarea\nEmpresas: IM · DATAVIA · PD · Personal'
+        'Formato:\n  urgente/normal/cuando [empresa] tarea [importante] [para el viernes]\n  para <empresa>: tarea\n  radar descripción\n\nFechas: hoy · mañana · para el <día> · due <weekday>\n★ Importante: escribe "importante" en la tarea\nEmpresas: IM · DATAVIA · PD · Personal · Chelsea'
       )
     }
   } catch (err) {

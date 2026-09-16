@@ -50,3 +50,19 @@ can reach the data; there is no separate Chelsea login.
 | I'll handle it | `status=lo_resuelvo_yo, asignado_a=Gabby, decidido_at=now()` |
 | Archive | `status=archivado, decidido_at=now()` (does not touch Gmail) |
 | Done | `status=resuelto, resuelto_at=now()` |
+
+## Chelsea's manual tasks
+
+Not everything Chelsea owes comes from an email. `/chelsea` shows a **Tareas**
+section under the mail: ordinary rows of the GabbyHQ `tasks` table whose company
+is the one named **Chelsea** (matched by name, case-insensitive —
+`src/lib/chelsea.ts`). No new table, no new column, no flag: if the company
+doesn't exist the section just says *"Crea la empresa Chelsea en Settings"*.
+
+- Add them from `/tasks` (pick the Chelsea company) or from Telegram with
+  `para Chelsea: llamar al proveedor` — the `para <empresa>: …` form works for
+  any company and defaults to `normal` priority.
+- `Show resolved` drives both sections; `Copy pending list` emits one message
+  with a `Correos:` and a `Tareas:` block (empty blocks are omitted).
+- `/hoy` keeps these tasks **out of the Eisenhower matrix** — they're delegated,
+  not Gabby's own work. The Chelsea company block lower down still lists them.

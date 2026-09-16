@@ -8,6 +8,7 @@ import TaskCard from '@/components/TaskCard'
 import CompanyNote from '@/components/CompanyNote'
 import EisenhowerMatrix from '@/components/EisenhowerMatrix'
 import { todayYmd } from '@/lib/dates'
+import { findChelseaCompany } from '@/lib/chelsea'
 
 const MAX_TASKS_PER_BLOCK = 5
 
@@ -130,6 +131,12 @@ export default function HoyPage() {
     })
   }
 
+  // 11c: Chelsea's tasks are delegated, not Gabby's own work, so they stay out
+  // of the matrix. Their company block further down still lists them normally,
+  // which is where Gabby goes to see what Chelsea has.
+  const chelseaId = findChelseaCompany(companies)?.id
+  const matrixTasks = chelseaId ? tasks.filter((t) => t.company_id !== chelseaId) : tasks
+
   const totalOverdue = tasks.filter((t) => t.due_date && t.due_date < today).length
   const totalToday = tasks.filter((t) => t.due_date === today).length
 
@@ -141,7 +148,7 @@ export default function HoyPage() {
     <div className="space-y-6">
       {/* ── Eisenhower matrix — above the strip and the company blocks ── */}
       <EisenhowerMatrix
-        tasks={tasks}
+        tasks={matrixTasks}
         companies={companies}
         notas={notas}
         radar={radar}

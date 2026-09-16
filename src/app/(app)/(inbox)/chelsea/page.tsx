@@ -1,9 +1,13 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { URGENCIA_EMOJI, URGENCIA_ORDER, URGENCIA_LABELS } from '@/types'
-import type { ImTriaje, ImUrgencia } from '@/types'
+import { URGENCIA_EMOJI, URGENCIA_LABELS } from '@/types'
+import type { ImTriaje, Company, Task } from '@/types'
 import CopyButton from '@/components/CopyButton'
+import TaskCard from '@/components/TaskCard'
+import { supabase } from '@/lib/supabase'
+import { formatShortEs } from '@/lib/dates'
+import { CHELSEA_MISSING_HINT, findChelseaCompany } from '@/lib/chelsea'
 
 const TZ = 'America/Cancun'
 
@@ -20,13 +24,9 @@ function dayLabel(iso: string | null): string {
     timeZone: TZ, month: 'short', day: 'numeric',
   }).format(new Date(iso))
 }
-function todayLabel(): string {
-  return new Intl.DateTimeFormat('en-US', { timeZone: TZ, month: 'short', day: 'numeric' })
-    .format(new Date())
-}
-
-function oneLine(text: string | null): string {
-  return (text ?? '').replace(/\s+/g, ' ').trim()
+/** Today as 'YYYY-MM-DD' in Cancun, so the whole page agrees on "today". */
+function todayKey(): string {
+  return dayKey(new Date().toISOString())
 }
 
 export default function ChelseaPage() {
@@ -35,6 +35,15 @@ export default function ChelseaPage() {
   const [error, setError] = useState<string | null>(null)
   const [showResolved, setShowResolved] = useState(false)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+
+  // 11a: the manual half of Chelsea's list — normal tasks whose company is
+  // "Chelsea". `companies` is the full list so the TaskCard edit form can still
+  // move a task to another company.
+  const [companies, setCompanies] = useState<Company[]>([])
+  const [tasks, setTasks] = useState<Task[]>([])
+  const [tasksLoading, setTasksLoading] = useState(true)
+  const [tasksError, setTasksError] = useState<string | null>(null)
+  const today = todayKey()
 
   const fetchItems = useCallback(async () => {
     setLoading(true)
@@ -55,9 +64,58 @@ export default function ChelseaPage() {
     setLoading(false)
   }, [showResolved])
 
+  // Reads the GabbyHQ project (tasks/companies) — never the inbox-IM schema.
+  const fetchTasks = useCallback(async () => {
+    setTasksLoading(true)
+    setTasksError(null)
+    const { data: companiesData, error: cErr } = await supabase
+      .from('companies')
+      .select('*')
+      .order('name')
+    const list = (companiesData as Company[]) ?? []
+    setCompanies(list)
+
+    const chelsea = findChelseaCompany(list)
+    if (!chelsea) {
+      // 11d handles the message; there is nothing to query without the company.
+      setTasks([])
+      setTasksError(cErr?.message ?? null)
+      setTasksLoading(false)
+      return
+    }
+
+    let query = supabase
+      .from('tasks')
+      .select('*, company:companies(*), subtasks(*)')
+      .eq('company_id', chelsea.id)
+      .order('created_at', { ascending: false })
+    // The one "Show resolved" toggle drives both sections: done = true here.
+    if (!showResolved) query = query.eq('done', false)
+
+    const { data, error: tErr } = await query
+    setTasks((data as Task[]) ?? [])
+    setTasksError(tErr?.message ?? null)
+    setTasksLoading(false)
+  }, [showResolved])
+
   useEffect(() => { fetchItems() }, [fetchItems])
+  useEffect(() => { fetchTasks() }, [fetchTasks])
 
   const pending = useMemo(() => items.filter((i) => i.status === 'pasado_a_chelsea'), [items])
+  const chelseaCompany = useMemo(() => findChelseaCompany(companies), [companies])
+  // Open tasks first (soonest due date up top, undated last), done ones after.
+  const sortedTasks = useMemo(() => {
+    const byDue = (a: Task, b: Task) => {
+      if (!a.due_date && !b.due_date) return 0
+      if (!a.due_date) return 1
+      if (!b.due_date) return -1
+      return a.due_date < b.due_date ? -1 : a.due_date > b.due_date ? 1 : 0
+    }
+    return [...tasks].sort((a, b) => Number(a.done) - Number(b.done) || byDue(a, b))
+  }, [tasks])
+
+  // Same order the list shows, so the copied text reads the way the page does.
+  const openTasks = useMemo(() => sortedTasks.filter((t) => !t.done), [sortedTasks])
 
   async function markDone(id: string) {
     const prev = items
@@ -100,27 +158,26 @@ export default function ChelseaPage() {
       }))
   }, [items])
 
-  // Plain-text pending list, grouped by urgency, in English.
+  // 11b: one message with both sections, ready to paste into Telegram. An
+  // empty section is left out entirely rather than shown with no rows.
   function buildPendingText(): string {
-    const lines: string[] = [`CHELSEA'S PENDING — ${todayLabel()}`]
-    const headers: Record<ImUrgencia, string> = { alta: 'HIGH', media: 'MEDIUM', baja: 'LOW' }
-    for (const u of URGENCIA_ORDER) {
-      const bucket = pending.filter((i) => i.urgencia === u)
-      if (bucket.length === 0) continue
-      lines.push('', `${headers[u]}:`)
-      for (const i of bucket) {
-        const summary = oneLine(i.resumen_ia)
-        lines.push(`- ${i.remitente || '(no sender)'} — ${i.asunto || '(no subject)'}${summary ? `: ${summary}` : ''}`)
+    const lines: string[] = [`Pendientes Chelsea — ${formatShortEs(today)}`]
+
+    if (pending.length > 0) {
+      lines.push('Correos:')
+      for (const i of pending) {
+        lines.push(`- ${i.remitente || '(sin remitente)'}: ${i.asunto || '(sin asunto)'}`)
       }
     }
-    const noUrg = pending.filter((i) => !i.urgencia)
-    if (noUrg.length) {
-      lines.push('', 'OTHER:')
-      for (const i of noUrg) {
-        const summary = oneLine(i.resumen_ia)
-        lines.push(`- ${i.remitente || '(no sender)'} — ${i.asunto || '(no subject)'}${summary ? `: ${summary}` : ''}`)
+
+    if (openTasks.length > 0) {
+      lines.push('Tareas:')
+      for (const t of openTasks) {
+        const due = t.due_date ? ` (vence ${formatShortEs(t.due_date)})` : ''
+        lines.push(`- ${t.text}${due}`)
       }
     }
+
     return lines.join('\n')
   }
 
@@ -130,7 +187,9 @@ export default function ChelseaPage() {
         <div>
           <h1 className="text-lg font-semibold text-[#e8e8e8]">Chelsea</h1>
           <p className="text-sm text-[#888888] mt-0.5">
-            {loading ? 'Loading…' : `${pending.length} pending`}
+            {loading || tasksLoading
+              ? 'Loading…'
+              : `${pending.length} pending · ${openTasks.length} ${openTasks.length === 1 ? 'task' : 'tasks'}`}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -143,7 +202,7 @@ export default function ChelseaPage() {
             />
             Show resolved
           </label>
-          {pending.length > 0 && (
+          {(pending.length > 0 || openTasks.length > 0) && (
             <CopyButton text={buildPendingText} label="Copy pending list" />
           )}
         </div>
@@ -151,7 +210,9 @@ export default function ChelseaPage() {
 
       {error && <p className="text-xs text-red-400">{error}</p>}
 
-      {!loading && pending.length === 0 && !showResolved && (
+      {/* With no Chelsea company the Tareas section below carries the message. */}
+      {!loading && !tasksLoading && chelseaCompany && pending.length === 0 &&
+        openTasks.length === 0 && !showResolved && (
         <div className="text-sm text-[#888888] text-center py-12">Nothing pending ✨</div>
       )}
 
@@ -207,6 +268,38 @@ export default function ChelseaPage() {
           </div>
         </div>
       ))}
+
+      {/* ── 11a: Tareas — the manual half, under the mail ── */}
+      <div className="space-y-2 pt-1">
+        <h2 className="text-xs font-semibold text-[#888888] uppercase tracking-wider">Tareas</h2>
+
+        {tasksError && <p className="text-xs text-red-400">{tasksError}</p>}
+
+        {/* Loading is checked first: `companies` is empty until it resolves, so
+            the 11d hint would otherwise flash on every page load. */}
+        {tasksLoading ? (
+          <p className="text-xs text-[#555555]">Loading…</p>
+        ) : !chelseaCompany ? (
+          // 11d
+          <p className="text-sm text-[#888888]">{CHELSEA_MISSING_HINT}</p>
+        ) : sortedTasks.length === 0 ? (
+          <p className="text-xs text-[#555555]">
+            Sin tareas — agrégalas desde Tasks con la empresa Chelsea.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {sortedTasks.map((task) => (
+              <TaskCard
+                key={task.id}
+                task={task}
+                companies={companies}
+                onUpdate={fetchTasks}
+                today={today}
+              />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
