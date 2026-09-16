@@ -6,7 +6,6 @@ import type { ImTriaje, ImUrgencia, Company, Task } from '@/types'
 import CopyButton from '@/components/CopyButton'
 import TaskCard from '@/components/TaskCard'
 import { supabase } from '@/lib/supabase'
-import { formatShortEs } from '@/lib/dates'
 import { CHELSEA_MISSING_HINT, findChelseaCompany } from '@/lib/chelsea'
 
 const TZ = 'America/Cancun'
@@ -24,6 +23,17 @@ function dayLabel(iso: string | null): string {
     timeZone: TZ, month: 'short', day: 'numeric',
   }).format(new Date(iso))
 }
+/** "Sep 16" in Cancun — the title of the list Chelsea gets. */
+function todayLabel(): string {
+  return new Intl.DateTimeFormat('en-US', { timeZone: TZ, month: 'short', day: 'numeric' })
+    .format(new Date())
+}
+
+/** "2026-09-18" → "Sep 18". T00:00:00 keeps a `date` column off the UTC shift. */
+function dueLabelEn(value: string): string {
+  return new Date(`${value}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
 function oneLine(text: string | null): string {
   return (text ?? '').replace(/\s+/g, ' ').trim()
 }
@@ -165,7 +175,7 @@ export default function ChelseaPage() {
   // 11b: one message with both sections, ready to paste into Telegram. An
   // empty section is left out entirely rather than shown with no rows.
   function buildPendingText(): string {
-    const lines: string[] = [`Pendientes Chelsea — ${formatShortEs(today)}`]
+    const lines: string[] = [`CHELSEA'S PENDING — ${todayLabel()}`]
 
     // ── Mail: grouped by urgency, each row carrying its resumen_ia ──
     const headers: Record<ImUrgencia, string> = { alta: 'HIGH', media: 'MEDIUM', baja: 'LOW' }
@@ -189,9 +199,9 @@ export default function ChelseaPage() {
 
     // ── Then the manual tasks, always last ──
     if (openTasks.length > 0) {
-      lines.push('', 'Tareas:')
+      lines.push('', 'Tasks:')
       for (const t of openTasks) {
-        const due = t.due_date ? ` (vence ${formatShortEs(t.due_date)})` : ''
+        const due = t.due_date ? ` (due ${dueLabelEn(t.due_date)})` : ''
         lines.push(`- ${t.text}${due}`)
       }
     }
