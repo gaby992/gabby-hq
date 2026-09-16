@@ -62,7 +62,9 @@ doesn't exist the section just says *"Crea la empresa Chelsea en Settings"*.
 - Add them from `/tasks` (pick the Chelsea company) or from Telegram with
   `para Chelsea: llamar al proveedor` — the `para <empresa>: …` form works for
   any company and defaults to `normal` priority.
-- `Show resolved` drives both sections; `Copy pending list` emits one message
-  with a `Correos:` and a `Tareas:` block (empty blocks are omitted).
+- `Show resolved` drives both sections; `Copy pending list` keeps the mail in
+  its urgency buckets (🔴 HIGH / 🟡 MEDIUM / 🟢 LOW / ⚪ OTHER, each row with
+  its `resumen_ia`) and appends a `Tareas:` block at the end. Empty sections
+  are omitted.
 - `/hoy` keeps these tasks **out of the Eisenhower matrix** — they're delegated,
   not Gabby's own work. The Chelsea company block lower down still lists them.

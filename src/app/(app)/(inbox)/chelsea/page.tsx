@@ -1,8 +1,8 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { URGENCIA_EMOJI, URGENCIA_LABELS } from '@/types'
-import type { ImTriaje, Company, Task } from '@/types'
+import { URGENCIA_EMOJI, URGENCIA_ORDER, URGENCIA_LABELS } from '@/types'
+import type { ImTriaje, ImUrgencia, Company, Task } from '@/types'
 import CopyButton from '@/components/CopyButton'
 import TaskCard from '@/components/TaskCard'
 import { supabase } from '@/lib/supabase'
@@ -24,6 +24,10 @@ function dayLabel(iso: string | null): string {
     timeZone: TZ, month: 'short', day: 'numeric',
   }).format(new Date(iso))
 }
+function oneLine(text: string | null): string {
+  return (text ?? '').replace(/\s+/g, ' ').trim()
+}
+
 /** Today as 'YYYY-MM-DD' in Cancun, so the whole page agrees on "today". */
 function todayKey(): string {
   return dayKey(new Date().toISOString())
@@ -163,15 +167,29 @@ export default function ChelseaPage() {
   function buildPendingText(): string {
     const lines: string[] = [`Pendientes Chelsea — ${formatShortEs(today)}`]
 
-    if (pending.length > 0) {
-      lines.push('Correos:')
-      for (const i of pending) {
-        lines.push(`- ${i.remitente || '(sin remitente)'}: ${i.asunto || '(sin asunto)'}`)
+    // ── Mail: grouped by urgency, each row carrying its resumen_ia ──
+    const headers: Record<ImUrgencia, string> = { alta: 'HIGH', media: 'MEDIUM', baja: 'LOW' }
+    function pushMail(items: ImTriaje[]) {
+      for (const i of items) {
+        const summary = oneLine(i.resumen_ia)
+        lines.push(`- ${i.remitente || '(no sender)'} — ${i.asunto || '(no subject)'}${summary ? `: ${summary}` : ''}`)
       }
     }
+    for (const u of URGENCIA_ORDER) {
+      const bucket = pending.filter((i) => i.urgencia === u)
+      if (bucket.length === 0) continue
+      lines.push('', `${URGENCIA_EMOJI[u]} ${headers[u]}:`)
+      pushMail(bucket)
+    }
+    const noUrg = pending.filter((i) => !i.urgencia)
+    if (noUrg.length) {
+      lines.push('', '⚪ OTHER:')
+      pushMail(noUrg)
+    }
 
+    // ── Then the manual tasks, always last ──
     if (openTasks.length > 0) {
-      lines.push('Tareas:')
+      lines.push('', 'Tareas:')
       for (const t of openTasks) {
         const due = t.due_date ? ` (vence ${formatShortEs(t.due_date)})` : ''
         lines.push(`- ${t.text}${due}`)
