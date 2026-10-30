@@ -4,16 +4,20 @@
 // message replaces whatever was pending.
 
 import { createServerClient } from '@/lib/supabase-server'
-import type { Accion, NotaParsed, TareaParsed } from '@/lib/parser'
+import type { NotaParsed, TareaParsed } from '@/lib/parser'
+import type { AccionParams } from './acciones'
 
 /**
  * What waits in a draft. Tasks are stored flat (the phase 2 shape, no `tipo`);
  * notes and actions carry a discriminator.
+ *   accion    → buttons to pick ONE of `candidatos`
+ *   confirmar → [Sí, borrar] [No] over `ids`
  */
 export type BorradorParsed =
   | (TareaParsed & { tipo?: 'tarea' })
   | { tipo: 'nota'; nota: NotaParsed }
-  | { tipo: 'accion'; accion: Accion; candidatos: string[] }
+  | { tipo: 'accion'; params: AccionParams; candidatos: string[] }
+  | { tipo: 'confirmar'; params: AccionParams; ids: string[] }
 
 export const BORRADOR_TTL_MS = 10 * 60 * 1000
 

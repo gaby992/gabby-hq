@@ -7,7 +7,7 @@ import {
   removeInlineKeyboard,
   sendTelegram,
 } from '@/lib/asistente/telegram'
-import { ejecutarAccion, manejarAccion } from '@/lib/asistente/acciones'
+import { conIds, ejecutarAccion, manejarAccion, manejarPorTitulo, type AccionParams, type Respuesta } from '@/lib/asistente/acciones'
 import { ejecutarNota, USO_NOTA } from '@/lib/asistente/notas-bot'
 import { llmConfig } from '@/lib/asistente/llm'
 import { ayuda, faltantes, parseMensaje, type TareaParsed } from '@/lib/parser'
@@ -83,6 +83,35 @@ async function guardarOPreguntar(chatId: number, texto: string, tarea: TareaPars
   await reply(chatId, joinLines(prefix, q.text), q.replyMarkup)
 }
 
+/**
+ * Shared tail of every action: mint a draft (its nonce goes into any buttons),
+ * run the resolver, then keep the draft only if buttons are waiting on it.
+ * Returns false when the resolver had nothing to say (edit with no match).
+ */
+async function responderAccion(
+  chatId: number,
+  text: string,
+  params: AccionParams,
+  resolver: (nonce: string) => Promise<Respuesta | null>,
+  prefix: string | null
+): Promise<boolean> {
+  const borrador = await crearBorrador(chatId, text, { tipo: 'accion', params, candidatos: [] })
+  const r = await resolver(nonceDe(borrador.id))
+  if (!r) {
+    await borrarBorrador(borrador.id)
+    return false
+  }
+  if (r.candidatos && r.candidatos.length > 0) {
+    await actualizarBorrador(borrador.id, { tipo: 'accion', params, candidatos: r.candidatos })
+  } else if (r.confirmar && r.confirmar.length > 0) {
+    await actualizarBorrador(borrador.id, { tipo: 'confirmar', params, ids: r.confirmar })
+  } else {
+    await borrarBorrador(borrador.id)
+  }
+  await reply(chatId, joinLines(prefix, r.text), r.replyMarkup)
+  return true
+}
+
 async function handleText(chatId: number, text: string, prefix: string | null) {
   if (!text) {
     await reply(chatId, joinLines(prefix, 'No entendí nada. ¿Me lo repites?'))
@@ -95,17 +124,27 @@ async function handleText(chatId: number, text: string, prefix: string | null) {
       await reply(chatId, ayuda(modeloActual()))
       return
     case 'accion': {
-      // "listo …" / "pasa …": by alarm number, "todo", or a word of the title.
-      // The draft only exists when there are buttons to tie to it; the nonce
-      // is minted first so the buttons can carry it.
-      const borrador = await crearBorrador(chatId, text, { tipo: 'accion', accion: parsed.accion, candidatos: [] })
-      const r = await manejarAccion(parsed.accion, parsed.arg, nonceDe(borrador.id))
-      if (r.candidatos && r.candidatos.length > 0) {
-        await actualizarBorrador(borrador.id, { tipo: 'accion', accion: parsed.accion, candidatos: r.candidatos })
-      } else {
-        await borrarBorrador(borrador.id)
+      // "listo …" / "pasa …" / "borra …": by alarm number, "todo", or a word
+      // of the title.
+      await responderAccion(chatId, text, { accion: parsed.accion }, (nonce) =>
+        manejarAccion({ accion: parsed.accion }, parsed.arg, nonce), prefix)
+      return
+    }
+    case 'nota_tarea': {
+      if (!parsed.texto) {
+        await reply(chatId, joinLines(prefix, 'Formato: nota en paypal: texto que quieres agregar'))
+        return
       }
-      await reply(chatId, joinLines(prefix, r.text), r.replyMarkup)
+      const params: AccionParams = { accion: 'nota_tarea', texto: parsed.texto }
+      await responderAccion(chatId, text, params, (nonce) => manejarPorTitulo(params, parsed.termino, nonce), prefix)
+      return
+    }
+    case 'edicion': {
+      // "paypal urgente": an edit if some open task matches «paypal»;
+      // otherwise it was a new task all along.
+      const params: AccionParams = { accion: 'editar', cambios: parsed.cambios }
+      const handled = await responderAccion(chatId, text, params, (nonce) => manejarPorTitulo(params, parsed.termino, nonce), prefix)
+      if (!handled) await guardarOPreguntar(chatId, text, parsed.fallback, prefix)
       return
     }
     case 'nota': {
@@ -191,8 +230,8 @@ async function handleCallback(cq: CallbackQuery) {
     return
   }
 
-  // "e:<nonce>:<company_id>" | "p:<nonce>:<priority>" | "t:<nonce>:<task_id>"
-  const m = String(cq.data ?? '').match(/^([ept]):([0-9a-f]{8}):(.+)$/)
+  // "e:<nonce>:<company_id>" | "p:<nonce>:<priority>" | "t:<nonce>:<task_id>" | "y:<nonce>:1|0"
+  const m = String(cq.data ?? '').match(/^([epty]):([0-9a-f]{8}):(.+)$/)
   if (!m) return
   const [, kind, nonce, value] = m
 
@@ -206,11 +245,29 @@ async function handleCallback(cq: CallbackQuery) {
     const companies = await cargarEmpresas()
     const parsed = borrador.parsed
 
-    // ── "listo paypal" / "pasa paypal" with several matches: the chosen task ──
+    // ── "listo paypal" etc. with several matches: the chosen task ──
     if (parsed.tipo === 'accion') {
       if (kind !== 't' || !parsed.candidatos.includes(value)) return
+      const r = await conIds(parsed.params, [value], nonce)
+      if (r.confirmar && r.confirmar.length > 0) {
+        // borra: one more step — the same draft now waits for the yes/no.
+        await actualizarBorrador(borrador.id, { tipo: 'confirmar', params: parsed.params, ids: r.confirmar })
+      } else {
+        await borrarBorrador(borrador.id)
+      }
+      await reply(chatId, r.text, r.replyMarkup)
+      return
+    }
+
+    // ── [Sí, borrar] [No] ──
+    if (parsed.tipo === 'confirmar') {
+      if (kind !== 'y') return
       await borrarBorrador(borrador.id)
-      await reply(chatId, await ejecutarAccion(parsed.accion, [value]))
+      if (value !== '1') {
+        await reply(chatId, 'Ok, no borré nada.')
+        return
+      }
+      await reply(chatId, await ejecutarAccion(parsed.params, parsed.ids))
       return
     }
 
@@ -228,7 +285,7 @@ async function handleCallback(cq: CallbackQuery) {
     }
 
     // ── A task missing company and/or priority ──
-    if (kind === 't') return
+    if (kind === 't' || kind === 'y') return
     const tarea: TareaParsed = { ...parsed }
     if (kind === 'e') {
       const c = companies.find((x) => x.id === value)

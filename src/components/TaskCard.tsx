@@ -8,6 +8,7 @@ import DueDateLabel from './DueDateLabel'
 import ImportantBadge from './ImportantBadge'
 import ImportanteCheckbox from './ImportanteCheckbox'
 import { supabase } from '@/lib/supabase'
+import { formatShortEs, ymd } from '@/lib/dates'
 
 interface Props {
   task: Task
@@ -164,6 +165,11 @@ export default function TaskCard({ task, companies, onUpdate, today }: Props) {
             <PriorityBadge priority={task.priority} />
             <ImportantBadge importante={task.importante} />
             <DueDateLabel date={task.due_date} today={today} />
+            {isCompleted && task.completed_at && (
+              <span className="text-xs text-[#1D9E75]" title={task.completed_at}>
+                ✓ hecha {formatShortEs(ymd(new Date(task.completed_at)))}
+              </span>
+            )}
             {subtasks.length > 0 && (
               <span className="text-xs text-[#888888]">{completedCount}/{subtasks.length} subtasks</span>
             )}

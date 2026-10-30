@@ -1,19 +1,35 @@
-// "listo …" and "pasa …": act on tasks named by the number they had in the
-// LAST alarm (bot_alarmas) or by a word of their title.
-//   listo 3 · listo 2,5 · listo paypal      → done = true (the trigger stamps completed_at)
-//   pasa 2,5 · pasa todo · pasa paypal      → due_date = tomorrow (Cancún)
-// Title search with 2–5 hits asks with buttons; the tap lands in the webhook
-// as "t:<nonce>:<task_id>" and comes back here through ejecutarAccion().
+// Everything the bot does TO an existing task, named by the number it had in
+// the LAST alarm (bot_alarmas) or by a word of its title:
+//   listo 3 · listo 2,5 · listo paypal        → done = true (the trigger stamps completed_at)
+//   pasa 2,5 · pasa todo · pasa paypal        → due_date = tomorrow (Cancún)
+//   borra 3 · borra paypal                    → delete, ALWAYS after a [Sí, borrar] [No]
+//   nota en paypal: texto                     → append "30 oct: texto" to tasks.notes
+//   paypal urgente / para el viernes / es de PD → edit priority, date or company
+// Title search with 2–5 hits asks with buttons ("t:<nonce>:<task_id>"); the
+// webhook then calls ejecutarAccion() with the chosen id.
 
 import { createServerClient } from '@/lib/supabase-server'
-import type { Accion } from '@/lib/parser'
-import { addDays, cancunYmd, formatCortoEs } from './cancun'
+import { PRIORITY_LABELS } from '@/types'
+import type { Accion, Cambios } from '@/lib/parser'
+import { addDays, cancunYmd, formatCortoEs, formatVenceEs } from './cancun'
 import type { AlarmaItem, AlarmaTipo } from './alarmas'
 import { inlineKeyboard, type InlineButton } from './telegram'
+
+/** The action plus whatever it needs besides the task ids. Travels inside drafts. */
+export interface AccionParams {
+  accion: Accion
+  /** nota_tarea: the line to append. */
+  texto?: string
+  /** editar: what to change. */
+  cambios?: Cambios
+}
 
 export const USO: Record<Accion, string> = {
   pasa: 'Formato: pasa 2,5 (números de la última alarma) · pasa todo · pasa paypal (palabra del título)',
   listo: 'Formato: listo 3 · listo 2,5 (números de la última alarma) · listo paypal (palabra del título)',
+  borra: 'Formato: borra 3 (número de la última alarma) · borra paypal (palabra del título)',
+  nota_tarea: 'Formato: nota en paypal: texto que quieres agregar',
+  editar: 'Formato: paypal para el viernes · paypal urgente · paypal es de PD',
 }
 
 const MAX_CANDIDATOS = 5
@@ -25,19 +41,26 @@ interface UltimaAlarma {
   items: AlarmaItem[]
 }
 
-/** A task as the confirmations need it. */
 interface TaskRow {
   id: string
   text: string
   done: boolean
+  notes: string | null
+  due_date: string | null
+  priority: 'urgente' | 'normal' | 'cuando'
+  importante: boolean
   company: { name: string } | null
 }
+
+const COLS = 'id, text, done, notes, due_date, priority, importante, company:companies(name)'
 
 export interface Respuesta {
   text: string
   replyMarkup?: unknown
-  /** When buttons are shown: the ids the tap may pick (saved in the draft). */
+  /** Buttons shown to pick ONE task: the ids the tap may choose. */
   candidatos?: string[]
+  /** [Sí, borrar] [No] shown: the ids waiting for the yes. */
+  confirmar?: string[]
 }
 
 // ── Resolution ──────────────────────────────────────────────────────────
@@ -59,7 +82,7 @@ async function ultimaAlarma(): Promise<UltimaAlarma | null> {
   return data
 }
 
-type Resuelto = { ids: string[] } | { text: string }
+type Resuelto = { ids: string[] } | { text: string } | { elegir: TaskRow[] }
 
 async function porNumeros(wanted: number[] | 'todo'): Promise<Resuelto> {
   const alarma = await ultimaAlarma()
@@ -76,96 +99,184 @@ async function porNumeros(wanted: number[] | 'todo'): Promise<Resuelto> {
   return { ids: wanted.map((n) => byN.get(n)!) }
 }
 
-async function porTitulo(termino: string, accion: Accion): Promise<Resuelto | { pregunta: Respuesta }> {
+/** Open tasks whose title contains the term. Used by every "…paypal" form. */
+export async function buscarPorTitulo(termino: string): Promise<TaskRow[]> {
   const { data, error } = await createServerClient()
     .from('tasks')
-    .select('id, text, done, company:companies(name)')
+    .select(COLS)
     .eq('done', false)
     .order('created_at', { ascending: false })
   if (error) throw new Error(`Supabase tasks: ${error.message}`)
   const needle = normalizar(termino)
-  const hits = ((data as unknown as TaskRow[]) ?? []).filter((t) => normalizar(t.text).includes(needle))
+  return ((data as unknown as TaskRow[]) ?? []).filter((t) => normalizar(t.text).includes(needle))
+}
 
+async function porTitulo(termino: string): Promise<Resuelto> {
+  const hits = await buscarPorTitulo(termino)
   if (hits.length === 0) return { text: `No encontré ninguna tarea con «${termino}».` }
   if (hits.length === 1) return { ids: [hits[0].id] }
   if (hits.length > MAX_CANDIDATOS) {
     return { text: `Encontré ${hits.length} tareas con «${termino}». Dime algo más específico.` }
   }
-  const verbo = accion === 'listo' ? 'completo' : 'paso a mañana'
-  const buttons: InlineButton[] = hits.map((t) => ({
-    text: `${t.text.length > 40 ? t.text.slice(0, 39) + '…' : t.text}${t.company ? ` · ${t.company.name}` : ''}`,
-    callback_data: `t:NONCE:${t.id}`,
-  }))
-  return {
-    pregunta: {
-      text: `¿Cuál ${verbo}?`,
-      replyMarkup: inlineKeyboard(buttons.map((b) => [b])),
-      candidatos: hits.map((t) => t.id),
-    },
-  }
+  return { elegir: hits }
 }
 
-// ── Execution ───────────────────────────────────────────────────────────
+// ── Questions ───────────────────────────────────────────────────────────
+
+const VERBO: Record<Accion, string> = {
+  listo: 'completo',
+  pasa: 'paso a mañana',
+  borra: 'borro',
+  nota_tarea: 'lleva la nota',
+  editar: 'cambio',
+}
 
 function etiqueta(t: TaskRow): string {
   return `«${t.text}»${t.company ? ` · ${t.company.name}` : ''}`
 }
 
-/** Runs the action on the given open tasks and returns the one-line confirmation(s). */
-export async function ejecutarAccion(accion: Accion, ids: string[]): Promise<string> {
-  const db = createServerClient()
-  const manana = addDays(cancunYmd(), 1)
-  const cambio = accion === 'listo' ? { done: true } : { due_date: manana }
-  const { data, error } = await db
-    .from('tasks')
-    .update(cambio)
-    .in('id', ids)
-    .eq('done', false)
-    .select('id, text, done, company:companies(name)')
+function preguntaElegir(accion: Accion, hits: TaskRow[], nonce: string): Respuesta {
+  const buttons: InlineButton[] = hits.map((t) => ({
+    text: `${t.text.length > 40 ? t.text.slice(0, 39) + '…' : t.text}${t.company ? ` · ${t.company.name}` : ''}`,
+    callback_data: `t:${nonce}:${t.id}`,
+  }))
+  return {
+    text: `¿Cuál ${VERBO[accion]}?`,
+    replyMarkup: inlineKeyboard(buttons.map((b) => [b])),
+    candidatos: hits.map((t) => t.id),
+  }
+}
+
+/** "borra": never without this. */
+export async function preguntaConfirmarBorrado(ids: string[], nonce: string): Promise<Respuesta> {
+  const { data, error } = await createServerClient().from('tasks').select(COLS).in('id', ids)
   if (error) throw new Error(`Supabase tasks: ${error.message}`)
   const rows = (data as unknown as TaskRow[]) ?? []
+  if (rows.length === 0) return { text: 'Esas tareas ya no existen.' }
+  const lista = rows.map((t) => `• ${etiqueta(t)}`).join('\n')
+  return {
+    text: `¿Borrar ${rows.length === 1 ? 'esta tarea' : `estas ${rows.length} tareas`}?\n${lista}`,
+    replyMarkup: inlineKeyboard([[
+      { text: '🗑️ Sí, borrar', callback_data: `y:${nonce}:1` },
+      { text: 'No', callback_data: `y:${nonce}:0` },
+    ]]),
+    confirmar: rows.map((t) => t.id),
+  }
+}
 
+// ── Execution ───────────────────────────────────────────────────────────
+
+function describirCambios(c: Cambios): string {
+  const out: string[] = []
+  if (c.company_name) out.push(c.company_name)
+  if (c.priority) out.push(`${PRIORITY_LABELS[c.priority]}${c.importante ? ' ★' : ''}`)
+  if (c.due_date) out.push(`vence ${formatVenceEs(c.due_date)}`)
+  return out.join(' · ')
+}
+
+/** Runs the action on the given tasks and returns the one-line confirmation(s). */
+export async function ejecutarAccion(params: AccionParams, ids: string[]): Promise<string> {
+  const db = createServerClient()
+
+  if (params.accion === 'borra') {
+    const { data, error } = await db.from('tasks').delete().in('id', ids).select(COLS)
+    if (error) throw new Error(`Supabase tasks: ${error.message}`)
+    const rows = (data as unknown as TaskRow[]) ?? []
+    if (rows.length === 0) return 'Esas tareas ya no existían.'
+    return rows.map((t) => `🗑️ Borrada: ${etiqueta(t)}`).join('\n')
+  }
+
+  if (params.accion === 'nota_tarea') {
+    // Append only — never overwrite: inbox-IM tasks keep their "De:/resumen/
+    // Ref: gmail:…" block exactly as n8n wrote it.
+    const { data: before, error: e1 } = await db.from('tasks').select(COLS).in('id', ids)
+    if (e1) throw new Error(`Supabase tasks: ${e1.message}`)
+    const linea = `${formatCortoEs(cancunYmd())}: ${params.texto ?? ''}`.trim()
+    const out: string[] = []
+    for (const t of (before as unknown as TaskRow[]) ?? []) {
+      const notes = t.notes?.trim() ? `${t.notes.trimEnd()}\n\n${linea}` : linea
+      const { error } = await db.from('tasks').update({ notes }).eq('id', t.id)
+      if (error) throw new Error(`Supabase tasks: ${error.message}`)
+      out.push(`📎 Nota agregada a «${t.text}»`)
+    }
+    return out.join('\n') || 'Esa tarea ya no existe.'
+  }
+
+  if (params.accion === 'editar') {
+    const c = params.cambios ?? {}
+    const update: Record<string, unknown> = {}
+    if (c.priority) update.priority = c.priority
+    if (c.importante) update.importante = true
+    if (c.due_date) update.due_date = c.due_date
+    if (c.company_id) update.company_id = c.company_id
+    if (Object.keys(update).length === 0) return USO.editar
+    const { data, error } = await db.from('tasks').update(update).in('id', ids).eq('done', false).select(COLS)
+    if (error) throw new Error(`Supabase tasks: ${error.message}`)
+    const rows = (data as unknown as TaskRow[]) ?? []
+    if (rows.length === 0) return 'Esa tarea ya está cerrada; no cambié nada.'
+    return rows.map((t) => `✏️ ${etiqueta(t)} → ${describirCambios(c)}`).join('\n')
+  }
+
+  // listo / pasa
+  const manana = addDays(cancunYmd(), 1)
+  const cambio = params.accion === 'listo' ? { done: true } : { due_date: manana }
+  const { data, error } = await db.from('tasks').update(cambio).in('id', ids).eq('done', false).select(COLS)
+  if (error) throw new Error(`Supabase tasks: ${error.message}`)
+  const rows = (data as unknown as TaskRow[]) ?? []
   if (rows.length === 0) {
-    return accion === 'listo' ? 'Esas tareas ya estaban cerradas.' : 'Nada que pasar: esas tareas ya están cerradas.'
+    return params.accion === 'listo' ? 'Esas tareas ya estaban cerradas.' : 'Nada que pasar: esas tareas ya están cerradas.'
   }
   const skipped = ids.length - rows.length
   const cola = skipped > 0 ? `\n(${skipped} ya ${skipped === 1 ? 'estaba cerrada' : 'estaban cerradas'})` : ''
-
-  if (accion === 'listo') {
-    return rows.map((t) => `✅ Hecha: ${etiqueta(t)}`).join('\n') + cola
-  }
+  if (params.accion === 'listo') return rows.map((t) => `✅ Hecha: ${etiqueta(t)}`).join('\n') + cola
   const fecha = formatCortoEs(manana)
   if (rows.length === 1) return `📅 ${etiqueta(rows[0])} pasa a mañana (${fecha})${cola}`
   return `✅ ${rows.length} tareas pasan a mañana (${fecha}):\n` + rows.map((t) => `• ${etiqueta(t)}`).join('\n') + cola
 }
 
-// ── Entry point from the webhook ────────────────────────────────────────
+/** What happens once the task ids are known: run it, or (borra) ask first. */
+export async function conIds(params: AccionParams, ids: string[], nonce: string): Promise<Respuesta> {
+  if (params.accion === 'borra') return preguntaConfirmarBorrado(ids, nonce)
+  return { text: await ejecutarAccion(params, ids) }
+}
+
+// ── Entry points from the webhook ───────────────────────────────────────
 
 /**
- * `arg` is what came after "listo"/"pasa": nothing, "todo", "2,5" or a word.
- * `nonce` ties the buttons (if any) to the draft the webhook will create.
+ * listo / pasa / borra with `arg` = nothing, "todo", "2,5" or a word.
+ * `nonce` ties any buttons to the draft the webhook created.
  */
-export async function manejarAccion(accion: Accion, arg: string, nonce: string): Promise<Respuesta> {
+export async function manejarAccion(params: AccionParams, arg: string, nonce: string): Promise<Respuesta> {
   const rest = arg.trim()
-  if (!rest) return { text: USO[accion] }
+  if (!rest) return { text: USO[params.accion] }
 
-  let resuelto: Resuelto | { pregunta: Respuesta }
+  let resuelto: Resuelto
   if (/^todo$/i.test(rest)) {
-    // "listo todo" closes everything in the last alarm in one tap — too easy
-    // to send by accident, so only "pasa todo" exists.
-    if (accion !== 'pasa') return { text: USO[accion] }
+    // Only "pasa todo" exists: closing or deleting a whole alarm in one tap is
+    // too easy to send by accident.
+    if (params.accion !== 'pasa') return { text: USO[params.accion] }
     resuelto = await porNumeros('todo')
   } else if (/^[\d\s,;]+$/.test(rest)) {
-    const nums = Array.from(new Set(rest.split(/[\s,;]+/).filter(Boolean).map(Number)))
-    resuelto = await porNumeros(nums)
+    resuelto = await porNumeros(Array.from(new Set(rest.split(/[\s,;]+/).filter(Boolean).map(Number))))
   } else {
-    resuelto = await porTitulo(rest, accion)
+    resuelto = await porTitulo(rest)
   }
 
-  if ('pregunta' in resuelto) {
-    const markup = JSON.parse(JSON.stringify(resuelto.pregunta.replyMarkup).replace(/NONCE/g, nonce))
-    return { ...resuelto.pregunta, replyMarkup: markup }
-  }
   if ('text' in resuelto) return { text: resuelto.text }
-  return { text: await ejecutarAccion(accion, resuelto.ids) }
+  if ('elegir' in resuelto) return preguntaElegir(params.accion, resuelto.elegir, nonce)
+  return conIds(params, resuelto.ids, nonce)
+}
+
+/**
+ * "nota en paypal: …" and "paypal urgente": title search only. Returns null
+ * for the edit form when nothing matches, so the webhook creates the task.
+ */
+export async function manejarPorTitulo(params: AccionParams, termino: string, nonce: string): Promise<Respuesta | null> {
+  const hits = await buscarPorTitulo(termino)
+  if (hits.length === 0) {
+    return params.accion === 'editar' ? null : { text: `No encontré ninguna tarea con «${termino}».` }
+  }
+  if (hits.length === 1) return conIds(params, [hits[0].id], nonce)
+  if (hits.length > MAX_CANDIDATOS) return { text: `Encontré ${hits.length} tareas con «${termino}». Dime algo más específico.` }
+  return preguntaElegir(params.accion, hits, nonce)
 }

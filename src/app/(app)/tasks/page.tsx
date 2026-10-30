@@ -107,7 +107,15 @@ function TasksPageContent() {
   }
 
   const isShowingCompleted = filter === 'completadas'
-  const displayTasks = filteredTasks
+  // Completed: most recently closed first. Rows closed before completed_at
+  // existed (null) sink to the bottom, ordered by creation.
+  const displayTasks = isShowingCompleted
+    ? [...filteredTasks].sort((a, b) => {
+        if (a.completed_at && b.completed_at) return a.completed_at < b.completed_at ? 1 : -1
+        if (a.completed_at || b.completed_at) return a.completed_at ? -1 : 1
+        return a.created_at < b.created_at ? 1 : -1
+      })
+    : filteredTasks
 
   return (
     <div className="space-y-6">

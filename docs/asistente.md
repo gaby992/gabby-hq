@@ -10,7 +10,8 @@ sección y **no se empieza una fase hasta validar la anterior**.
 | 1 | Alarmas 8:00 am y 6:00 pm | ✅ Validada |
 | 2 | Notas de voz (Whisper) | ✅ Validada |
 | 3 | `/pregunta` (LLM) | ✅ Validada |
-| 3b | Notas y `listo` por Telegram, avisos de OpenAI | ✅ Construida — pendiente de validar |
+| 3b | Notas y `listo` por Telegram, avisos de OpenAI | ✅ Validada |
+| 3c | Todo se maneja desde el bot: borrar, nota en tarea, editar, fecha de cierre | ✅ Construida — pendiente de validar |
 | 4 | Google Calendar | ⏳ Pendiente |
 
 ---
@@ -20,6 +21,12 @@ sección y **no se empieza una fase hasta validar la anterior**.
 GabbyHQ es una app web (Next.js) desplegada en **Vercel**, con los datos en
 **Supabase** (Postgres). El bot de Telegram no es un programa aparte: es una
 ruta más de esa misma app. Nada vive en n8n ni en otro servidor.
+
+**Principio: el bot es la puerta principal.** Cualquier acción que exista en
+la app debe poder decirse al bot, en texto o por voz: crear, completar, mover,
+borrar y editar tareas, escribir notas, preguntar. La web (`/hoy`, `/tasks`,
+`/inbox`) es el tablero para **ver**, no un paso obligatorio. Si algo solo se
+puede hacer desde la web, es un pendiente del bot.
 
 Hay dos direcciones de tráfico:
 
@@ -91,7 +98,7 @@ Archivos del asistente dentro del repo:
 | `src/lib/asistente/llm.ts` | Llamada al modelo: OpenAI o Anthropic según `LLM_PROVIDER` |
 | `src/lib/asistente/pregunta.ts` | System prompt, timeout, respuesta y log en `bot_preguntas` |
 | `src/lib/asistente/alarmas.ts` | Arma los mensajes, los manda, reintenta, guarda la numeración |
-| `src/lib/asistente/acciones.ts` | `listo …` y `pasa …`: por número de la última alarma o por palabra del título |
+| `src/lib/asistente/acciones.ts` | `listo`, `pasa`, `borra`, `nota en …` y ediciones: por número de la última alarma o por palabra del título |
 | `src/lib/asistente/notas-bot.ts` | `nota IM: …` desde Telegram (misma función de guardado que /hoy y /tasks) |
 | `src/lib/asistente/openai-avisos.ts` | Clasifica errores de OpenAI y avisa por Telegram una vez al día |
 | `src/lib/asistente/telegram.ts` | Envío HTML, partición a 4000 caracteres, lista de chats permitidos |
@@ -581,8 +588,8 @@ otro), redeploy, listo. El código ya habla los dos protocolos.
 > mañana la paga otra persona u otra empresa, creas la key en esa cuenta, la
 > pegas en Vercel sobre `OPENAI_API_KEY` y haces redeploy. Nada más cambia.
 
-**`/ayuda`**: responde en 10 líneas todo lo que el bot entiende (tareas, voz,
-`listo`, `pasa`, `nota`, `/pregunta`, radar, alarmas, empresas) y termina con
+**`/ayuda`**: responde en cuatro secciones (Agregar · Cerrar/Mover · Notas ·
+Preguntar, 13 líneas) todo lo que el bot entiende y termina con
 `🤖 Modelo actual: gpt-5-mini (openai)`. También funciona `ayuda`,
 `help`, `formato` y `/start`.
 
@@ -732,6 +739,74 @@ nuevo. Puedes borrar esas filas cuando quieras.
 | Nombre | De dónde sale | Ejemplo |
 | --- | --- | --- |
 | `LLM_MODEL_FALLBACK` | Tú lo decides; solo si quieres un respaldo distinto de `gpt-4o-mini`. Tipo Config. | `gpt-4o-mini` |
+
+### 3g. Fase 3c — todo se maneja desde el bot
+
+**Borrar tareas**: `borra 3` (número de la última alarma) o `borra paypal`
+(palabra del título, con botones si hay varias). **Siempre** pide confirmación
+antes:
+```
+¿Borrar esta tarea?
+• «paypal statements Mar and Apr» · IM
+[ 🗑️ Sí, borrar ]  [ No ]
+```
+Al confirmar: `🗑️ Borrada: «paypal statements Mar and Apr» · IM`. Con "No":
+`Ok, no borré nada.` No existe `borra todo`.
+
+**Nota en una tarea**: `nota en paypal: ya mandé el de marzo, falta abril`
+busca la tarea por título y **agrega al final** de su campo notas una línea
+con la fecha: `30 oct: ya mandé el de marzo, falta abril`. Nunca sobrescribe
+lo que ya había: las tareas que vienen de inbox-IM conservan intacto su bloque
+`De:/resumen/Ref: gmail:…` y la línea nueva queda debajo. Confirma
+`📎 Nota agregada a «paypal statements Mar and Apr»`. Se ve en /tasks al
+expandir la tarjeta.
+
+**Cambiar fecha, urgencia o empresa**: el título primero y el cambio al final.
+
+| Dices | Cambia | Confirma |
+| --- | --- | --- |
+| `paypal para el viernes` (o `paypal mañana`, `paypal hoy`, `paypal due monday`) | `due_date` | `✏️ «paypal …» · IM → vence vie 6 nov` |
+| `paypal urgente` (o `normal`, `cuando pueda`) | prioridad; `urgente` también pone ★ | `✏️ «paypal …» · IM → Urgente ★` |
+| `paypal es de PD` (o `va para PD`, `pasa a PD`) | empresa | `✏️ «paypal …» · PD → PD` |
+| `paypal urgente para mañana` | varios a la vez | `✏️ … → Urgente ★ · vence sáb 31 oct` |
+
+Cómo decide el bot si es una edición o una tarea nueva: solo es edición cuando
+el modificador va **al final** y existe una tarea abierta cuyo título contiene
+lo que quedó antes ("paypal"). Si no hay ninguna que coincida, se crea como
+tarea nueva con el flujo normal (y pregunta empresa/urgencia si faltan). Por
+eso `urgente IM llamar a Juan` (modificador al inicio) siempre crea. Varias
+coincidencias → botones para escoger.
+
+**Fecha de cierre visible**
+
+- En `/tasks` → pestaña **Completadas**, cada tarjeta muestra `✓ hecha 30 oct`
+  (la fecha de `completed_at`, en verde) y la lista va de la más reciente a la
+  más antigua. Las que se cerraron antes de la fase 1 no tienen fecha y quedan
+  al final.
+- `/pregunta` recibe, para cada tarea cerrada, `[cerrada ayer, jue 29 oct]` y
+  el prompt le pide incluir esa fecha: `- título · IM · cerrada jue 29 oct`.
+
+**`/ayuda`** se reorganizó en cuatro secciones (📥 Agregar · ✅ Cerrar/Mover ·
+🗒 Notas · ❓ Preguntar), 13 líneas, y sigue terminando con el modelo actual.
+
+**Pruebas de la fase 3c**
+
+1. `borra paypal` con una sola coincidencia → pregunta con los dos botones.
+   Toca **No** → "Ok, no borré nada." y la tarea sigue en /tasks. Repite y
+   toca **Sí, borrar** → `🗑️ Borrada: …` y ya no está. Con dos coincidencias
+   primero salen los botones de "¿Cuál borro?" y después la confirmación.
+2. En una tarea que vino de inbox-IM (tiene `Ref: gmail:` en notas):
+   `nota en <palabra del asunto>: probando` → `📎 Nota agregada a «…»`. En
+   /tasks, expande la tarjeta: el bloque `De:/resumen/Ref:` sigue igual y
+   abajo aparece `30 oct: probando`.
+3. `paypal para el viernes` → `✏️ … → vence vie 6 nov`; `paypal urgente` →
+   `→ Urgente ★`; `paypal es de PD` → `→ PD`. Comprueba cada uno en /tasks.
+   Luego `zzz urgente` (sin ninguna tarea con "zzz") → te pregunta la empresa:
+   se está creando una tarea nueva, no editando.
+4. Completa una tarea desde el bot (`listo …`) y abre /tasks → Completadas: la
+   primera tarjeta es esa, con `✓ hecha` y la fecha de hoy.
+5. `¿qué cerré ayer?` → cada ítem trae `cerrada` con su fecha. `/ayuda` →
+   cuatro encabezados y no más de 14 líneas.
 
 **Pruebas de la fase 3b**
 

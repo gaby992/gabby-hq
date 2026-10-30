@@ -11,6 +11,9 @@
 //   nota IM: texto  /  nota IM + línea  /  nota IM:        (replace / append / delete)
 //   listo 3  /  listo 2,5  /  listo paypal                  (complete, by alarm number or title)
 //   pasa 2,5  /  pasa todo  /  pasa paypal                  (move to tomorrow)
+//   borra 3  /  borra paypal                                (delete, always confirmed with buttons)
+//   nota en paypal: texto                                   (append a dated line to that task's notes)
+//   paypal para el viernes / paypal urgente / paypal es de PD   (edit an existing task)
 //   /pregunta <…>  /  ? <pregunta>  /  ¿…?  /  pregunta <…>   (answered by the LLM)
 //   /ayuda / ayuda / help / formato / /start
 
@@ -37,7 +40,16 @@ export interface NotaParsed {
   texto: string
 }
 
-export type Accion = 'pasa' | 'listo'
+export type Accion = 'pasa' | 'listo' | 'borra' | 'nota_tarea' | 'editar'
+
+/** What "paypal urgente" / "paypal para el viernes" / "paypal es de PD" want to change. */
+export interface Cambios {
+  priority?: Priority
+  importante?: boolean
+  due_date?: string
+  company_id?: string
+  company_name?: string
+}
 
 export type Parsed =
   | { kind: 'ayuda' }
@@ -45,6 +57,9 @@ export type Parsed =
   | { kind: 'radar'; titulo: string }
   | { kind: 'nota'; nota: NotaParsed }
   | { kind: 'accion'; accion: Accion; arg: string }
+  | { kind: 'nota_tarea'; termino: string; texto: string }
+  /** Title + trailing modifier(s). If no open task matches `termino`, `fallback` is the new task to create. */
+  | { kind: 'edicion'; termino: string; cambios: Cambios; fallback: TareaParsed }
   | { kind: 'tarea'; tarea: TareaParsed }
 
 type CompanyRef = Pick<Company, 'id' | 'name'>
@@ -182,6 +197,45 @@ function parseNota(rest: string, companies: CompanyRef[]): NotaParsed {
   return { ...base, modo: 'reemplazar', texto: body }
 }
 
+// "paypal urgente" / "paypal para el viernes" / "paypal es de PD": the title
+// first, then one or more modifiers at the very end. Only the trailing
+// position counts — "urgente IM llamar a Juan" (modifier first) always creates.
+function parseEdicion(text: string, companies: CompanyRef[], today: string): { termino: string; cambios: Cambios } | null {
+  let rest = norm(text)
+  const cambios: Cambios = {}
+  let found = true
+  while (found) {
+    found = false
+    let m = rest.match(/^(.+?)[\s,]+(urgente|normal|cuando\s+pueda)$/i)
+    if (m && cambios.priority === undefined) {
+      const p = m[2].toLowerCase().startsWith('cuando') ? 'cuando' : (m[2].toLowerCase() as Priority)
+      cambios.priority = p
+      if (p === 'urgente') cambios.importante = true
+      rest = norm(m[1]); found = true; continue
+    }
+    m = rest.match(new RegExp(`^(.+?)[\\s,]+(?:para|due)(?:\\s+el)?\\s+(${DAY_TOKEN})$`, 'i')) ??
+        rest.match(/^(.+?)[\s,]+(hoy|mañana|manana|today|tomorrow)$/i)
+    if (m && cambios.due_date === undefined) {
+      const d = resolveDay(m[2], today)
+      if (d) { cambios.due_date = d; rest = norm(m[1]); found = true; continue }
+    }
+    if (companies.length > 0 && cambios.company_id === undefined) {
+      const sorted = [...companies].sort((a, b) => b.name.length - a.name.length)
+      const names = sorted.map((c) => escapeRe(c.name.trim())).join('|')
+      m = rest.match(new RegExp(`^(.+?)[\\s,]+(?:es|va|pasa|cambia)\\s+(?:de|a|para)\\s+(${names})$`, 'i'))
+      if (m) {
+        const c = sorted.find((x) => x.name.trim().toLowerCase() === m![2].toLowerCase())
+        if (c) { cambios.company_id = c.id; cambios.company_name = c.name.trim(); rest = norm(m[1]); found = true; continue }
+      }
+    }
+  }
+  if (Object.keys(cambios).length === 0) return null
+  const termino = tidy(rest)
+  // A bare modifier ("urgente") or a word-long term is a new task, not an edit.
+  if (termino.length < 3) return null
+  return { termino, cambios }
+}
+
 // ── Entry point ─────────────────────────────────────────────────────────
 
 export function parseMensaje(raw: string, companies: CompanyRef[], today: string): Parsed {
@@ -197,10 +251,14 @@ export function parseMensaje(raw: string, companies: CompanyRef[], today: string
   }
   const radar = text.match(/^radar\b\s*([\s\S]*)$/i)
   if (radar) return { kind: 'radar', titulo: tidy(radar[1]) }
+  const notaTarea = text.match(/^nota\s+en\s+([^:]+?)\s*:\s*([\s\S]*)$/i)
+  if (notaTarea) return { kind: 'nota_tarea', termino: tidy(notaTarea[1]), texto: tidy(notaTarea[2]) }
   const nota = text.match(/^nota\b\s*([\s\S]*)$/i)
   if (nota) return { kind: 'nota', nota: parseNota(nota[1], companies) }
-  const accion = text.match(/^(pasa|listo)\b\s*([\s\S]*)$/i)
+  const accion = text.match(/^(pasa|listo|borra)\b\s*([\s\S]*)$/i)
   if (accion) return { kind: 'accion', accion: accion[1].toLowerCase() as Accion, arg: tidy(accion[2]) }
+
+  const edicion = /^(urgente|normal|cuando|para)\b/i.test(text) ? null : parseEdicion(text, companies, today)
 
   let rest = norm(text)
   const p = takePriority(rest); rest = norm(p.text)
@@ -208,18 +266,17 @@ export function parseMensaje(raw: string, companies: CompanyRef[], today: string
   const i = takeImportante(rest); rest = norm(i.text)
   const d = takeDueDate(rest, today); rest = norm(d.text)
 
-  return {
-    kind: 'tarea',
-    tarea: {
-      text: tidy(rest),
-      priority: p.priority,
-      company_id: c.company?.id ?? null,
-      company_name: c.company?.name.trim() ?? null,
-      // Same rule as the forms and the matrix: urgente implies ★.
-      importante: i.importante || p.priority === 'urgente',
-      due_date: d.due_date,
-    },
+  const tarea: TareaParsed = {
+    text: tidy(rest),
+    priority: p.priority,
+    company_id: c.company?.id ?? null,
+    company_name: c.company?.name.trim() ?? null,
+    // Same rule as the forms and the matrix: urgente implies ★.
+    importante: i.importante || p.priority === 'urgente',
+    due_date: d.due_date,
   }
+  if (edicion) return { kind: 'edicion', termino: edicion.termino, cambios: edicion.cambios, fallback: tarea }
+  return { kind: 'tarea', tarea }
 }
 
 /** What the bot still has to ask before it can save. Order = order of questions. */
@@ -230,18 +287,21 @@ export function faltantes(t: TareaParsed): Faltante[] {
   return out
 }
 
-/** /ayuda — ten lines, everything the bot understands. */
+/** /ayuda — four short sections, at most 14 lines. */
 export function ayuda(modelo: string): string {
   return [
-    '📝 Tarea: urgente/normal/cuando [empresa] tarea [importante] [hoy · mañana · para el viernes]',
-    '↳ También "para IM: tarea"; si falta empresa o urgencia, te pregunto con botones',
-    '🎤 Voz: mándame un audio (máx 2 min); lo entiendo igual que el texto',
-    '✅ listo 3 · listo 2,5 · listo paypal: completa tareas (número de la última alarma, o palabra del título)',
-    '📅 pasa 2,5 · pasa todo · pasa paypal: las mueve a mañana',
-    '🗒 nota IM: texto (reemplaza) · nota IM + línea (agrega) · nota IM: (borra)',
-    '❓ /pregunta ¿qué tengo hoy? (o empieza con ? o ¿): te contesto con tus tareas y notas',
-    '💡 radar <idea> · ⏰ alarmas ☀️ 8:00 am y 🌙 6:00 pm, lun–sáb',
-    '🏢 Empresas: IM · DATAVIA · PD · Personal · Chelsea',
+    '📥 AGREGAR',
+    'urgente/normal/cuando [empresa] tarea [importante] [hoy · mañana · para el viernes] · o "para IM: tarea"',
+    '🎤 Por voz igual (máx 2 min) · 💡 radar <idea> · si falta algo, te pregunto con botones',
+    '✅ CERRAR / MOVER',
+    'listo 3 · listo paypal (completa) · pasa 2,5 · pasa todo · pasa paypal (a mañana) · borra 3 · borra paypal',
+    'paypal para el viernes · paypal urgente · paypal es de PD (cambia fecha, urgencia o empresa)',
+    '🗒 NOTAS',
+    'nota IM: texto (reemplaza) · nota IM + línea (agrega) · nota IM: (borra)',
+    'nota en paypal: texto (la agrega al pie de esa tarea, con fecha)',
+    '❓ PREGUNTAR',
+    '/pregunta ¿qué tengo hoy? (o empieza con ? o ¿) · te contesto con tus tareas y notas',
+    '⏰ Alarmas ☀️ 8:00 am y 🌙 6:00 pm, lun–sáb · 🏢 IM · DATAVIA · PD · Personal · Chelsea',
     `🤖 Modelo actual: ${modelo}`,
   ].join('\n')
 }

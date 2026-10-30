@@ -152,9 +152,10 @@ export async function construirContexto(now: Date = new Date()): Promise<Context
       const c = cap(cerradas)
       lines.push(`Cerradas en los últimos 7 días (${cerradas.length}):`)
       for (const t of c.items) {
-        const d = t.completed_at ? daysBetween(cancunYmd(new Date(t.completed_at)), today) : null
+        const fecha = t.completed_at ? cancunYmd(new Date(t.completed_at)) : null
+        const d = fecha ? daysBetween(fecha, today) : null
         const cuando = d === null ? '' : d === 0 ? 'hoy' : d === 1 ? 'ayer' : `hace ${d} días`
-        lines.push(`- ${t.text}${cuando ? ` [cerrada ${cuando}]` : ''}`)
+        lines.push(`- ${t.text}${fecha ? ` [cerrada ${cuando}, ${formatVenceEs(fecha)}]` : ''}`)
       }
       if (c.extra > 0) lines.push(`- (+${c.extra} más)`)
     }

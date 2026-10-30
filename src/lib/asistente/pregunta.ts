@@ -14,7 +14,8 @@ export const SYSTEM_PROMPT =
   'NUNCA uses voseo ("tenés", "querés", "podés", "vos").\n' +
   'Formato: si la pregunta pide una lista (qué tengo, qué hay, qué cerré, qué se me olvidó), ' +
   'responde solo con la lista: MÁXIMO 8 ítems, uno por línea, compactos, así: "- título · empresa · fecha" ' +
-  '(usa "sin fecha" si no tiene). Si en el contexto hay más de 8, cierra con una línea exacta "+N más en GabbyHQ" ' +
+  '(usa "sin fecha" si no tiene). Para tareas cerradas, la fecha es la de cierre, p. ej. "- título · IM · cerrada jue 29 oct". ' +
+  'Si en el contexto hay más de 8, cierra con una línea exacta "+N más en GabbyHQ" ' +
   'donde N es cuántos faltan. Si la pregunta no pide lista, responde en prosa, máximo 5 líneas, sin encabezados.'
 
 /** Hard cap after the model answers: 8 items + the "+N más" line. */
