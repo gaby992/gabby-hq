@@ -8,8 +8,8 @@ sección y **no se empieza una fase hasta validar la anterior**.
 | Fase | Qué agrega | Estado |
 | --- | --- | --- |
 | 1 | Alarmas 8:00 am y 6:00 pm | ✅ Validada |
-| 2 | Notas de voz (Whisper) | ✅ Construida — pendiente de validar |
-| 3 | `/pregunta` (Claude) | ⏳ Pendiente |
+| 2 | Notas de voz (Whisper) | ✅ Validada |
+| 3 | `/pregunta` (LLM) | ✅ Construida — pendiente de validar |
 | 4 | Google Calendar | ⏳ Pendiente |
 
 ---
@@ -33,6 +33,13 @@ Hay dos direcciones de tráfico:
                                           ┌───────────────┐
                                           │ OpenAI Whisper │ ──▶ texto ──▶ mismo parser
                                           └───────────────┘
+                                                  │ si es /pregunta:
+                                                  │ contexto (tareas + notas) + pregunta
+                                                  ▼
+                                          ┌────────────────────┐
+                                          │ LLM (OpenAI o      │ ──▶ respuesta ≤ 5 líneas
+                                          │ Anthropic, por env)│
+                                          └────────────────────┘
 
  (2) El reloj te escribe a ti
      ┌─────────────┐  GET + secret  ┌────────────────────────┐  SQL  ┌──────────┐
@@ -79,6 +86,9 @@ Archivos del asistente dentro del repo:
 | `src/lib/asistente/whisper.ts` | Audio → texto con OpenAI whisper-1 |
 | `src/lib/asistente/borradores.ts` | Tareas a medias esperando un botón (`bot_borradores`) |
 | `src/lib/asistente/tareas.ts` | Preguntas con botones, confirmación en una línea, guardado |
+| `src/lib/asistente/contexto.ts` | Arma el contexto en texto plano para `/pregunta` (sin el campo `notes`) |
+| `src/lib/asistente/llm.ts` | Llamada al modelo: OpenAI o Anthropic según `LLM_PROVIDER` |
+| `src/lib/asistente/pregunta.ts` | System prompt, timeout, respuesta y log en `bot_preguntas` |
 | `src/lib/asistente/alarmas.ts` | Arma los mensajes, los manda, reintenta, guarda la numeración |
 | `src/lib/asistente/pasa.ts` | El comando `pasa 2,5` / `pasa todo` |
 | `src/lib/asistente/telegram.ts` | Envío HTML, partición a 4000 caracteres, lista de chats permitidos |
@@ -88,6 +98,8 @@ Archivos del asistente dentro del repo:
 | `sql/2026-10-asistente-fase1-pruebas.sql` | Pruebas con rollback de la fase 1 (correr después, en otra query) |
 | `sql/2026-10-asistente-fase2.sql` | Migración de la fase 2 (correr en una query) |
 | `sql/2026-10-asistente-fase2-pruebas.sql` | Prueba con rollback de la fase 2 (correr después, en otra query) |
+| `sql/2026-10-asistente-fase3.sql` | Migración de la fase 3 (correr en una query) |
+| `sql/2026-10-asistente-fase3-pruebas.sql` | Prueba con rollback de la fase 3 + consulta de costos |
 
 ---
 
@@ -387,8 +399,7 @@ que si lo hubieras tecleado:
 4. Audios de más de **2 minutos** no se procesan: "Mándame un audio más corto
    (máx 2 min)".
 5. Si el audio empieza con "pregunta" o con "¿" ("¿qué tengo hoy?"), no es
-   una tarea: por ahora responde "Eso lo entenderé en la siguiente fase 🙂".
-   La fase 3 lo conectará con Claude.
+   una tarea: es una pregunta y la contesta la fase 3.
 
 **Confirmación, siempre en una sola línea**
 
@@ -517,9 +528,148 @@ bot, `[bot]`.
   chat los borra. La tabla nunca tiene más de una fila por chat.
 - Un audio que diga `radar …` o `pasa 2,5` funciona igual que escrito.
 
-## 3. Fase 3 — `/pregunta` (Claude)
+## 3. Fase 3 — `/pregunta` (LLM)
 
-_Pendiente._
+### 3a. Qué hace
+
+Le preguntas al bot sobre tu día y te contesta en **máximo 5 líneas**, en
+español informal, usando **solo** lo que hay en GabbyHQ. Tres formas de
+preguntar, escritas o por audio:
+
+- `/pregunta ¿qué tengo hoy?`
+- cualquier mensaje que empiece con `?` o `¿`: `¿por dónde vamos con IM?`
+- `pregunta qué cerré ayer`
+
+Cómo funciona por dentro, cada vez que preguntas:
+
+1. El bot arma un **contexto** en texto plano, en hora de Cancún, agrupado por
+   empresa (IM · DATAVIA · PD · Personal · Chelsea):
+   - fecha y hora actual, y hasta qué domingo llega "esta semana";
+   - por empresa: la nota "por dónde iba" completa; las tareas abiertas de hoy
+     (vencidas, vence hoy, urgentes/★); las del resto de la semana (con fecha
+     hasta el domingo); las cerradas en los últimos 7 días;
+   - de Chelsea, además, el **número** de correos pendientes en inbox-IM.
+   De cada tarea solo va el título, la empresa, la prioridad, la ★ y la fecha.
+   **Nunca va el campo `notes`** de las tareas: ahí viven resúmenes de correos
+   con `Ref: gmail:…` y no deben salir de la base. El contexto se recorta a
+   ~3000 tokens (notas muy largas se cortan a 1200 caracteres; listas, a 30).
+2. Manda contexto + pregunta al modelo con este system prompt:
+   > Eres el asistente personal de Gabby. Respondes en español, informal, en
+   > MÁXIMO 5 líneas. Solo usas el contexto dado; si algo no está ahí, dices
+   > que no lo tienes. Nunca inventas tareas ni fechas. Si pregunta qué hacer
+   > primero, priorizas: vencidas > vence hoy > urgente★ > urgente > ★.
+   Con `max_tokens` 300 y 20 segundos de espera máxima. Si se pasa o falla:
+   "Se me trabó, pregunta otra vez."
+3. Guarda la pregunta, la respuesta, el modelo, los tokens y los milisegundos
+   en la tabla `bot_preguntas`. Es solo un registro: sirve para ver cuánto
+   cuesta y qué preguntas contesta mal, para afinar el prompt.
+
+**Modelo y proveedor por env vars, sin tocar código**
+
+| `LLM_PROVIDER` | `LLM_MODEL` (ejemplos) | Key que usa |
+| --- | --- | --- |
+| `openai` (default) | `gpt-5-mini` (default), `gpt-5-nano`, `gpt-4o-mini` | `OPENAI_API_KEY` (la misma de la fase 2) |
+| `anthropic` | `claude-haiku-5-5`, `claude-sonnet-5-5` | `ANTHROPIC_API_KEY` (solo si cambias a Anthropic) |
+
+Para cambiar de proveedor: cambias las dos env vars (y agregas la key del
+otro), redeploy, listo. El código ya habla los dos protocolos.
+
+> La key de OpenAI puede ser de **cualquier cuenta**: la que vaya a pagar. Si
+> mañana la paga otra persona u otra empresa, creas la key en esa cuenta, la
+> pegas en Vercel sobre `OPENAI_API_KEY` y haces redeploy. Nada más cambia.
+
+**`/ayuda`**: responde en 8 líneas todo lo que el bot entiende (tareas, voz,
+`pasa`, `/pregunta`, radar, alarmas, empresas). También funciona `ayuda`,
+`help`, `formato` y `/start`.
+
+### 3b. Lo que hay que hacer a mano
+
+**Paso 1 — Correr el SQL en Supabase (dos queries, en este orden)**
+
+1. https://supabase.com → proyecto **GabbyHQ** → **SQL Editor** → **New query**.
+2. Pega `sql/2026-10-asistente-fase3.sql` completo → **Run**. Crea
+   `bot_preguntas` **sin RLS** (lo verás como `rowsecurity = false`; es a
+   propósito, para poder consultarla sin trabas desde el editor).
+3. **New query** (otra pestaña) → pega `sql/2026-10-asistente-fase3-pruebas.sql`
+   → **Run**. Inserta una fila de prueba, la muestra y hace `rollback`.
+
+**Paso 2 — Env vars en Vercel y redeploy**
+
+1. https://vercel.com → **gabby-hq** → **Settings** → **Environment Variables**.
+2. Agrega `LLM_PROVIDER` = `openai` y `LLM_MODEL` = `gpt-5-mini`. No son
+   secretas: déjalas como variables normales, en Production (y Preview si
+   quieres probar ahí). Si no las creas, el código usa esos mismos valores por
+   defecto, pero tenerlas visibles es lo que permite cambiarlas sin tocar
+   código.
+3. Verifica que `OPENAI_API_KEY` (fase 2) sigue ahí y que la key tiene permiso
+   de **Model capabilities → Write** (la misma que usa Whisper lo tiene).
+4. **Deployments** → último deploy → `⋯` → **Redeploy**.
+
+**Paso 3 (opcional) — Que Telegram muestre los comandos**
+
+Para que al escribir `/` aparezcan `/pregunta` y `/ayuda` sugeridos:
+en **@BotFather** → `/setcommands` → elige tu bot → pega:
+```
+pregunta - Pregúntame sobre tu día: /pregunta ¿qué tengo hoy?
+ayuda - Todo lo que entiendo
+```
+
+### 3c. Env vars que agrega esta fase
+
+| Nombre | De dónde sale | Ejemplo |
+| --- | --- | --- |
+| `LLM_PROVIDER` | Tú lo decides: `openai` o `anthropic`. Tipo Config, no secreta. | `openai` |
+| `LLM_MODEL` | El id del modelo en ese proveedor. Tipo Config, no secreta. | `gpt-5-mini` |
+| `ANTHROPIC_API_KEY` | **Solo si** `LLM_PROVIDER=anthropic`: console.anthropic.com → API Keys. | `sk-ant-…` |
+
+Sin key nueva mientras sigas en OpenAI: se reutiliza `OPENAI_API_KEY`.
+
+### 3d. Cómo probar que funciona
+
+Las cinco preguntas que deben funcionar. Manda cada una (escrita, o por audio
+empezando con "pregunta …") y revisa que la respuesta tenga ≤ 5 líneas y
+hable **solo** de lo que hay en la app:
+
+| # | Pregunta | Esperado |
+| --- | --- | --- |
+| 1 | `¿qué tengo hoy?` | Lista o resume las tareas vencidas, de hoy y urgentes/★, por empresa. Si no hay, lo dice. |
+| 2 | `¿por dónde vamos con IM?` | Resume la nota "por dónde iba" de IM y sus tareas abiertas. Si IM no tiene nota, dice que no la tiene. |
+| 3 | `¿qué se me olvidó esta semana?` | Las vencidas (con "hace N días") y lo que vence hasta el domingo. |
+| 4 | `¿qué cerré ayer?` | Las tareas con `completed_at` de ayer. Si cerraste una hoy y preguntas por ayer, no debe mezclarlas. |
+| 5 | `¿qué hay de Chelsea?` | Sus tareas abiertas y "N correos pendientes". Nunca el contenido de los correos. |
+
+Extra: `/pregunta` solo → el formato de uso. `/ayuda` → 8 líneas. Luego en
+Supabase → **Table Editor** → `bot_preguntas`: una fila por pregunta con
+`tokens_in` ≈ 1000–3500 y `ms` < 20000.
+
+### 3e. Qué puede fallar y dónde verlo
+
+Logs: Vercel → **Logs** → filtro `/api/telegram`; las líneas llevan
+`[pregunta]`: `ok · openai:gpt-5-mini · ctx N chars · in N · out N · N ms`
+o `error · … · motivo`. Las fallas también quedan en `bot_preguntas` con
+`respuesta` empezando por `ERROR:`.
+
+| Síntoma | Causa probable | Qué hacer |
+| --- | --- | --- |
+| Siempre "Se me trabó" y el log dice `OPENAI_API_KEY no está definida` / `ANTHROPIC_API_KEY no está definida` | Falta la key del proveedor elegido, o el redeploy. | Settings → Environment Variables → redeploy. |
+| Log: `timeout tras 20s` | El modelo tardó demasiado (raro con gpt-5-mini). | Pregunta otra vez; si es constante, prueba `gpt-5-nano`. |
+| Log: `model_not_found` / `The model … does not exist` | `LLM_MODEL` mal escrito o no disponible para esa key. | Corrige la env var; redeploy. |
+| Log: `insufficient_quota` | Sin saldo en OpenAI o tope mensual alcanzado. | Billing → Add to credit balance / Limits. |
+| Log: `LLM_PROVIDER inválido` | Valor distinto de `openai` / `anthropic`. | Corrige la env var. |
+| Responde con tareas que no existen | El modelo inventó pese al prompt. | Copia la fila de `bot_preguntas` y ajusta `SYSTEM_PROMPT` en `src/lib/asistente/pregunta.ts`. |
+| Responde "no tengo esa información" a algo que sí está | El contexto se recortó (más de ~3000 tokens) o la tarea no entra en hoy/semana/7 días. | Revisa `ctx N chars` en el log; acorta las notas "por dónde iba". |
+| Responde pero no queda fila en `bot_preguntas` | No se corrió el SQL. El log dice `bot_preguntas insert: relation … does not exist`. | Paso 1. |
+| Habla de correos de Chelsea con detalle | No debería poder: solo recibe el número. Si pasa, revisa `contexto.ts`. | Reporta. |
+
+**Comportamientos que conviene saber**
+
+- Cada pregunta manda todo el contexto de nuevo (no hay memoria entre
+  preguntas): "¿y de DATAVIA?" sin más contexto no sabe a qué te refieres.
+- Con los modelos gpt-5 el código manda `reasoning_effort: minimal` para que
+  no gaste los 300 tokens pensando y conteste vacío. Con otros modelos no se
+  manda.
+- Una pregunta por audio pasa primero por Whisper y luego por el LLM: puede
+  tardar 5–10 s en total.
 
 ## 4. Fase 4 — Google Calendar
 
@@ -556,8 +706,8 @@ El código es el mismo repo.
 3. **SQL Editor**: crea las tablas base de GabbyHQ (`companies`, `tasks`,
    `subtasks`, `radar`, `api_keys`) y corre en orden todos los archivos de
    `sql/` del repo, incluidos `sql/2026-10-asistente-fase1.sql` y
-   `sql/2026-10-asistente-fase2.sql` (y sus pruebas en queries aparte, ver 1b
-   y 2b Paso 1).
+   `sql/2026-10-asistente-fase2.sql` y `sql/2026-10-asistente-fase3.sql` (y
+   sus pruebas en queries aparte, ver 1b, 2b y 3b Paso 1).
 4. En la app, en **Settings**, crea las empresas con los nombres que esa
    persona use. El orden fijo de la alarma (IM · DATAVIA · PD · Personal ·
    Chelsea) está en `EMPRESAS_ORDEN` dentro de `src/lib/asistente/alarmas.ts`;
@@ -572,7 +722,8 @@ El código es el mismo repo.
    `TELEGRAM_BOT_TOKEN`, `ALLOWED_CHAT_IDS`, `APP_URL` (la URL que Vercel le
    asigne, p. ej. `https://chelsea-hq.vercel.app`), `CRON_SECRET` (nuevo,
    `openssl rand -hex 32`), `OPENAI_API_KEY` (una key propia, con su tope de
-   gasto, ver 2b), `NEXT_PUBLIC_SUPABASE_URL`,
+   gasto, ver 2b), `LLM_PROVIDER` y `LLM_MODEL` (ver 3c),
+   `NEXT_PUBLIC_SUPABASE_URL`,
    `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`,
    `ADMIN_PASSWORD` y `API_SECRET_SEED` (login de la app), y si usa inbox-IM,
    `SUPABASE_INBOXIM_URL` y `SUPABASE_INBOXIM_SERVICE_KEY` (si no, el bloque
@@ -614,8 +765,9 @@ verano; para una zona con DST hay que calcular el offset en vez de fijarlo).
 | Supabase | 1 | $0 | Dentro del plan actual; `bot_alarmas` crece ~2 filas/día. |
 | Telegram Bot API | 1 | $0 | Gratis. |
 | OpenAI Whisper (`whisper-1`) | 2 | **$0.006 USD por minuto de audio** (precio de lista a octubre 2026; se cobra por segundos, redondeado). Ejemplo: 30 audios de 30 s al mes = 15 min = **$0.09 USD/mes**. Con 100 audios de 1 min = $0.60. | El tope mensual de $5 en OpenAI equivale a ~830 minutos de audio: imposible de alcanzar con uso normal. |
-| Anthropic (Claude) | 3 | _se estima en la fase 3_ | Depende del modelo y de cuánto contexto se mande por pregunta. |
+| LLM para `/pregunta` (`gpt-5-mini`) | 3 | **$0.25 USD / 1M tokens de entrada · $2.00 / 1M de salida** (precio de lista a octubre 2026). Una pregunta ≈ 3000 tokens de entrada (el contexto) + 150 de salida ≈ **$0.0011 USD**. Ejemplo: 20 preguntas al día × 30 días = 600 preguntas ≈ **$0.65 USD/mes**. | Si el contexto es corto (pocas tareas), baja a la mitad. Con `gpt-5-nano` cuesta ~5× menos; con Anthropic (`claude-haiku-5-5`) algo más. La consulta de costo real del mes está al final de `sql/2026-10-asistente-fase3-pruebas.sql`. |
 | Google Calendar API | 4 | $0 | Gratis dentro de las cuotas normales. |
 
 **Fase 1 total: $0 adicionales** sobre lo que ya se paga.
 **Fase 2 total: ~$0.10 USD/mes** con uso normal (requiere saldo prepagado en OpenAI, mínimo $5).
+**Fase 3 total: ~$0.65 USD/mes** con 20 preguntas al día. Sale del mismo saldo y del mismo tope de $5 de OpenAI.

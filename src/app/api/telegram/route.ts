@@ -19,16 +19,17 @@ import {
   nonceDe,
 } from '@/lib/asistente/borradores'
 import { cargarEmpresas, confirmacion, guardarTarea, pregunta } from '@/lib/asistente/tareas'
+import { responderPregunta } from '@/lib/asistente/pregunta'
 import type { Priority } from '@/types'
 
 // Telegram → here (webhook). Text, voice notes and inline-button taps all end
 // up in the same place: parseMensaje() → save, or ask for what is missing.
-// A voice note needs a round trip to Whisper, so give the function some room.
+// A voice note needs a round trip to Whisper, and a question one to the LLM
+// (20 s cap), so give the function some room.
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 export const maxDuration = 60
 
-const FASE_3 = 'Eso lo entenderé en la siguiente fase 🙂'
 const ERROR_GENERICO = 'Error al procesar. Intenta de nuevo.'
 
 // Plain-text reply. The shared helper throws on a Telegram error (the alarms
@@ -80,8 +81,8 @@ async function handleText(chatId: number, text: string, prefix: string | null) {
       await reply(chatId, AYUDA)
       return
     case 'pregunta':
-      // Fase 3 will answer these; until then, say so.
-      await reply(chatId, joinLines(prefix, FASE_3))
+      // Fase 3: context + LLM, ≤5 lines, logged in bot_preguntas.
+      await reply(chatId, joinLines(prefix, await responderPregunta(chatId, parsed.texto)))
       return
     case 'radar': {
       if (!parsed.titulo) {

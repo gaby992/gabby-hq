@@ -99,7 +99,7 @@ async function loadDoneToday(today: string): Promise<{ tasks: Task[]; companies:
  * uses — the cron has no session cookie, so it cannot go through that route.
  * Returns null when inbox-IM is unreachable; the alarm still goes out.
  */
-async function countChelseaMail(): Promise<number | null> {
+export async function countChelseaMail(): Promise<number | null> {
   try {
     const inbox = createInboxClient()
     const { count, error } = await inbox

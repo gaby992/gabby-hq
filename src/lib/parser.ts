@@ -8,8 +8,8 @@
 //   para <empresa>: tarea            (also without the colon)
 //   tarea … <empresa>  /  tarea … hoy   (company or date at the end — voice says it that way)
 //   radar <descripción>
-//   ? <pregunta>  /  pregunta <…>     (handed to phase 3 when it exists)
-//   ayuda / help / formato / /start
+//   /pregunta <…>  /  ? <pregunta>  /  ¿…?  /  pregunta <…>   (answered by the LLM)
+//   /ayuda / ayuda / help / formato / /start
 
 import type { Company, Priority } from '@/types'
 import { addDays } from '@/lib/asistente/cancun'
@@ -147,9 +147,12 @@ export function parseMensaje(raw: string, companies: CompanyRef[], today: string
   const text = raw.trim()
   const lower = text.toLowerCase()
 
-  if (/^(?:\/start|\/help|ayuda|help|formato)\b/i.test(lower)) return { kind: 'ayuda' }
-  if (/^[?¿]/.test(text) || /^pregunta\b/i.test(text)) {
-    return { kind: 'pregunta', texto: tidy(text.replace(/^[?¿]+|^pregunta\b/i, '')) }
+  if (/^(?:\/start|\/help|\/ayuda|ayuda|help|formato)\b/i.test(lower)) return { kind: 'ayuda' }
+  if (/^[?¿]/.test(text) || /^\/?pregunta\b/i.test(text)) {
+    // Keep the question as asked (its "¿…?" included) — only drop the trigger.
+    // "? qué cerré ayer" → "qué cerré ayer"; "¿qué tengo hoy?" stays whole.
+    const texto = /^¿/.test(text) ? text : tidy(text.replace(/^\?+|^\/?pregunta\b/i, ''))
+    return { kind: 'pregunta', texto }
   }
   const radar = text.match(/^radar\b\s*([\s\S]*)$/i)
   if (radar) return { kind: 'radar', titulo: tidy(radar[1]) }
@@ -182,12 +185,14 @@ export function faltantes(t: TareaParsed): Faltante[] {
   return out
 }
 
-export const AYUDA =
-  'Escríbeme o mándame un audio:\n' +
-  '  urgente/normal/cuando [empresa] tarea [importante] [hoy · mañana · para el viernes]\n' +
-  '  para <empresa>: tarea\n' +
-  '  radar descripción\n' +
-  '  pasa 2,5 · pasa todo (mueve a mañana lo numerado en la última alarma)\n\n' +
-  'Si falta la empresa o la urgencia, te pregunto con botones.\n' +
-  '★ Importante: di "importante" en la tarea\n' +
-  'Empresas: IM · DATAVIA · PD · Personal · Chelsea'
+/** /ayuda — eight lines, everything the bot understands. */
+export const AYUDA = [
+  '📝 Tarea: urgente/normal/cuando [empresa] tarea [importante] [hoy · mañana · para el viernes]',
+  '↳ También "para IM: tarea" o la empresa/urgencia al final; si falta algo, te pregunto con botones',
+  '🎤 Voz: mándame un audio (máx 2 min) y lo entiendo igual que el texto',
+  '📅 pasa 2,5 · pasa todo: mueve a mañana lo numerado en la última alarma',
+  '❓ /pregunta ¿qué tengo hoy? (o empieza con ? o ¿): te contesto con tus tareas y notas',
+  '💡 radar <idea>: la guarda en Radar',
+  '⏰ Alarmas: ☀️ 8:00 am y 🌙 6:00 pm, lunes a sábado',
+  '🏢 Empresas: IM · DATAVIA · PD · Personal · Chelsea',
+].join('\n')
