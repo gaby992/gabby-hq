@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { isAllowedChat, sendTelegram } from '@/lib/asistente/telegram'
+import { esComandoPasa, manejarPasa } from '@/lib/asistente/pasa'
 
 const PRIORITIES = ['urgente', 'normal', 'cuando'] as const
 type Priority = (typeof PRIORITIES)[number]
@@ -74,12 +76,14 @@ function extractImportante(text: string): { importante: boolean; cleaned: string
 // keywords, so "urgente Chelsea …" keeps its old meaning.
 const PARA_EMPRESA = /^para\s+([^:]+):\s*(.+)$/i
 
+// Plain-text reply. The shared helper throws on a Telegram error (the alarms
+// need that to retry); here a failed reply is only worth a log line.
 async function sendMessage(chatId: number, text: string) {
-  await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text }),
-  })
+  try {
+    await sendTelegram(chatId, text, { tag: 'bot' })
+  } catch {
+    /* already logged by sendTelegram */
+  }
 }
 
 export async function POST(request: Request) {
@@ -90,12 +94,26 @@ export async function POST(request: Request) {
   }
 
   const chatId: number = message.chat.id
+
+  // The bot obeys only the chats listed in ALLOWED_CHAT_IDS. Anyone else gets
+  // a one-liner and nothing is read or written — this is what makes the same
+  // deployment safe to point a second bot (Chelsea's) at later.
+  if (!isAllowedChat(chatId)) {
+    console.warn(`[bot] chat no autorizado: ${chatId}`)
+    await sendMessage(chatId, 'No autorizado')
+    return NextResponse.json({ ok: true })
+  }
+
   const text: string = message.text.trim()
   const words = text.split(/\s+/)
   const first = words[0].toLowerCase()
 
   try {
-    if (first === 'radar') {
+    if (esComandoPasa(text)) {
+      // Fase 1e: "pasa 2,5" / "pasa todo" — numbers from the last alarm.
+      await sendMessage(chatId, await manejarPasa(text))
+
+    } else if (first === 'radar') {
       const titulo = words.slice(1).join(' ')
       if (!titulo) {
         await sendMessage(chatId, 'Uso: radar <descripción>')
@@ -178,12 +196,12 @@ export async function POST(request: Request) {
     } else {
       await sendMessage(
         chatId,
-        'Formato:\n  urgente/normal/cuando [empresa] tarea [importante] [para el viernes]\n  para <empresa>: tarea\n  radar descripción\n\nFechas: hoy · mañana · para el <día> · due <weekday>\n★ Importante: escribe "importante" en la tarea\nEmpresas: IM · DATAVIA · PD · Personal · Chelsea'
+        'Formato:\n  urgente/normal/cuando [empresa] tarea [importante] [para el viernes]\n  para <empresa>: tarea\n  radar descripción\n  pasa 2,5 · pasa todo (mueve a mañana lo numerado en la última alarma)\n\nFechas: hoy · mañana · para el <día> · due <weekday>\n★ Importante: escribe "importante" en la tarea\nEmpresas: IM · DATAVIA · PD · Personal · Chelsea'
       )
     }
   } catch (err) {
     console.error('Telegram bot error:', err)
-    await sendMessage(chatId, 'Error al guardar. Intenta de nuevo.')
+    await sendMessage(chatId, 'Error al procesar. Intenta de nuevo.')
   }
 
   return NextResponse.json({ ok: true })

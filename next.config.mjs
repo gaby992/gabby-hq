@@ -1,5 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // The "Hoy" view lives at "/" — the Telegram alarms link to /hoy because
+  // that reads better in a message, so make that address work.
+  async redirects() {
+    return [{ source: '/hoy', destination: '/', permanent: false }]
+  },
   async headers() {
     return [
       {

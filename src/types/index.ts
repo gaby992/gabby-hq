@@ -29,6 +29,8 @@ export interface Task {
   link_url: string | null
   link_label: string | null
   done: boolean
+  /** Set by a DB trigger when `done` flips to true, cleared when it flips back. */
+  completed_at?: string | null
   created_at: string
   company?: Company
   subtasks?: Subtask[]
