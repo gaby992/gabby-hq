@@ -8,6 +8,9 @@
 //   para <empresa>: tarea            (also without the colon)
 //   tarea … <empresa>  /  tarea … hoy   (company or date at the end — voice says it that way)
 //   radar <descripción>
+//   nota IM: texto  /  nota IM + línea  /  nota IM:        (replace / append / delete)
+//   listo 3  /  listo 2,5  /  listo paypal                  (complete, by alarm number or title)
+//   pasa 2,5  /  pasa todo  /  pasa paypal                  (move to tomorrow)
 //   /pregunta <…>  /  ? <pregunta>  /  ¿…?  /  pregunta <…>   (answered by the LLM)
 //   /ayuda / ayuda / help / formato / /start
 
@@ -25,10 +28,23 @@ export interface TareaParsed {
 
 export type Faltante = 'empresa' | 'urgencia'
 
+export type NotaModo = 'reemplazar' | 'agregar' | 'borrar'
+
+export interface NotaParsed {
+  company_id: string | null
+  company_name: string | null
+  modo: NotaModo
+  texto: string
+}
+
+export type Accion = 'pasa' | 'listo'
+
 export type Parsed =
   | { kind: 'ayuda' }
   | { kind: 'pregunta'; texto: string }
   | { kind: 'radar'; titulo: string }
+  | { kind: 'nota'; nota: NotaParsed }
+  | { kind: 'accion'; accion: Accion; arg: string }
   | { kind: 'tarea'; tarea: TareaParsed }
 
 type CompanyRef = Pick<Company, 'id' | 'name'>
@@ -141,6 +157,31 @@ function takeDueDate(text: string, today: string): { due_date: string | null; te
   return { due_date: null, text }
 }
 
+// "nota IM: …" / "nota IM + …" / "nota IM:" — company first, then the mode.
+// Voice says "más" for "+", so that works too right after the company.
+function parseNota(rest: string, companies: CompanyRef[]): NotaParsed {
+  let company: CompanyRef | null = null
+  let body = rest.trim()
+  if (companies.length > 0) {
+    const sorted = [...companies].sort((a, b) => b.name.length - a.name.length)
+    const names = sorted.map((c) => escapeRe(c.name.trim())).join('|')
+    const m = body.match(new RegExp(`^(${names})\\b\\s*([\\s\\S]*)$`, 'i'))
+    if (m) {
+      company = sorted.find((c) => c.name.trim().toLowerCase() === m[1].toLowerCase()) ?? null
+      body = m[2].trim()
+    }
+  }
+  const base = { company_id: company?.id ?? null, company_name: company?.name.trim() ?? null }
+  let m = body.match(/^(?:\+|más\b)\s*([\s\S]*)$/i)
+  if (m) return { ...base, modo: 'agregar', texto: m[1].trim() }
+  m = body.match(/^:\s*([\s\S]*)$/)
+  if (m) {
+    const texto = m[1].trim()
+    return { ...base, modo: texto ? 'reemplazar' : 'borrar', texto }
+  }
+  return { ...base, modo: 'reemplazar', texto: body }
+}
+
 // ── Entry point ─────────────────────────────────────────────────────────
 
 export function parseMensaje(raw: string, companies: CompanyRef[], today: string): Parsed {
@@ -156,6 +197,10 @@ export function parseMensaje(raw: string, companies: CompanyRef[], today: string
   }
   const radar = text.match(/^radar\b\s*([\s\S]*)$/i)
   if (radar) return { kind: 'radar', titulo: tidy(radar[1]) }
+  const nota = text.match(/^nota\b\s*([\s\S]*)$/i)
+  if (nota) return { kind: 'nota', nota: parseNota(nota[1], companies) }
+  const accion = text.match(/^(pasa|listo)\b\s*([\s\S]*)$/i)
+  if (accion) return { kind: 'accion', accion: accion[1].toLowerCase() as Accion, arg: tidy(accion[2]) }
 
   let rest = norm(text)
   const p = takePriority(rest); rest = norm(p.text)
@@ -185,14 +230,18 @@ export function faltantes(t: TareaParsed): Faltante[] {
   return out
 }
 
-/** /ayuda — eight lines, everything the bot understands. */
-export const AYUDA = [
-  '📝 Tarea: urgente/normal/cuando [empresa] tarea [importante] [hoy · mañana · para el viernes]',
-  '↳ También "para IM: tarea" o la empresa/urgencia al final; si falta algo, te pregunto con botones',
-  '🎤 Voz: mándame un audio (máx 2 min) y lo entiendo igual que el texto',
-  '📅 pasa 2,5 · pasa todo: mueve a mañana lo numerado en la última alarma',
-  '❓ /pregunta ¿qué tengo hoy? (o empieza con ? o ¿): te contesto con tus tareas y notas',
-  '💡 radar <idea>: la guarda en Radar',
-  '⏰ Alarmas: ☀️ 8:00 am y 🌙 6:00 pm, lunes a sábado',
-  '🏢 Empresas: IM · DATAVIA · PD · Personal · Chelsea',
-].join('\n')
+/** /ayuda — ten lines, everything the bot understands. */
+export function ayuda(modelo: string): string {
+  return [
+    '📝 Tarea: urgente/normal/cuando [empresa] tarea [importante] [hoy · mañana · para el viernes]',
+    '↳ También "para IM: tarea"; si falta empresa o urgencia, te pregunto con botones',
+    '🎤 Voz: mándame un audio (máx 2 min); lo entiendo igual que el texto',
+    '✅ listo 3 · listo 2,5 · listo paypal: completa tareas (número de la última alarma, o palabra del título)',
+    '📅 pasa 2,5 · pasa todo · pasa paypal: las mueve a mañana',
+    '🗒 nota IM: texto (reemplaza) · nota IM + línea (agrega) · nota IM: (borra)',
+    '❓ /pregunta ¿qué tengo hoy? (o empieza con ? o ¿): te contesto con tus tareas y notas',
+    '💡 radar <idea> · ⏰ alarmas ☀️ 8:00 am y 🌙 6:00 pm, lun–sáb',
+    '🏢 Empresas: IM · DATAVIA · PD · Personal · Chelsea',
+    `🤖 Modelo actual: ${modelo}`,
+  ].join('\n')
+}

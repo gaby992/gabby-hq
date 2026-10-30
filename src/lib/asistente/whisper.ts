@@ -1,7 +1,10 @@
 // Voice note → text, through OpenAI's transcription endpoint (whisper-1).
 // Plain fetch + FormData: no SDK, no new dependency.
 
+import { avisarOpenAI, clasificarErrorOpenAI } from './openai-avisos'
+
 const OPENAI_URL = 'https://api.openai.com/v1/audio/transcriptions'
+const WHISPER_MODEL = 'whisper-1'
 
 /** Telegram voice notes are .ogg/opus; whisper-1 accepts them as-is. */
 export const MAX_AUDIO_SECONDS = 120
@@ -20,7 +23,7 @@ export async function transcribirAudio(bytes: ArrayBuffer, filename: string): Pr
 
   const form = new FormData()
   form.append('file', new Blob([bytes]), filename)
-  form.append('model', 'whisper-1')
+  form.append('model', WHISPER_MODEL)
   form.append('language', 'es')
   form.append('prompt', PROMPT)
   form.append('response_format', 'json')
@@ -32,9 +35,11 @@ export async function transcribirAudio(bytes: ArrayBuffer, filename: string): Pr
   })
   const json = await res.json().catch(() => null)
   if (!res.ok) {
-    const reason = json?.error?.message ?? `HTTP ${res.status}`
-    console.error(`[voz] whisper error: ${reason}`)
-    throw new WhisperError(reason)
+    const err = clasificarErrorOpenAI(res.status, json)
+    console.error(`[voz] whisper error (${err.kind}): ${err.message}`)
+    // Retired model, bad key, no credit: Gabby hears about it once a day.
+    await avisarOpenAI(err, WHISPER_MODEL)
+    throw new WhisperError(err.message)
   }
   const text = String(json?.text ?? '').trim()
   console.log(`[voz] whisper ok · ${filename} · ${bytes.byteLength} bytes · ${text.length} chars`)

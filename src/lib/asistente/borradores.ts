@@ -4,7 +4,16 @@
 // message replaces whatever was pending.
 
 import { createServerClient } from '@/lib/supabase-server'
-import type { TareaParsed } from '@/lib/parser'
+import type { Accion, NotaParsed, TareaParsed } from '@/lib/parser'
+
+/**
+ * What waits in a draft. Tasks are stored flat (the phase 2 shape, no `tipo`);
+ * notes and actions carry a discriminator.
+ */
+export type BorradorParsed =
+  | (TareaParsed & { tipo?: 'tarea' })
+  | { tipo: 'nota'; nota: NotaParsed }
+  | { tipo: 'accion'; accion: Accion; candidatos: string[] }
 
 export const BORRADOR_TTL_MS = 10 * 60 * 1000
 
@@ -12,7 +21,7 @@ export interface Borrador {
   id: string
   chat_id: number
   texto: string
-  parsed: TareaParsed
+  parsed: BorradorParsed
   created_at: string
 }
 
@@ -21,7 +30,7 @@ export function nonceDe(id: string): string {
   return id.replace(/-/g, '').slice(0, 8)
 }
 
-export async function crearBorrador(chatId: number, texto: string, parsed: TareaParsed): Promise<Borrador> {
+export async function crearBorrador(chatId: number, texto: string, parsed: BorradorParsed): Promise<Borrador> {
   const db = createServerClient()
   // One live draft per chat.
   await db.from('bot_borradores').delete().eq('chat_id', chatId)
@@ -50,7 +59,7 @@ export async function borradorVigente(chatId: number): Promise<Borrador | null> 
   return data
 }
 
-export async function actualizarBorrador(id: string, parsed: TareaParsed): Promise<void> {
+export async function actualizarBorrador(id: string, parsed: BorradorParsed): Promise<void> {
   const db = createServerClient()
   const { error } = await db.from('bot_borradores').update({ parsed }).eq('id', id)
   if (error) throw new Error(`Supabase bot_borradores: ${error.message}`)

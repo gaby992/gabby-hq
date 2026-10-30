@@ -9,7 +9,8 @@ sección y **no se empieza una fase hasta validar la anterior**.
 | --- | --- | --- |
 | 1 | Alarmas 8:00 am y 6:00 pm | ✅ Validada |
 | 2 | Notas de voz (Whisper) | ✅ Validada |
-| 3 | `/pregunta` (LLM) | ✅ Construida — pendiente de validar |
+| 3 | `/pregunta` (LLM) | ✅ Validada |
+| 3b | Notas y `listo` por Telegram, avisos de OpenAI | ✅ Construida — pendiente de validar |
 | 4 | Google Calendar | ⏳ Pendiente |
 
 ---
@@ -90,7 +91,9 @@ Archivos del asistente dentro del repo:
 | `src/lib/asistente/llm.ts` | Llamada al modelo: OpenAI o Anthropic según `LLM_PROVIDER` |
 | `src/lib/asistente/pregunta.ts` | System prompt, timeout, respuesta y log en `bot_preguntas` |
 | `src/lib/asistente/alarmas.ts` | Arma los mensajes, los manda, reintenta, guarda la numeración |
-| `src/lib/asistente/pasa.ts` | El comando `pasa 2,5` / `pasa todo` |
+| `src/lib/asistente/acciones.ts` | `listo …` y `pasa …`: por número de la última alarma o por palabra del título |
+| `src/lib/asistente/notas-bot.ts` | `nota IM: …` desde Telegram (misma función de guardado que /hoy y /tasks) |
+| `src/lib/asistente/openai-avisos.ts` | Clasifica errores de OpenAI y avisa por Telegram una vez al día |
 | `src/lib/asistente/telegram.ts` | Envío HTML, partición a 4000 caracteres, lista de chats permitidos |
 | `src/lib/asistente/cancun.ts` | Fechas en hora de Cancún |
 | `src/lib/asistente/cron-auth.ts` | Verifica el `CRON_SECRET` |
@@ -578,8 +581,9 @@ otro), redeploy, listo. El código ya habla los dos protocolos.
 > mañana la paga otra persona u otra empresa, creas la key en esa cuenta, la
 > pegas en Vercel sobre `OPENAI_API_KEY` y haces redeploy. Nada más cambia.
 
-**`/ayuda`**: responde en 8 líneas todo lo que el bot entiende (tareas, voz,
-`pasa`, `/pregunta`, radar, alarmas, empresas). También funciona `ayuda`,
+**`/ayuda`**: responde en 10 líneas todo lo que el bot entiende (tareas, voz,
+`listo`, `pasa`, `nota`, `/pregunta`, radar, alarmas, empresas) y termina con
+`🤖 Modelo actual: gpt-5-mini (openai)`. También funciona `ayuda`,
 `help`, `formato` y `/start`.
 
 ### 3b. Lo que hay que hacer a mano
@@ -620,6 +624,7 @@ ayuda - Todo lo que entiendo
 | --- | --- | --- |
 | `LLM_PROVIDER` | Tú lo decides: `openai` o `anthropic`. Tipo Config, no secreta. | `openai` |
 | `LLM_MODEL` | El id del modelo en ese proveedor. Tipo Config, no secreta. | `gpt-5-mini` |
+| `LLM_MODEL_FALLBACK` | Opcional (fase 3b). Modelo de respaldo si OpenAI retira `LLM_MODEL`. Default `gpt-4o-mini`. | `gpt-4o-mini` |
 | `ANTHROPIC_API_KEY` | **Solo si** `LLM_PROVIDER=anthropic`: console.anthropic.com → API Keys. | `sk-ant-…` |
 
 Sin key nueva mientras sigas en OpenAI: se reutiliza `OPENAI_API_KEY`.
@@ -660,6 +665,91 @@ o `error · … · motivo`. Las fallas también quedan en `bot_preguntas` con
 | Responde "no tengo esa información" a algo que sí está | El contexto se recortó (más de ~3000 tokens) o la tarea no entra en hoy/semana/7 días. | Revisa `ctx N chars` en el log; acorta las notas "por dónde iba". |
 | Responde pero no queda fila en `bot_preguntas` | No se corrió el SQL. El log dice `bot_preguntas insert: relation … does not exist`. | Paso 1. |
 | Habla de correos de Chelsea con detalle | No debería poder: solo recibe el número. Si pasa, revisa `contexto.ts`. | Reporta. |
+
+### 3f. Fase 3b — notas, completar tareas, modelos retirados
+
+**Notas "por dónde iba" por Telegram** (texto o voz). Usan exactamente la
+misma función de guardado que el editor de /hoy y el panel de /tasks, así que
+lo que escribas aquí aparece allá al instante:
+
+| Dices | Pasa | Confirma |
+| --- | --- | --- |
+| `nota IM: quedé a la mitad de los PayPal, sigue abril` | **Reemplaza** la nota de IM | `📝 Nota de IM guardada (1 línea)` |
+| `nota IM + enviar TOTT reminder` (por voz: "nota IM más enviar…") | **Agrega** una línea al final de la nota de IM | `📝 Nota de IM guardada (3 líneas)` |
+| `nota IM:` (nada después) | **Borra** la nota de IM | `📝 Nota de IM borrada` |
+| `nota: quedé a la mitad…` (sin empresa) | Pregunta `¿Nota de qué empresa?` con los botones de siempre | — |
+
+La empresa se busca por nombre, sin importar mayúsculas (IM · DATAVIA · PD ·
+Personal · Chelsea, o cualquiera que exista en Settings).
+
+**Completar tareas por Telegram** (texto o voz):
+
+| Dices | Pasa |
+| --- | --- |
+| `listo 3` / `listo 2,5` | Completa esas tareas, por su número en la **última alarma** (igual que `pasa`) |
+| `listo paypal` | Busca «paypal» en los títulos de las tareas abiertas, sin acentos ni mayúsculas. 1 coincidencia → la completa. 2 a 5 → botones para escoger. 0 → `No encontré ninguna tarea con «paypal»`. Más de 5 → pide algo más específico. |
+| `pasa paypal` | Lo mismo, pero la mueve a mañana |
+
+Al completar: `done = true` (el trigger de la fase 1 pone `completed_at`) y
+confirma `✅ Hecha: «paypal statements Mar and Apr» · IM`. No existe
+`listo todo` a propósito: cerrar toda la alarma de un golpe es demasiado fácil
+de mandar por error.
+
+**Ajustes a `/pregunta`**
+
+- El system prompt pide español neutro con tuteo ("tienes", "quieres") y
+  prohíbe el voseo ("tenés", "querés").
+- Prosa: máximo 5 líneas. Si la pregunta pide una lista ("qué tengo", "qué
+  cerré"): máximo 8 ítems en formato `- título · empresa · fecha` y, si hay
+  más, una última línea `+N más en GabbyHQ → https://gabby-hq.vercel.app/hoy`.
+  El código recorta a 9 líneas por si el modelo se pasa.
+
+**Modelos retirados, key inválida, sin saldo**
+
+OpenAI cambia nombres de modelos sin avisar. Qué hace el bot cuando OpenAI
+responde error:
+
+| OpenAI dice | El bot hace |
+| --- | --- |
+| "model not found" para `LLM_MODEL` | Reintenta **una vez** con `LLM_MODEL_FALLBACK` (por defecto `gpt-4o-mini`) y te contesta con ese. Además manda a Telegram, **una sola vez al día**: `⚠️ El modelo gpt-5-mini ya no existe. Cambia LLM_MODEL en Vercel.` |
+| "model not found" para `whisper-1` | No hay fallback: avisa una vez al día que hay que actualizarlo en `src/lib/asistente/whisper.ts`. |
+| 401 (key inválida) | `⚠️ OpenAI: la key no es válida (…). Revisa saldo/key.` — una vez al día |
+| 429 por quota (sin saldo o tope mensual) | `⚠️ OpenAI: sin saldo o tope mensual alcanzado (…). Revisa saldo/key.` — una vez al día |
+
+**Qué hacer cuando OpenAI retire un modelo**: Vercel → **gabby-hq** →
+**Settings** → **Environment Variables** → edita `LLM_MODEL` con el nombre
+nuevo (lo ves en https://platform.openai.com/docs/models) → **Save** →
+**Deployments** → `⋯` → **Redeploy**. Sin tocar código. Mientras tanto el
+bot sigue contestando con el modelo de respaldo.
+
+La marca de "ya avisé hoy" se guarda en `bot_preguntas` (filas con `chat_id`
+0 y `pregunta` que empieza con `⚠️aviso:`), no en `bot_alarmas`: esa tabla
+tiene un CHECK que solo admite `manana`/`tarde` y cambiarlo sería un SQL
+nuevo. Puedes borrar esas filas cuando quieras.
+
+**Env var opcional de esta fase**
+
+| Nombre | De dónde sale | Ejemplo |
+| --- | --- | --- |
+| `LLM_MODEL_FALLBACK` | Tú lo decides; solo si quieres un respaldo distinto de `gpt-4o-mini`. Tipo Config. | `gpt-4o-mini` |
+
+**Pruebas de la fase 3b**
+
+1. `nota IM: prueba desde Telegram` → `📝 Nota de IM guardada (1 línea)`; abre
+   /hoy y la nota de IM dice eso. Luego `nota IM + segunda línea` → `(2
+   líneas)`. Luego `nota IM:` → `📝 Nota de IM borrada` y /hoy ya no la
+   muestra.
+2. Crea dos tareas con "paypal" en el título. `listo paypal` → botones con las
+   dos; toca una → `✅ Hecha: «…» · IM`. Otra vez `listo paypal` → ahora una
+   sola coincidencia, la completa directo. `listo paypal` de nuevo → `No
+   encontré ninguna tarea con «paypal»`.
+3. Después de una alarma: `listo 1` → `✅ Hecha: «…»`. `listo 99` → "No
+   encontré el 99…".
+4. `¿qué tengo hoy?` con más de 8 tareas → 8 líneas `- título · empresa ·
+   fecha` y `+N más en GabbyHQ → …/hoy`. Nunca "tenés".
+5. Pon `LLM_MODEL=gpt-modelo-inexistente` en Vercel, redeploy, pregunta algo:
+   contesta igual (con el fallback) y llega el ⚠️. Pregunta otra vez: contesta
+   pero **no** repite el ⚠️. Regresa `LLM_MODEL` a `gpt-5-mini` y redeploy.
 
 **Comportamientos que conviene saber**
 

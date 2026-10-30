@@ -7,8 +7,10 @@ import {
   removeInlineKeyboard,
   sendTelegram,
 } from '@/lib/asistente/telegram'
-import { esComandoPasa, manejarPasa } from '@/lib/asistente/pasa'
-import { AYUDA, faltantes, parseMensaje, type TareaParsed } from '@/lib/parser'
+import { ejecutarAccion, manejarAccion } from '@/lib/asistente/acciones'
+import { ejecutarNota, USO_NOTA } from '@/lib/asistente/notas-bot'
+import { llmConfig } from '@/lib/asistente/llm'
+import { ayuda, faltantes, parseMensaje, type TareaParsed } from '@/lib/parser'
 import { cancunYmd } from '@/lib/asistente/cancun'
 import { MAX_AUDIO_SECONDS, transcribirAudio } from '@/lib/asistente/whisper'
 import {
@@ -17,6 +19,7 @@ import {
   borrarBorrador,
   crearBorrador,
   nonceDe,
+  type BorradorParsed,
 } from '@/lib/asistente/borradores'
 import { cargarEmpresas, confirmacion, guardarTarea, pregunta } from '@/lib/asistente/tareas'
 import { responderPregunta } from '@/lib/asistente/pregunta'
@@ -46,6 +49,21 @@ function joinLines(...lines: (string | null | undefined)[]): string {
   return lines.filter(Boolean).join('\n')
 }
 
+function modeloActual(): string {
+  try {
+    const c = llmConfig()
+    return `${c.model} (${c.provider})`
+  } catch {
+    return process.env.LLM_MODEL ?? 'gpt-5-mini'
+  }
+}
+
+/** A draft always starts with a fresh id; the nonce goes into the buttons. */
+async function borradorConNonce(chatId: number, texto: string, parsed: BorradorParsed): Promise<string> {
+  const b = await crearBorrador(chatId, texto, parsed)
+  return nonceDe(b.id)
+}
+
 // ── Tasks: save, or ask ──────────────────────────────────────────────────
 
 /**
@@ -70,16 +88,41 @@ async function handleText(chatId: number, text: string, prefix: string | null) {
     await reply(chatId, joinLines(prefix, 'No entendí nada. ¿Me lo repites?'))
     return
   }
-  if (esComandoPasa(text)) {
-    await reply(chatId, joinLines(prefix, await manejarPasa(text)))
-    return
-  }
-
-  const parsed = parseMensaje(text, await cargarEmpresas(), cancunYmd())
+  const companies = await cargarEmpresas()
+  const parsed = parseMensaje(text, companies, cancunYmd())
   switch (parsed.kind) {
     case 'ayuda':
-      await reply(chatId, AYUDA)
+      await reply(chatId, ayuda(modeloActual()))
       return
+    case 'accion': {
+      // "listo …" / "pasa …": by alarm number, "todo", or a word of the title.
+      // The draft only exists when there are buttons to tie to it; the nonce
+      // is minted first so the buttons can carry it.
+      const borrador = await crearBorrador(chatId, text, { tipo: 'accion', accion: parsed.accion, candidatos: [] })
+      const r = await manejarAccion(parsed.accion, parsed.arg, nonceDe(borrador.id))
+      if (r.candidatos && r.candidatos.length > 0) {
+        await actualizarBorrador(borrador.id, { tipo: 'accion', accion: parsed.accion, candidatos: r.candidatos })
+      } else {
+        await borrarBorrador(borrador.id)
+      }
+      await reply(chatId, joinLines(prefix, r.text), r.replyMarkup)
+      return
+    }
+    case 'nota': {
+      const n = parsed.nota
+      if (n.modo !== 'borrar' && !n.texto) {
+        await reply(chatId, joinLines(prefix, USO_NOTA))
+        return
+      }
+      if (!n.company_id) {
+        const nonce = await borradorConNonce(chatId, text, { tipo: 'nota', nota: n })
+        const q = pregunta('empresa', nonce, companies)
+        await reply(chatId, joinLines(prefix, '¿Nota de qué empresa?'), q.replyMarkup)
+        return
+      }
+      await reply(chatId, joinLines(prefix, await ejecutarNota(n)))
+      return
+    }
     case 'pregunta':
       // Fase 3: context + LLM, ≤5 lines, logged in bot_preguntas.
       await reply(chatId, joinLines(prefix, await responderPregunta(chatId, parsed.texto)))
@@ -148,8 +191,8 @@ async function handleCallback(cq: CallbackQuery) {
     return
   }
 
-  // "e:<nonce>:<company_id>" | "p:<nonce>:<priority>"
-  const m = String(cq.data ?? '').match(/^([ep]):([0-9a-f]{8}):(.+)$/)
+  // "e:<nonce>:<company_id>" | "p:<nonce>:<priority>" | "t:<nonce>:<task_id>"
+  const m = String(cq.data ?? '').match(/^([ept]):([0-9a-f]{8}):(.+)$/)
   if (!m) return
   const [, kind, nonce, value] = m
 
@@ -157,12 +200,36 @@ async function handleCallback(cq: CallbackQuery) {
     await removeInlineKeyboard(chatId, messageId)
     const borrador = await borradorVigente(chatId)
     if (!borrador || nonceDe(borrador.id) !== nonce) {
-      await reply(chatId, 'Ese borrador ya expiró (10 min). Mándame la tarea otra vez.')
+      await reply(chatId, 'Ese borrador ya expiró (10 min). Mándamelo otra vez.')
+      return
+    }
+    const companies = await cargarEmpresas()
+    const parsed = borrador.parsed
+
+    // ── "listo paypal" / "pasa paypal" with several matches: the chosen task ──
+    if (parsed.tipo === 'accion') {
+      if (kind !== 't' || !parsed.candidatos.includes(value)) return
+      await borrarBorrador(borrador.id)
+      await reply(chatId, await ejecutarAccion(parsed.accion, [value]))
       return
     }
 
-    const tarea: TareaParsed = { ...borrador.parsed }
-    const companies = await cargarEmpresas()
+    // ── "nota: …" without a company: the chosen company ──
+    if (parsed.tipo === 'nota') {
+      if (kind !== 'e') return
+      const c = companies.find((x) => x.id === value)
+      if (!c) {
+        await reply(chatId, 'Esa empresa ya no existe. Mándame la nota otra vez.')
+        return
+      }
+      await borrarBorrador(borrador.id)
+      await reply(chatId, await ejecutarNota({ ...parsed.nota, company_id: c.id, company_name: c.name.trim() }))
+      return
+    }
+
+    // ── A task missing company and/or priority ──
+    if (kind === 't') return
+    const tarea: TareaParsed = { ...parsed }
     if (kind === 'e') {
       const c = companies.find((x) => x.id === value)
       if (!c) {

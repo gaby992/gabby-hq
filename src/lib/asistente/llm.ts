@@ -3,6 +3,11 @@
 //   LLM_MODEL    = gpt-5-mini (default) | any model id of that provider
 // Switching to Anthropic is: set LLM_PROVIDER=anthropic, LLM_MODEL=claude-…,
 // add ANTHROPIC_API_KEY, redeploy. No code changes.
+//
+// When OpenAI retires LLM_MODEL, one retry goes to LLM_MODEL_FALLBACK
+// (default gpt-4o-mini) and Telegram gets a once-a-day warning.
+
+import { OpenAIError, avisarOpenAI, clasificarErrorOpenAI } from './openai-avisos'
 
 export type LlmProvider = 'openai' | 'anthropic'
 
@@ -17,13 +22,14 @@ export interface LlmResult {
 
 export class LlmError extends Error {}
 
-export function llmConfig(): { provider: LlmProvider; model: string } {
+export function llmConfig(): { provider: LlmProvider; model: string; fallback: string } {
   const provider = (process.env.LLM_PROVIDER ?? 'openai').trim().toLowerCase()
   if (provider !== 'openai' && provider !== 'anthropic') {
     throw new LlmError(`LLM_PROVIDER inválido: "${provider}" (usa openai o anthropic)`)
   }
   const model = (process.env.LLM_MODEL ?? 'gpt-5-mini').trim()
-  return { provider, model }
+  const fallback = (process.env.LLM_MODEL_FALLBACK ?? 'gpt-4o-mini').trim()
+  return { provider, model, fallback }
 }
 
 interface Opts {
@@ -71,7 +77,7 @@ async function openai(model: string, system: string, user: string, o: Opts) {
     o.timeoutMs
   )
   const json = await res.json().catch(() => null)
-  if (!res.ok) throw new LlmError(json?.error?.message ?? `OpenAI HTTP ${res.status}`)
+  if (!res.ok) throw clasificarErrorOpenAI(res.status, json)
   return {
     text: String(json?.choices?.[0]?.message?.content ?? '').trim(),
     tokensIn: Number(json?.usage?.prompt_tokens ?? 0),
@@ -113,8 +119,32 @@ async function anthropic(model: string, system: string, user: string, o: Opts) {
 }
 
 export async function preguntarLlm(system: string, user: string, o: Opts): Promise<LlmResult> {
-  const { provider, model } = llmConfig()
+  const { provider, model, fallback } = llmConfig()
   const t0 = Date.now()
-  const r = provider === 'anthropic' ? await anthropic(model, system, user, o) : await openai(model, system, user, o)
-  return { ...r, provider, model, ms: Date.now() - t0 }
+  if (provider === 'anthropic') {
+    const r = await anthropic(model, system, user, o)
+    return { ...r, provider, model, ms: Date.now() - t0 }
+  }
+
+  try {
+    const r = await openai(model, system, user, o)
+    return { ...r, provider, model, ms: Date.now() - t0 }
+  } catch (err) {
+    if (!(err instanceof OpenAIError)) throw err
+    // Key or credit problems: warn (once a day) and give up — a fallback
+    // model would hit the same wall.
+    if (err.kind !== 'model_not_found' || fallback === model) {
+      await avisarOpenAI(err, model)
+      throw err
+    }
+    console.warn(`[llm] ${model} no existe (${err.message}); reintento con ${fallback}`)
+    await avisarOpenAI(err, model)
+    try {
+      const r = await openai(fallback, system, user, o)
+      return { ...r, provider, model: fallback, ms: Date.now() - t0 }
+    } catch (err2) {
+      if (err2 instanceof OpenAIError) await avisarOpenAI(err2, fallback)
+      throw err2
+    }
+  }
 }
