@@ -64,6 +64,8 @@ interface SendOptions {
   html?: boolean
   /** Shows up in the Vercel log line so a failure can be traced to its alarm. */
   tag?: string
+  /** Inline keyboard etc. Attached to the last part when the text is split. */
+  replyMarkup?: unknown
 }
 
 /**
@@ -80,6 +82,7 @@ export async function sendTelegram(chatId: number, text: string, opts: SendOptio
       disable_web_page_preview: true,
     }
     if (opts.html) body.parse_mode = 'HTML'
+    if (opts.replyMarkup && i === parts.length - 1) body.reply_markup = opts.replyMarkup
 
     let res: Response
     try {
@@ -106,4 +109,56 @@ export async function sendTelegram(chatId: number, text: string, opts: SendOptio
     }
     console.log(`[${tag}] telegram ok chat=${chatId} parte ${i + 1}/${parts.length} (${parts[i].length} chars)`)
   }
+}
+
+// ── Inline buttons ───────────────────────────────────────────────────────
+
+export interface InlineButton {
+  text: string
+  callback_data: string // Telegram caps this at 64 bytes
+}
+
+export function inlineKeyboard(rows: InlineButton[][]): { inline_keyboard: InlineButton[][] } {
+  return { inline_keyboard: rows }
+}
+
+/** Stops the "loading" spinner on the button the user tapped. Best-effort. */
+export async function answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void> {
+  try {
+    await fetch(`${API()}/answerCallbackQuery`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ callback_query_id: callbackQueryId, text }),
+    })
+  } catch (err) {
+    console.error(`[bot] answerCallbackQuery: ${String(err)}`)
+  }
+}
+
+/** Removes the buttons from a question already answered. Best-effort. */
+export async function removeInlineKeyboard(chatId: number, messageId: number): Promise<void> {
+  try {
+    await fetch(`${API()}/editMessageReplyMarkup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } }),
+    })
+  } catch (err) {
+    console.error(`[bot] editMessageReplyMarkup: ${String(err)}`)
+  }
+}
+
+// ── Files (voice notes) ──────────────────────────────────────────────────
+
+/** getFile + download. Throws with a readable reason on any failure. */
+export async function downloadTelegramFile(fileId: string): Promise<{ bytes: ArrayBuffer; path: string }> {
+  const meta = await fetch(`${API()}/getFile?file_id=${encodeURIComponent(fileId)}`)
+  const json = await meta.json().catch(() => null)
+  if (!meta.ok || !json?.ok || !json.result?.file_path) {
+    throw new TelegramError(meta.status, json?.description ?? 'getFile sin file_path')
+  }
+  const path: string = json.result.file_path
+  const file = await fetch(`https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${path}`)
+  if (!file.ok) throw new TelegramError(file.status, `descarga de ${path}`)
+  return { bytes: await file.arrayBuffer(), path }
 }

@@ -7,6 +7,7 @@ export const CANCUN_TZ = 'America/Cancun'
 const CANCUN_OFFSET = '-05:00'
 
 const DIAS_ES = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado']
+const DIAS_CORTOS_ES = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb']
 const MESES_ES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
 
 /** 'YYYY-MM-DD' of the current civil date in Cancún. */
@@ -53,4 +54,11 @@ export function formatDiaLargoEs(ymd: string): string {
 export function formatCortoEs(ymd: string): string {
   const [, m, d] = ymd.split('-').map(Number)
   return `${d} ${MESES_ES[m - 1]}`
+}
+
+/** '2026-11-01' → 'vie 1 nov' — the confirmation one-liner. */
+export function formatVenceEs(ymd: string): string {
+  const [y, m, d] = ymd.split('-').map(Number)
+  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay()
+  return `${DIAS_CORTOS_ES[dow]} ${d} ${MESES_ES[m - 1]}`
 }

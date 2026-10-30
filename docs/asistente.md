@@ -7,8 +7,8 @@ sección y **no se empieza una fase hasta validar la anterior**.
 
 | Fase | Qué agrega | Estado |
 | --- | --- | --- |
-| 1 | Alarmas 8:00 am y 6:00 pm | ✅ Construida — pendiente de validar |
-| 2 | Notas de voz (Whisper) | ⏳ Pendiente |
+| 1 | Alarmas 8:00 am y 6:00 pm | ✅ Validada |
+| 2 | Notas de voz (Whisper) | ✅ Construida — pendiente de validar |
 | 3 | `/pregunta` (Claude) | ⏳ Pendiente |
 | 4 | Google Calendar | ⏳ Pendiente |
 
@@ -23,11 +23,16 @@ ruta más de esa misma app. Nada vive en n8n ni en otro servidor.
 Hay dos direcciones de tráfico:
 
 ```
- (1) Tú escribes al bot
+ (1) Tú escribes (o hablas) al bot
      ┌──────────┐   webhook (HTTPS)   ┌───────────────────────┐   SQL   ┌──────────┐
      │ Telegram │ ──────────────────▶ │ Vercel · /api/telegram │ ──────▶ │ Supabase │
-     └──────────┘ ◀────────────────── └───────────────────────┘ ◀────── └──────────┘
-                    respuesta del bot
+     └──────────┘ ◀────────────────── └───────────┬───────────┘ ◀────── └──────────┘
+                    respuesta del bot             │ si es audio:
+                    (texto o botones)             │ descarga el .ogg y lo manda a
+                                                  ▼
+                                          ┌───────────────┐
+                                          │ OpenAI Whisper │ ──▶ texto ──▶ mismo parser
+                                          └───────────────┘
 
  (2) El reloj te escribe a ti
      ┌─────────────┐  GET + secret  ┌────────────────────────┐  SQL  ┌──────────┐
@@ -69,7 +74,11 @@ Archivos del asistente dentro del repo:
 | `vercel.json` | Los dos horarios del Cron |
 | `src/app/api/asistente/manana/route.ts` | Alarma de las 8:00 |
 | `src/app/api/asistente/tarde/route.ts` | Alarma de las 6:00 pm |
-| `src/app/api/telegram/route.ts` | Webhook del bot (comandos, incluido `pasa`) |
+| `src/app/api/telegram/route.ts` | Webhook del bot: texto, audios, botones, `pasa` |
+| `src/lib/parser.ts` | El único parser de mensajes (texto y voz): empresa, urgencia, ★, fecha |
+| `src/lib/asistente/whisper.ts` | Audio → texto con OpenAI whisper-1 |
+| `src/lib/asistente/borradores.ts` | Tareas a medias esperando un botón (`bot_borradores`) |
+| `src/lib/asistente/tareas.ts` | Preguntas con botones, confirmación en una línea, guardado |
 | `src/lib/asistente/alarmas.ts` | Arma los mensajes, los manda, reintenta, guarda la numeración |
 | `src/lib/asistente/pasa.ts` | El comando `pasa 2,5` / `pasa todo` |
 | `src/lib/asistente/telegram.ts` | Envío HTML, partición a 4000 caracteres, lista de chats permitidos |
@@ -77,6 +86,8 @@ Archivos del asistente dentro del repo:
 | `src/lib/asistente/cron-auth.ts` | Verifica el `CRON_SECRET` |
 | `sql/2026-10-asistente-fase1.sql` | Migración de la fase 1 (correr en una query) |
 | `sql/2026-10-asistente-fase1-pruebas.sql` | Pruebas con rollback de la fase 1 (correr después, en otra query) |
+| `sql/2026-10-asistente-fase2.sql` | Migración de la fase 2 (correr en una query) |
+| `sql/2026-10-asistente-fase2-pruebas.sql` | Prueba con rollback de la fase 2 (correr después, en otra query) |
 
 ---
 
@@ -346,7 +357,165 @@ Para ver las corridas del Cron: **Settings → Cron Jobs**; cada job muestra la
 
 ## 2. Fase 2 — Notas de voz (Whisper)
 
-_Pendiente. Se escribe cuando la fase 1 esté validada._
+### 2a. Qué hace
+
+Le mandas un **audio** al bot en vez de escribir, y pasa exactamente lo mismo
+que si lo hubieras tecleado:
+
+1. El bot descarga el audio de Telegram y lo manda a OpenAI (modelo
+   `whisper-1`) para convertirlo en texto. Entiende español con palabras en
+   inglés mezcladas ("Shift", "Google Ads", "SEO", "follow up").
+2. Te responde siempre con lo que entendió, y en **el mismo mensaje** confirma
+   o pregunta:
+   ```
+   🎤 Entendí: «urgente IM llamar a Juan mañana»
+   ✅ IM · Urgente ★ · «llamar a Juan» · vence sáb 31 oct
+   ```
+3. Si al mensaje le falta la **empresa** o la **urgencia** (escrito o hablado,
+   da igual), **no guarda**: te pregunta con botones.
+   ```
+   🎤 Entendí: «llamar a Juan mañana»
+   ¿Para qué empresa?
+   [ IM ] [ DATAVIA ] [ PD ]
+   [ Personal ] [ Chelsea ]
+   ```
+   Tocas un botón; si aún falta algo te hace la segunda pregunta
+   (`¿Qué urgencia?` → Urgente · Normal · Cuando pueda); cuando está completa
+   guarda y confirma en una línea. Esa tarea a medias es un **borrador**: vive
+   10 minutos. Si no contestas, se descarta; si mandas otra tarea nueva, la
+   reemplaza.
+4. Audios de más de **2 minutos** no se procesan: "Mándame un audio más corto
+   (máx 2 min)".
+5. Si el audio empieza con "pregunta" o con "¿" ("¿qué tengo hoy?"), no es
+   una tarea: por ahora responde "Eso lo entenderé en la siguiente fase 🙂".
+   La fase 3 lo conectará con Claude.
+
+**Confirmación, siempre en una sola línea**
+
+```
+✅ IM · Urgente ★ · «Llamar a Juan» · vence vie 1 nov
+```
+
+Empresa · urgencia (con ★ si es importante; `urgente` siempre lleva ★) ·
+el título entre comillas · "vence …" solo si tiene fecha.
+
+**Lo que entiende el parser** (es el mismo para texto y voz; las piezas pueden
+ir en cualquier orden):
+
+| Pieza | Cómo lo dices |
+| --- | --- |
+| Urgencia | `urgente` / `normal` / `cuando pueda`, al inicio o al final ("…, urgente") |
+| Empresa | al inicio (`IM llamar…`), con `para IM` / `para IM:`, o al final (`…, IM`). Si va en medio ("regalo personal") la toma pero no la quita del título |
+| ★ Importante | la palabra `importante` en cualquier parte |
+| Fecha | `hoy` / `mañana` al inicio o **al final** del mensaje, `para el viernes`, `due friday`, `para mañana` |
+| Radar | `radar <idea>` |
+| Pregunta | empieza con `?`, `¿` o `pregunta` |
+| Ayuda | `ayuda`, `help`, `formato`, `/start` |
+
+Dos arreglos que vienen con esta fase y aplican también a lo escrito:
+
+- "hoy"/"mañana" **al final** del mensaje ("urgente IM Shift Google Ads y SEO
+  hoy") ahora se reconoce como fecha y se quita del título. Antes se quedaba
+  en el título y la tarea salía sin fecha.
+- "hoy" y "mañana" se calculan en **hora de Cancún**. Antes se calculaban en la
+  hora del servidor (UTC): un "hoy" dicho después de las 7 pm caía en mañana.
+
+### 2b. Lo que hay que hacer a mano
+
+**Paso 1 — Correr el SQL en Supabase (dos queries, en este orden)**
+
+1. https://supabase.com → proyecto **GabbyHQ** → **SQL Editor** → **New query**.
+2. Pega `sql/2026-10-asistente-fase2.sql` completo → **Run**. Crea la tabla
+   `bot_borradores`. Al final verás sus 5 columnas y `rowsecurity = true`.
+3. **New query** (otra pestaña) → pega `sql/2026-10-asistente-fase2-pruebas.sql`
+   → **Run**. Inserta un borrador de prueba, lo muestra y hace `rollback`: no
+   queda nada.
+
+**Paso 2 — Crear la API key de OpenAI y ponerle tope de gasto**
+
+1. Entra a https://platform.openai.com e inicia sesión (o crea la cuenta).
+2. Arriba a la derecha, el engrane **Settings** → en la izquierda
+   **Billing** → **Add payment details** si no hay tarjeta, y **Add to credit
+   balance** con un monto chico (p. ej. $5 USD). OpenAI cobra por adelantado;
+   sin saldo, Whisper responde error.
+3. Todavía en Settings → **Limits** (dentro de Organization). Pon **Monthly
+   budget** = `5` y, si quieres aviso antes, **Alert threshold** = `3`. Con
+   eso, si algo se descontrola, deja de funcionar al llegar a $5 en vez de
+   seguir cobrando.
+4. En la izquierda, **API keys** → **Create new secret key**. Nombre:
+   `gabbyhq-telegram`. Permisos: **Restricted** → en *Model capabilities*
+   marca **Write** (es lo que necesita transcripciones) y deja el resto en
+   *None*. Click **Create secret key**.
+5. Copia la key (empieza con `sk-…`). **Solo se muestra una vez**: guárdala en
+   tu gestor de contraseñas. Si la pierdes, crea otra y borra la vieja.
+
+**Paso 3 — Ponerla en Vercel y redeploy**
+
+1. https://vercel.com → proyecto **gabby-hq** → **Settings** → **Environment
+   Variables**.
+2. Key `OPENAI_API_KEY`, Value: la key. Marca **Production** (y Preview si
+   pruebas en previews). **Save**.
+3. **Deployments** → último deploy → `⋯` → **Redeploy**. Sin redeploy, la
+   variable no existe para la app y todo audio responderá "Error al
+   procesar".
+
+No hay nada que tocar en BotFather: los audios llegan por el mismo webhook.
+
+### 2c. Env vars que agrega esta fase
+
+| Nombre | De dónde sale | Ejemplo (valor falso) |
+| --- | --- | --- |
+| `OPENAI_API_KEY` | platform.openai.com → Settings → API keys → Create new secret key (Paso 2) | `sk-proj-aB3dE…xYz` |
+
+### 2d. Cómo probar que funciona
+
+**Prueba 1 — Audio completo.** Mándale al bot un audio diciendo: *"urgente
+IM llamar a Juan mañana"*. Esperado, en un solo mensaje:
+```
+🎤 Entendí: «urgente IM llamar a Juan mañana»
+✅ IM · Urgente ★ · «llamar a Juan» · vence sáb 31 oct
+```
+Abre `/tasks`: la tarea está en IM, urgente, con ★ y fecha de mañana.
+
+**Prueba 2 — Audio incompleto + botones.** Audio: *"llamar al contador"*.
+Esperado: "🎤 Entendí: «llamar al contador»" + "¿Para qué empresa?" con
+botones. Toca **Personal** → "¿Qué urgencia?" con tres botones → toca
+**Normal** → "✅ Personal · Normal · «llamar al contador»". Los botones de las
+preguntas ya contestadas desaparecen. Luego manda otro audio incompleto, espera
+11 minutos y toca el botón: debe decir "Ese borrador ya expiró".
+
+**Prueba 3 — Límites.** (a) Un audio de más de 2 minutos → "Mándame un audio
+más corto (máx 2 min)". (b) Un audio diciendo *"pregunta qué tengo hoy"* →
+"Eso lo entenderé en la siguiente fase 🙂". (c) Escrito, no hablado:
+`urgente IM Shift Google Ads y SEO hoy` → la confirmación dice `vence` con la
+fecha de hoy y el título **sin** la palabra "hoy".
+
+### 2e. Qué puede fallar y dónde verlo
+
+Logs: Vercel → **Logs** → filtro `/api/telegram`. Las líneas de voz llevan la
+etiqueta `[voz]` (`whisper ok · … · N chars` o `whisper error: …`); las del
+bot, `[bot]`.
+
+| Síntoma | Causa probable | Qué hacer |
+| --- | --- | --- |
+| Todo audio responde "Error al procesar" y el log dice `OPENAI_API_KEY no está definida` | Falta la env var o el redeploy. | Paso 3. |
+| Log: `whisper error: Incorrect API key provided` | Key mal copiada o revocada. | Crea otra en OpenAI y actualízala en Vercel. |
+| Log: `whisper error: You exceeded your current quota` / `insufficient_quota` | Sin saldo en OpenAI o se alcanzó el tope mensual. | Billing → Add to credit balance, o sube el límite en Limits. |
+| Log: `whisper error: … model_not_found` | La key es *Restricted* sin permiso de Model capabilities. | Edita la key o crea una con Write en Model capabilities. |
+| Responde "No entendí el audio" | Whisper devolvió texto vacío (silencio, muy bajo). | Repite más cerca del micrófono. |
+| Entiende mal nombres de empresa | Whisper los escribe distinto ("Datavía"). | El parser ignora mayúsculas pero no acentos ni letras cambiadas: si no reconoce la empresa, te la pregunta con botones. Tócalo y listo. |
+| Toco un botón y no pasa nada | El borrador expiró (10 min) o lo reemplazó otra tarea; o el webhook tardó. | Manda la tarea otra vez. Revisa Logs por `[bot] callback`. |
+| El audio tarda más de 10 s en contestar | Whisper tarda ~2–6 s por audio de 30 s; Vercel permite hasta 60 s en esta ruta. | Normal. Si pasa de 60 s, el log dirá `Task timed out`. |
+| Texto escrito que antes se guardaba ahora pregunta empresa | Es a propósito (2d): sin empresa o sin urgencia no se guarda. | Tocar el botón, o escribir la empresa. |
+
+**Comportamientos que conviene saber**
+
+- El audio se procesa **dentro** del webhook: Telegram espera la respuesta.
+  Si la transcripción falla, el bot contesta "Error al procesar" y el motivo
+  queda en los logs; nada se guarda a medias.
+- Los borradores viejos no se limpian solos: el siguiente mensaje del mismo
+  chat los borra. La tabla nunca tiene más de una fila por chat.
+- Un audio que diga `radar …` o `pasa 2,5` funciona igual que escrito.
 
 ## 3. Fase 3 — `/pregunta` (Claude)
 
@@ -386,8 +555,9 @@ El código es el mismo repo.
    (→ `SUPABASE_SERVICE_ROLE_KEY`; secreto, solo servidor).
 3. **SQL Editor**: crea las tablas base de GabbyHQ (`companies`, `tasks`,
    `subtasks`, `radar`, `api_keys`) y corre en orden todos los archivos de
-   `sql/` del repo, terminando con `sql/2026-10-asistente-fase1.sql` (y sus
-   pruebas en una query aparte, ver 1b Paso 1).
+   `sql/` del repo, incluidos `sql/2026-10-asistente-fase1.sql` y
+   `sql/2026-10-asistente-fase2.sql` (y sus pruebas en queries aparte, ver 1b
+   y 2b Paso 1).
 4. En la app, en **Settings**, crea las empresas con los nombres que esa
    persona use. El orden fijo de la alarma (IM · DATAVIA · PD · Personal ·
    Chelsea) está en `EMPRESAS_ORDEN` dentro de `src/lib/asistente/alarmas.ts`;
@@ -401,7 +571,8 @@ El código es el mismo repo.
 2. Antes de **Deploy**, abre **Environment Variables** y carga todas:
    `TELEGRAM_BOT_TOKEN`, `ALLOWED_CHAT_IDS`, `APP_URL` (la URL que Vercel le
    asigne, p. ej. `https://chelsea-hq.vercel.app`), `CRON_SECRET` (nuevo,
-   `openssl rand -hex 32`), `NEXT_PUBLIC_SUPABASE_URL`,
+   `openssl rand -hex 32`), `OPENAI_API_KEY` (una key propia, con su tope de
+   gasto, ver 2b), `NEXT_PUBLIC_SUPABASE_URL`,
    `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`,
    `ADMIN_PASSWORD` y `API_SECRET_SEED` (login de la app), y si usa inbox-IM,
    `SUPABASE_INBOXIM_URL` y `SUPABASE_INBOXIM_SERVICE_KEY` (si no, el bloque
@@ -442,8 +613,9 @@ verano; para una zona con DST hay que calcular el offset en vez de fijarlo).
 | Vercel Pro | 1 | $20 USD / usuario | Ya se paga por GabbyHQ. Los Cron Jobs no cuestan aparte; dos corridas al día de pocos segundos no mueven la factura. |
 | Supabase | 1 | $0 | Dentro del plan actual; `bot_alarmas` crece ~2 filas/día. |
 | Telegram Bot API | 1 | $0 | Gratis. |
-| OpenAI Whisper | 2 | _se estima en la fase 2_ | Referencia: ~$0.006 USD por minuto de audio. |
+| OpenAI Whisper (`whisper-1`) | 2 | **$0.006 USD por minuto de audio** (precio de lista a octubre 2026; se cobra por segundos, redondeado). Ejemplo: 30 audios de 30 s al mes = 15 min = **$0.09 USD/mes**. Con 100 audios de 1 min = $0.60. | El tope mensual de $5 en OpenAI equivale a ~830 minutos de audio: imposible de alcanzar con uso normal. |
 | Anthropic (Claude) | 3 | _se estima en la fase 3_ | Depende del modelo y de cuánto contexto se mande por pregunta. |
 | Google Calendar API | 4 | $0 | Gratis dentro de las cuotas normales. |
 
 **Fase 1 total: $0 adicionales** sobre lo que ya se paga.
+**Fase 2 total: ~$0.10 USD/mes** con uso normal (requiere saldo prepagado en OpenAI, mínimo $5).

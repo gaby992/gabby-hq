@@ -1,207 +1,231 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
-import { isAllowedChat, sendTelegram } from '@/lib/asistente/telegram'
+import { createServerClient } from '@/lib/supabase-server'
+import {
+  answerCallbackQuery,
+  downloadTelegramFile,
+  isAllowedChat,
+  removeInlineKeyboard,
+  sendTelegram,
+} from '@/lib/asistente/telegram'
 import { esComandoPasa, manejarPasa } from '@/lib/asistente/pasa'
+import { AYUDA, faltantes, parseMensaje, type TareaParsed } from '@/lib/parser'
+import { cancunYmd } from '@/lib/asistente/cancun'
+import { MAX_AUDIO_SECONDS, transcribirAudio } from '@/lib/asistente/whisper'
+import {
+  actualizarBorrador,
+  borradorVigente,
+  borrarBorrador,
+  crearBorrador,
+  nonceDe,
+} from '@/lib/asistente/borradores'
+import { cargarEmpresas, confirmacion, guardarTarea, pregunta } from '@/lib/asistente/tareas'
+import type { Priority } from '@/types'
 
-const PRIORITIES = ['urgente', 'normal', 'cuando'] as const
-type Priority = (typeof PRIORITIES)[number]
+// Telegram → here (webhook). Text, voice notes and inline-button taps all end
+// up in the same place: parseMensaje() → save, or ask for what is missing.
+// A voice note needs a round trip to Whisper, so give the function some room.
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
+export const maxDuration = 60
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
-
-// Weekday tokens (en + es) → day-of-week index (Sun = 0).
-const WEEKDAYS: Record<string, number> = {
-  sunday: 0, domingo: 0,
-  monday: 1, lunes: 1,
-  tuesday: 2, martes: 2,
-  wednesday: 3, miercoles: 3, 'miércoles': 3,
-  thursday: 4, jueves: 4,
-  friday: 5, viernes: 5,
-  saturday: 6, sabado: 6, 'sábado': 6,
-}
-
-function ymd(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-
-// Best-effort: pull an optional due date out of the task text.
-// Understands "due <weekday>", "para (el) <weekday>", tomorrow/mañana, today/hoy.
-function extractDueDate(text: string): { dueDate: string | null; cleaned: string } {
-  const rel = text.match(/\b(?:due|para(?:\s+el)?)\s+(tomorrow|mañana|manana|today|hoy|[a-zápéíóúäëïöü]+)\b/i)
-  if (!rel) return { dueDate: null, cleaned: text }
-
-  const token = rel[1].toLowerCase()
-  const base = new Date()
-  base.setHours(0, 0, 0, 0)
-  let due: Date | null = null
-
-  if (token === 'today' || token === 'hoy') {
-    due = base
-  } else if (token === 'tomorrow' || token === 'mañana' || token === 'manana') {
-    due = new Date(base)
-    due.setDate(base.getDate() + 1)
-  } else if (token in WEEKDAYS) {
-    // Naming a weekday always means the NEXT one: "para el lunes" said on a
-    // Monday is next Monday, not today. Today has its own tokens (hoy/today).
-    const diff = (WEEKDAYS[token] - base.getDay() + 7) % 7 || 7
-    due = new Date(base)
-    due.setDate(base.getDate() + diff)
-  }
-
-  if (!due) return { dueDate: null, cleaned: text }
-  const cleaned = text.replace(rel[0], '').replace(/\s{2,}/g, ' ').trim()
-  return { dueDate: ymd(due), cleaned }
-}
-
-// 6e: "importante" anywhere in the task text is a command, not part of the
-// title — flag the second axis and drop the word. Applied only to the task
-// branch: `radar` rows have no such column, so there the word stays as typed.
-const IMPORTANTE = /\b(?:importante|important)\b/gi
-
-function extractImportante(text: string): { importante: boolean; cleaned: string } {
-  if (!IMPORTANTE.test(text)) {
-    IMPORTANTE.lastIndex = 0 // the /g flag makes .test() stateful
-    return { importante: false, cleaned: text }
-  }
-  IMPORTANTE.lastIndex = 0
-  const cleaned = text.replace(IMPORTANTE, '').replace(/\s{2,}/g, ' ').trim()
-  return { importante: true, cleaned }
-}
-
-// 11: "para Chelsea: llamar al proveedor" — delegating from the phone. The
-// company is matched by name (case-insensitive) like the positional form, so
-// this works for any company, not just Chelsea. Checked after the priority
-// keywords, so "urgente Chelsea …" keeps its old meaning.
-const PARA_EMPRESA = /^para\s+([^:]+):\s*(.+)$/i
+const FASE_3 = 'Eso lo entenderé en la siguiente fase 🙂'
+const ERROR_GENERICO = 'Error al procesar. Intenta de nuevo.'
 
 // Plain-text reply. The shared helper throws on a Telegram error (the alarms
 // need that to retry); here a failed reply is only worth a log line.
-async function sendMessage(chatId: number, text: string) {
+async function reply(chatId: number, text: string, replyMarkup?: unknown) {
   try {
-    await sendTelegram(chatId, text, { tag: 'bot' })
+    await sendTelegram(chatId, text, { tag: 'bot', replyMarkup })
   } catch {
     /* already logged by sendTelegram */
   }
 }
 
+function joinLines(...lines: (string | null | undefined)[]): string {
+  return lines.filter(Boolean).join('\n')
+}
+
+// ── Tasks: save, or ask ──────────────────────────────────────────────────
+
+/**
+ * Either saves the task and confirms in one line, or stores a draft and asks
+ * the first missing question with buttons. `prefix` is the "🎤 Entendí: «…»"
+ * line for voice notes — it goes in the same message as the answer.
+ */
+async function guardarOPreguntar(chatId: number, texto: string, tarea: TareaParsed, prefix: string | null) {
+  const falta = faltantes(tarea)
+  if (falta.length === 0) {
+    await guardarTarea(tarea)
+    await reply(chatId, joinLines(prefix, confirmacion(tarea)))
+    return
+  }
+  const borrador = await crearBorrador(chatId, texto, tarea)
+  const q = pregunta(falta[0], nonceDe(borrador.id), await cargarEmpresas())
+  await reply(chatId, joinLines(prefix, q.text), q.replyMarkup)
+}
+
+async function handleText(chatId: number, text: string, prefix: string | null) {
+  if (!text) {
+    await reply(chatId, joinLines(prefix, 'No entendí nada. ¿Me lo repites?'))
+    return
+  }
+  if (esComandoPasa(text)) {
+    await reply(chatId, joinLines(prefix, await manejarPasa(text)))
+    return
+  }
+
+  const parsed = parseMensaje(text, await cargarEmpresas(), cancunYmd())
+  switch (parsed.kind) {
+    case 'ayuda':
+      await reply(chatId, AYUDA)
+      return
+    case 'pregunta':
+      // Fase 3 will answer these; until then, say so.
+      await reply(chatId, joinLines(prefix, FASE_3))
+      return
+    case 'radar': {
+      if (!parsed.titulo) {
+        await reply(chatId, joinLines(prefix, 'Uso: radar <descripción>'))
+        return
+      }
+      const { error } = await createServerClient().from('radar').insert({ titulo: parsed.titulo, estado: 'idea' })
+      if (error) throw new Error(`Supabase radar: ${error.message}`)
+      await reply(chatId, joinLines(prefix, `✓ Radar: "${parsed.titulo}"`))
+      return
+    }
+    case 'tarea': {
+      if (!parsed.tarea.text) {
+        await reply(chatId, joinLines(prefix, 'Falta la tarea. Ejemplo: urgente IM llamar a Juan mañana'))
+        return
+      }
+      await guardarOPreguntar(chatId, text, parsed.tarea, prefix)
+    }
+  }
+}
+
+// ── Voice notes ──────────────────────────────────────────────────────────
+
+interface TelegramAudio {
+  file_id: string
+  duration?: number
+  mime_type?: string
+}
+
+async function handleVoice(chatId: number, audio: TelegramAudio) {
+  const duration = audio.duration ?? 0
+  if (duration > MAX_AUDIO_SECONDS) {
+    await reply(chatId, `Mándame un audio más corto (máx ${MAX_AUDIO_SECONDS / 60} min).`)
+    return
+  }
+  const { bytes, path } = await downloadTelegramFile(audio.file_id)
+  const filename = path.split('/').pop() || 'voice.ogg'
+  const texto = await transcribirAudio(bytes, filename)
+  if (!texto) {
+    await reply(chatId, 'No entendí el audio. ¿Me lo repites?')
+    return
+  }
+  // 2c: the transcription always goes back first, in the same message as the
+  // confirmation or the question.
+  await handleText(chatId, texto, `🎤 Entendí: «${texto}»`)
+}
+
+// ── Inline buttons ───────────────────────────────────────────────────────
+
+interface CallbackQuery {
+  id: string
+  data?: string
+  message?: { message_id: number; chat?: { id: number } }
+}
+
+async function handleCallback(cq: CallbackQuery) {
+  await answerCallbackQuery(cq.id)
+  const chatId = cq.message?.chat?.id
+  const messageId = cq.message?.message_id
+  if (!chatId || !messageId) return
+  if (!isAllowedChat(chatId)) {
+    console.warn(`[bot] callback de chat no autorizado: ${chatId}`)
+    return
+  }
+
+  // "e:<nonce>:<company_id>" | "p:<nonce>:<priority>"
+  const m = String(cq.data ?? '').match(/^([ep]):([0-9a-f]{8}):(.+)$/)
+  if (!m) return
+  const [, kind, nonce, value] = m
+
+  try {
+    await removeInlineKeyboard(chatId, messageId)
+    const borrador = await borradorVigente(chatId)
+    if (!borrador || nonceDe(borrador.id) !== nonce) {
+      await reply(chatId, 'Ese borrador ya expiró (10 min). Mándame la tarea otra vez.')
+      return
+    }
+
+    const tarea: TareaParsed = { ...borrador.parsed }
+    const companies = await cargarEmpresas()
+    if (kind === 'e') {
+      const c = companies.find((x) => x.id === value)
+      if (!c) {
+        await reply(chatId, 'Esa empresa ya no existe. Mándame la tarea otra vez.')
+        return
+      }
+      tarea.company_id = c.id
+      tarea.company_name = c.name.trim()
+    } else {
+      if (!['urgente', 'normal', 'cuando'].includes(value)) return
+      tarea.priority = value as Priority
+      if (value === 'urgente') tarea.importante = true
+    }
+
+    const falta = faltantes(tarea)
+    if (falta.length > 0) {
+      await actualizarBorrador(borrador.id, tarea)
+      const q = pregunta(falta[0], nonce, companies)
+      await reply(chatId, q.text, q.replyMarkup)
+      return
+    }
+    await guardarTarea(tarea)
+    await borrarBorrador(borrador.id)
+    await reply(chatId, confirmacion(tarea))
+  } catch (err) {
+    console.error('[bot] callback error:', err)
+    await reply(chatId, ERROR_GENERICO)
+  }
+}
+
+// ── Webhook ──────────────────────────────────────────────────────────────
+
 export async function POST(request: Request) {
-  const update = await request.json()
-  const message = update?.message
-  if (!message?.text || !message?.chat?.id) {
+  const update = await request.json().catch(() => null)
+  if (!update) return NextResponse.json({ ok: true })
+
+  if (update.callback_query) {
+    await handleCallback(update.callback_query)
     return NextResponse.json({ ok: true })
   }
 
-  const chatId: number = message.chat.id
+  const message = update.message
+  const chatId: number | undefined = message?.chat?.id
+  if (!chatId) return NextResponse.json({ ok: true })
 
   // The bot obeys only the chats listed in ALLOWED_CHAT_IDS. Anyone else gets
   // a one-liner and nothing is read or written — this is what makes the same
   // deployment safe to point a second bot (Chelsea's) at later.
   if (!isAllowedChat(chatId)) {
     console.warn(`[bot] chat no autorizado: ${chatId}`)
-    await sendMessage(chatId, 'No autorizado')
+    await reply(chatId, 'No autorizado')
     return NextResponse.json({ ok: true })
   }
 
-  const text: string = message.text.trim()
-  const words = text.split(/\s+/)
-  const first = words[0].toLowerCase()
-
   try {
-    if (esComandoPasa(text)) {
-      // Fase 1e: "pasa 2,5" / "pasa todo" — numbers from the last alarm.
-      await sendMessage(chatId, await manejarPasa(text))
-
-    } else if (first === 'radar') {
-      const titulo = words.slice(1).join(' ')
-      if (!titulo) {
-        await sendMessage(chatId, 'Uso: radar <descripción>')
-        return NextResponse.json({ ok: true })
-      }
-      const { error } = await supabase.from('radar').insert({ titulo, estado: 'idea' })
-      if (error) throw error
-      await sendMessage(chatId, `✓ Radar: "${titulo}"`)
-
-    } else if ((PRIORITIES as readonly string[]).includes(first)) {
-      const priority = first as Priority
-
-      const { data: companies } = await supabase.from('companies').select('id, name')
-      const companyMatch = companies?.find(
-        (c) => c.name.toLowerCase() === words[1]?.toLowerCase()
-      )
-      const rawText = words.slice(companyMatch ? 2 : 1).join(' ')
-      const { importante: saidImportante, cleaned: withoutStar } = extractImportante(rawText)
-      const { dueDate, cleaned: taskText } = extractDueDate(withoutStar)
-      // 8: same rule as the forms — `urgente` implies ★. From Telegram there's
-      // no way to untick it, so overriding it is an app-side edit.
-      const importante = saidImportante || priority === 'urgente'
-
-      if (!taskText) {
-        await sendMessage(chatId, `Uso: ${priority} [empresa] <descripción>`)
-        return NextResponse.json({ ok: true })
-      }
-
-      const { error } = await supabase.from('tasks').insert({
-        text: taskText,
-        priority,
-        importante,
-        company_id: companyMatch?.id ?? null,
-        due_date: dueDate,
-        done: false,
-      })
-      if (error) throw error
-
-      const label = companyMatch ? ` · ${companyMatch.name}` : ''
-      const dueLabel = dueDate ? ` · due ${dueDate}` : ''
-      const starLabel = importante ? ' ★' : ''
-      await sendMessage(chatId, `✓ ${priority}${label}${dueLabel}${starLabel}: "${taskText}"`)
-
-    } else if (PARA_EMPRESA.test(text)) {
-      const [, rawCompany, rawText] = text.match(PARA_EMPRESA)!
-      const wanted = rawCompany.trim()
-
-      const { data: companies } = await supabase.from('companies').select('id, name')
-      const target = companies?.find(
-        (c) => c.name.trim().toLowerCase() === wanted.toLowerCase()
-      )
-      if (!target) {
-        await sendMessage(chatId, `No existe la empresa "${wanted}". Créala en Settings.`)
-        return NextResponse.json({ ok: true })
-      }
-
-      const { importante, cleaned: withoutStar } = extractImportante(rawText)
-      const { dueDate, cleaned: taskText } = extractDueDate(withoutStar)
-      if (!taskText) {
-        await sendMessage(chatId, `Uso: para ${target.name}: <descripción>`)
-        return NextResponse.json({ ok: true })
-      }
-
-      // Delegated work is `normal` unless she says "importante" — there's no
-      // priority word in this form, and it isn't on fire by default.
-      const { error } = await supabase.from('tasks').insert({
-        text: taskText,
-        priority: 'normal',
-        importante,
-        company_id: target.id,
-        due_date: dueDate,
-        done: false,
-      })
-      if (error) throw error
-
-      const dueLabel = dueDate ? ` · due ${dueDate}` : ''
-      const starLabel = importante ? ' ★' : ''
-      await sendMessage(chatId, `✓ ${target.name}${dueLabel}${starLabel}: "${taskText}"`)
-
-    } else {
-      await sendMessage(
-        chatId,
-        'Formato:\n  urgente/normal/cuando [empresa] tarea [importante] [para el viernes]\n  para <empresa>: tarea\n  radar descripción\n  pasa 2,5 · pasa todo (mueve a mañana lo numerado en la última alarma)\n\nFechas: hoy · mañana · para el <día> · due <weekday>\n★ Importante: escribe "importante" en la tarea\nEmpresas: IM · DATAVIA · PD · Personal · Chelsea'
-      )
+    const audio: TelegramAudio | undefined = message.voice ?? message.audio
+    if (audio?.file_id) {
+      await handleVoice(chatId, audio)
+    } else if (typeof message.text === 'string') {
+      await handleText(chatId, message.text.trim(), null)
     }
   } catch (err) {
-    console.error('Telegram bot error:', err)
-    await sendMessage(chatId, 'Error al procesar. Intenta de nuevo.')
+    console.error('[bot] error:', err)
+    await reply(chatId, ERROR_GENERICO)
   }
 
   return NextResponse.json({ ok: true })
