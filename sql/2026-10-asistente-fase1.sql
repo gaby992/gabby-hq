@@ -10,7 +10,11 @@
 -- La columna nueva es NULLABLE y sin default a propósito: los inserts de n8n
 -- (Workflow B) no la mencionan y deben seguir funcionando tal cual.
 -- Seguro de volver a correr: todo es idempotente.
--- Correr en Supabase → proyecto GabbyHQ → SQL Editor.
+-- Correr en Supabase → proyecto GabbyHQ → SQL Editor, en UNA sola query.
+--
+-- Las pruebas con begin/rollback están en 2026-10-asistente-fase1-pruebas.sql
+-- y se corren DESPUÉS, en una query aparte: el editor de Supabase ejecuta cada
+-- query como una sola transacción, y un rollback aquí desharía la creación.
 
 -- ── 1. Columna ────────────────────────────────────────────────────────────
 alter table tasks add column if not exists completed_at timestamptz;
@@ -63,7 +67,7 @@ create index if not exists bot_alarmas_enviada_en_idx
 -- inbox-IM: nada del navegador la toca.
 alter table bot_alarmas enable row level security;
 
--- ── Verificación ──────────────────────────────────────────────────────────
+-- ── Verificación (solo lectura, sin transacciones) ────────────────────────
 -- 1. La columna. Esperado: timestamp with time zone · is_nullable = YES ·
 --    column_default = NULL.
 select column_name, data_type, is_nullable, column_default
@@ -80,22 +84,3 @@ select column_name, data_type
 from information_schema.columns
 where table_name = 'bot_alarmas'
 order by ordinal_position;
-
--- 4. Prueba del trigger, sin dejar rastro (rollback al final).
---    Esperado: fila 1 completed_at = NULL; fila 2 con fecha; fila 3 NULL otra vez.
-begin;
-  insert into tasks (text, priority, done)
-  values ('__probe completed_at__', 'normal', false);
-  select 1 as paso, completed_at from tasks where text = '__probe completed_at__';
-  update tasks set done = true  where text = '__probe completed_at__';
-  select 2 as paso, completed_at from tasks where text = '__probe completed_at__';
-  update tasks set done = false where text = '__probe completed_at__';
-  select 3 as paso, completed_at from tasks where text = '__probe completed_at__';
-rollback;
-
--- 5. Los inserts de n8n sobreviven: este no menciona completed_at ni
---    importante y debe pasar. Rollback: no queda nada.
-begin;
-  insert into tasks (text, priority, done) values ('__probe n8n__', 'normal', false);
-  select text, done, completed_at from tasks where text = '__probe n8n__';
-rollback;

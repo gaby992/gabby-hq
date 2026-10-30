@@ -75,7 +75,8 @@ Archivos del asistente dentro del repo:
 | `src/lib/asistente/telegram.ts` | Envío HTML, partición a 4000 caracteres, lista de chats permitidos |
 | `src/lib/asistente/cancun.ts` | Fechas en hora de Cancún |
 | `src/lib/asistente/cron-auth.ts` | Verifica el `CRON_SECRET` |
-| `sql/2026-10-asistente-fase1.sql` | Migración de la fase 1 |
+| `sql/2026-10-asistente-fase1.sql` | Migración de la fase 1 (correr en una query) |
+| `sql/2026-10-asistente-fase1-pruebas.sql` | Pruebas con rollback de la fase 1 (correr después, en otra query) |
 
 ---
 
@@ -165,22 +166,30 @@ intentar una vez a los 30 segundos. Si vuelve a fallar, te manda
 > fase no toca BotFather. Solo falta: SQL, tres env vars y apagar el workflow
 > viejo de n8n.
 
-**Paso 1 — Correr el SQL en Supabase**
+**Paso 1 — Correr el SQL en Supabase (dos queries, en este orden)**
+
+> Importante: el SQL Editor de Supabase ejecuta **toda la query como una sola
+> transacción**. Por eso la migración y las pruebas van en archivos separados:
+> las pruebas terminan en `rollback`, y si fueran en la misma query desharían
+> también la creación. Primero la migración, luego las pruebas, cada una en su
+> propia query.
 
 1. Entra a https://supabase.com y abre el proyecto **GabbyHQ** (no el de
    inbox-IM).
-2. En la barra izquierda, click en **SQL Editor**.
-3. Click en **New query**.
-4. Abre el archivo `sql/2026-10-asistente-fase1.sql` del repo, copia todo su
-   contenido y pégalo en el editor.
-5. Click en **Run** (o Ctrl/Cmd + Enter).
-6. Abajo salen varios resultados, uno por cada bloque de verificación del
-   final del archivo. Revisa:
+2. En la barra izquierda, click en **SQL Editor** → **New query**.
+3. Abre `sql/2026-10-asistente-fase1.sql` del repo, copia todo su contenido,
+   pégalo y click en **Run** (o Ctrl/Cmd + Enter). Esto crea la columna, el
+   trigger y la tabla, y al final hace tres consultas de solo lectura. Revisa:
    - `completed_at` existe, `is_nullable = YES`, sin default.
    - Aparece el trigger `tasks_set_completed_at`.
    - `bot_alarmas` tiene 4 columnas: `id`, `enviada_en`, `tipo`, `items`.
-   - La prueba del trigger muestra `NULL` → fecha → `NULL`.
-   Las pruebas terminan en `rollback`: no dejan filas.
+4. Otra vez **New query** (una pestaña nueva, no la misma). Abre
+   `sql/2026-10-asistente-fase1-pruebas.sql`, pégalo y **Run**. Son dos
+   bloques `begin … rollback` que no dejan filas:
+   - La prueba del trigger muestra `completed_at` en `NULL` → con fecha →
+     `NULL` otra vez.
+   - El insert "estilo n8n" (sin `completed_at` ni `importante`) pasa.
+   Si quieres ver cada resultado por separado, corre un bloque a la vez.
 
 Hazlo **antes** de que se dispare la primera alarma. Si la alarma corre sin la
 migración, no se rompe nada: te llega "⚠️ La alarma … falló: column
@@ -377,7 +386,8 @@ El código es el mismo repo.
    (→ `SUPABASE_SERVICE_ROLE_KEY`; secreto, solo servidor).
 3. **SQL Editor**: crea las tablas base de GabbyHQ (`companies`, `tasks`,
    `subtasks`, `radar`, `api_keys`) y corre en orden todos los archivos de
-   `sql/` del repo, terminando con `sql/2026-10-asistente-fase1.sql`.
+   `sql/` del repo, terminando con `sql/2026-10-asistente-fase1.sql` (y sus
+   pruebas en una query aparte, ver 1b Paso 1).
 4. En la app, en **Settings**, crea las empresas con los nombres que esa
    persona use. El orden fijo de la alarma (IM · DATAVIA · PD · Personal ·
    Chelsea) está en `EMPRESAS_ORDEN` dentro de `src/lib/asistente/alarmas.ts`;
