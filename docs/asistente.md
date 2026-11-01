@@ -139,6 +139,7 @@ Archivos del asistente dentro del repo:
 | `sql/2026-10-asistente-fase4-pruebas.sql` | Prueba con rollback de la fase 4 + consultas para afinar el prompt |
 | `sql/2026-11-asistente-fase4b.sql` | Migración de la fase 4b: `notas_historial` + `bot_alarmas.tipo` admite `que_sigue` |
 | `sql/2026-11-limpieza-titulos-hoy-manana.sql` | Limpieza única: títulos que terminan en " hoy"/" mañana" → `due_date` (select primero, update después) |
+| `sql/2026-11-limpieza-notas-como-tareas.sql` | Limpieza única: tareas que eran notas "por dónde iba" (select primero; mover a `notas_historial` y borrar después) |
 | `sql/2026-11-asistente-fase5.sql` | Migración de la fase 5: `conexiones_google` + `tasks.due_time` + `tasks.gcal_event_id` |
 | `sql/2026-11-asistente-fase5c.sql` | Migración de la fase 5-C: `pagos_recurrentes` |
 | `src/lib/asistente/pagos.ts` | Fase 5-C: pagos recurrentes (fila + evento mensual en Calendar) |
@@ -165,12 +166,18 @@ cada empresa:
 1. 📝 Tu nota "por dónde iba" completa, si la tienes escrita.
 2. Las tareas que importan hoy, **numeradas de corrido** a lo largo de todo el
    mensaje (1, 2, 3… sin reiniciar por empresa), para poder referirte a ellas:
-   - ● vencidas, con "hace N días"
-   - ○ vencen hoy
-   - ★ urgentes o importantes sin fecha o con fecha futura
-   (símbolos de texto, no emojis: Telegram no puede achicar un emoji y
-   estos se ven la mitad de grandes; misma regla en el cierre y en "¿qué
-   sigue?")
+   - 🔺 vencidas, con "hace N días"
+   - 🔸 vencen hoy
+   - ✴️ urgentes o ★ importantes
+   - ▫️ normales (con fecha primero, luego sin fecha)
+   - ▪️ cuando pueda
+   Desde la fase 4d la lista trae **todas** las tareas abiertas de cada
+   empresa en ese orden (vencidas más viejas primero → vence hoy → urgente★
+   → urgente → ★ → normal con fecha → normal sin fecha → cuando pueda), no
+   solo las accionables. Si una empresa pasa de 12, se corta y termina en
+   `· +N más en GabbyHQ` con link a `/tasks?company=<id>`. Los emojis son
+   los más chicos que hay (Telegram no colorea texto); el mismo set va en el
+   cierre, en "¿qué sigue?" y en `/pendientes`.
 
 Una empresa sin nota y sin tareas en esas categorías no aparece. En el bloque
 de Chelsea también va cuántos correos tiene pendientes en inbox-IM, con link a
@@ -187,15 +194,15 @@ Ejemplo:
 
 IM
 📝 Pendiente la propuesta de X; retomar por la sección de precios.
-● 1. Mandar factura de septiembre · hace 3 días
-○ 2. Llamar a Y
-★ 3. Revisar contrato · 5 nov
+🔺 1. Mandar factura de septiembre · hace 3 días
+🔸 2. Llamar a Y
+✴️ 3. Revisar contrato · 5 nov
 
 PD
-★ 4. Armar deck para inversionistas
+✴️ 4. Armar deck para inversionistas
 
 Chelsea
-★ 5. Cotizar proveedor nuevo
+✴️ 5. Cotizar proveedor nuevo
 📬 3 correos pendientes → /inbox
 
 Total: 5 tareas · abrir GabbyHQ
@@ -409,7 +416,7 @@ Para ver las corridas del Cron: **Settings → Cron Jobs**; cada job muestra la
 - La alarma de la tarde **recalcula** la lista pendiente (misma regla que la
   mañana) y la numera de nuevo desde 1. Los números de `pasa` siempre son los
   del último mensaje que recibiste.
-- `pasa N` sobre una tarea sin fecha (★) le pone fecha de mañana.
+- `pasa N` sobre una tarea sin fecha (✴️) le pone fecha de mañana.
 - Las tareas cerradas **antes** de correr el SQL no tienen `completed_at`, así
   que nunca saldrán en "Hecho hoy". Las que cierres después, sí.
 - Si Telegram falla a mitad de un mensaje de varias partes, el reintento vuelve
@@ -1097,16 +1104,16 @@ formato fijo:
 🎯 Qué sigue · dom 1 nov
 
 Ahora
-● 1. paypal statements · IM · hace 3 días
+🔺 1. paypal statements · IM · hace 3 días
 
 Después
-○ 2. … · PD · hoy
-★ 3. … · IM · urgente ★
-★ 4. … · DATAVIA · urgente
+🔸 2. … · PD · hoy
+✴️ 3. … · IM · urgente ★
+✴️ 4. … · DATAVIA · urgente
 
 Por vencer esta semana
-◇ 5. … · IM · jue 6 nov
-◇ 6. … · PD · vie 7 nov 3:00 pm
+▫️ 5. … · IM · jue 6 nov
+▫️ 6. … · PD · vie 7 nov 3:00 pm
 
 Por dónde ibas
 📝 IM: … (solo notas de los últimos 3 días, una línea cada una)
@@ -1114,9 +1121,9 @@ Por dónde ibas
 
 Mismo estilo que la lista de la mañana: encabezado con la fecha, cada
 sección con su título en negrita en su propia línea, línea en blanco entre
-secciones, y cada ítem como en la lista: símbolo (● vencida · ○ hoy · ★
-urgente/importante · ◇ vence esta semana) + número + título + empresa +
-fecha o edad. Sección vacía: `— nada vence esta semana` / `— sin notas de
+secciones, y cada ítem como en la lista: símbolo (🔺 vencida · 🔸 hoy · ✴️
+urgente/importante · ▫️ normal · ▪️ cuando pueda) + número + título +
+empresa + fecha o edad. Sección vacía: `— nada vence esta semana` / `— sin notas de
 los últimos 3 días`.
 
 El orden lo decide el **código**, determinista: vencidas (más vieja primero)
@@ -1260,7 +1267,34 @@ intérprete (sobre el título que devuelve el modelo). Entiende las 8 formas:
 no voy"). Probado con las 8 formas en `revisar propuesta de TOTT …` → título
 «revisar propuesta de TOTT» y la fecha correcta.
 
-**Pruebas de la fase 4c**
+**D) Fase 4d — lista completa, `/pendientes`, notas no son tareas.**
+
+- **Lista completa**: la lista de la mañana, `/hoy`, `dame la lista`,
+  `/pendientes` y el cierre muestran **todas** las tareas abiertas de cada
+  empresa (orden y corte de 12 descritos en § 1a). "Sigue pendiente" en el
+  cierre cuenta todas las abiertas.
+- **`/pendientes IM`** (también `pendientes de IM`, `todo lo pendiente de
+  IM`, `qué tengo pendiente en PD`, y el intérprete con "mándame lo de IM")
+  → la misma lista completa de **una** empresa: encabezado `📋 Pendiente ·
+  IM (5)`, numerada y espaciada igual que la de la mañana, sin viñetas. La
+  numeración se guarda como la de la mañana: `listo 2` funciona.
+  `/pendientes` sin empresa = la lista de la mañana.
+- **Notas no son tareas**: un mensaje que empieza por `por dónde iba …`,
+  `nota: …`, `nota IM: …` o `notas de PD: …` es una nota de empresa, nunca
+  una tarea — tanto en el parser clásico como en el intérprete (si el modelo
+  devolviera `crear` con ese título, `comoNotaEmpresa()` lo convierte en
+  `nota_empresa`; sin empresa, pregunta de cuál). "Notas de reunión con
+  Juan" sin dos puntos sigue siendo una tarea. Migración única:
+  `sql/2026-11-limpieza-notas-como-tareas.sql` (primero el select; luego,
+  si quieres, el bloque que las pasa a `notas_historial` y las borra).
+
+**Pruebas de la fase 4c/4d**
+
+0. `/hoy` → cada empresa con todas sus abiertas en orden y con 🔺 🔸 ✴️ ▫️
+   ▪️; una empresa con más de 12 termina en `+N más en GabbyHQ`.
+   `/pendientes IM` → `📋 Pendiente · IM (N)` con solo IM; `listo 1` cierra la
+   primera. `Por dónde iba IM: probando` → `📝 Nota de IM guardada`, y en
+   /tasks no apareció ninguna tarea nueva.
 
 1. `/hoy` → llega el mismo mensaje de las 8:00; `listo 1` cierra la primera.
    `cierre` → el de las 6:00 pm. Por voz: "dame la lista".

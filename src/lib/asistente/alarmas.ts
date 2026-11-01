@@ -28,15 +28,17 @@ const SIN_EMPRESA = 'Sin empresa'
 
 const RETRY_DELAY_MS = 30_000
 
-type Bucket = 'vencida' | 'hoy' | 'estrella'
+/** What the symbol says about a task. Shared by every list and "¿qué sigue?". */
+export type Bucket = 'vencida' | 'hoy' | 'estrella' | 'normal' | 'cuando'
 
 /**
- * Text symbols instead of emoji: Telegram cannot shrink an emoji, and these
- * render at half the size. Shared by the lists and "¿qué sigue?".
- *   ● vencida · ○ vence hoy · ★ urgente/importante · ◇ vence esta semana
+ * Telegram cannot colour text, so the symbols are emoji — the smallest ones:
+ *   🔺 vencida · 🔸 vence hoy · ✴️ urgente o ★ · ▫️ normal · ▪️ cuando pueda
  */
-export const SIMBOLO = { vencida: '●', hoy: '○', estrella: '★', proxima: '◇' } as const
-const BUCKET_ORDER: Bucket[] = ['vencida', 'hoy', 'estrella']
+export const SIMBOLO: Record<Bucket, string> = { vencida: '🔺', hoy: '🔸', estrella: '✴️', normal: '▫️', cuando: '▪️' }
+
+/** Open tasks shown per company before "+N más en GabbyHQ". */
+export const MAX_POR_EMPRESA = 12
 const PRIORITY_RANK = { urgente: 0, normal: 1, cuando: 2 } as const
 
 interface Numbered {
@@ -46,9 +48,12 @@ interface Numbered {
 }
 
 interface Grupo {
+  id: string | null
   name: string
   nota: string | null
   items: Numbered[]
+  /** Open tasks of the company beyond MAX_POR_EMPRESA (not numbered, not shown). */
+  extra: number
   isChelsea: boolean
 }
 
@@ -142,16 +147,38 @@ function companiesInOrder(companies: Company[]): Company[] {
   return [...fixed, ...rest]
 }
 
-function bucketFor(t: Task, today: string): Bucket | null {
+/** Which symbol a task gets. Every open task has one (fase 4d: the lists show everything). */
+export function bucketFor(t: Task, today: string): Bucket {
   if (t.due_date) {
     if (t.due_date < today) return 'vencida'
     if (t.due_date === today) return 'hoy'
   }
   if (t.priority === 'urgente' || t.importante) return 'estrella'
-  return null
+  if (t.priority === 'normal') return 'normal'
+  return 'cuando'
 }
 
-function compareInBucket(a: Task, b: Task): number {
+export function simboloDe(t: Pick<Task, 'due_date' | 'priority' | 'importante'>, today: string): string {
+  return SIMBOLO[bucketFor(t as Task, today)]
+}
+
+/**
+ * Order inside a company: vencidas (oldest first) → vence hoy → urgente★ →
+ * urgente → ★ → normal con fecha (soonest) → normal sin fecha → cuando pueda.
+ */
+function rango(t: Task, today: string): number {
+  if (t.due_date && t.due_date < today) return 0
+  if (t.due_date === today) return 1
+  if (t.priority === 'urgente' && t.importante) return 2
+  if (t.priority === 'urgente') return 3
+  if (t.importante) return 4
+  if (t.priority === 'normal') return t.due_date ? 5 : 6
+  return 7
+}
+
+function compareTasks(a: Task, b: Task, today: string): number {
+  const r = rango(a, today) - rango(b, today)
+  if (r !== 0) return r
   // Dated first (soonest), then by priority, then oldest first.
   if (a.due_date && b.due_date && a.due_date !== b.due_date) return a.due_date < b.due_date ? -1 : 1
   if (!!a.due_date !== !!b.due_date) return a.due_date ? -1 : 1
@@ -161,9 +188,10 @@ function compareInBucket(a: Task, b: Task): number {
 }
 
 /**
- * The numbered list both alarms share: per company (fixed order), the open
- * tasks that are overdue, due today, or urgente/★. Numbers run 1..N across
- * the whole message. A company with neither a note nor such tasks is omitted.
+ * The numbered list every message shares: per company (fixed order), ALL
+ * its open tasks in `rango` order, at most MAX_POR_EMPRESA each (the rest
+ * becomes "+N más en GabbyHQ"). Numbers run 1..N across the whole message.
+ * A company with neither a note nor open tasks is omitted.
  */
 function buildGrupos(
   tasks: Task[],
@@ -175,8 +203,9 @@ function buildGrupos(
   const items: AlarmaItem[] = []
   let n = 0
 
-  const sections: { name: string; nota: string | null; tasks: Task[]; isChelsea: boolean }[] =
+  const sections: { id: string | null; name: string; nota: string | null; tasks: Task[]; isChelsea: boolean }[] =
     companiesInOrder(companies).map((c) => ({
+      id: c.id,
       name: c.name.trim(),
       nota: notas.find((x) => x.company_id === c.id)?.nota?.trim() || null,
       tasks: tasks.filter((t) => t.company_id === c.id),
@@ -184,22 +213,19 @@ function buildGrupos(
     }))
   // Tasks created by the Inbox-IM "I'll handle it" button carry no company;
   // without this block an overdue one would silently vanish from the alarm.
-  sections.push({ name: SIN_EMPRESA, nota: null, tasks: tasks.filter((t) => !t.company_id), isChelsea: false })
+  sections.push({ id: null, name: SIN_EMPRESA, nota: null, tasks: tasks.filter((t) => !t.company_id), isChelsea: false })
 
   for (const s of sections) {
-    const picked = s.tasks
-      .map((task) => ({ task, bucket: bucketFor(task, today) }))
-      .filter((x): x is { task: Task; bucket: Bucket } => x.bucket !== null)
-      .sort((a, b) => BUCKET_ORDER.indexOf(a.bucket) - BUCKET_ORDER.indexOf(b.bucket) || compareInBucket(a.task, b.task))
+    const ordered = [...s.tasks].sort((a, b) => compareTasks(a, b, today))
+    if (!s.nota && ordered.length === 0) continue
 
-    if (!s.nota && picked.length === 0) continue
-
-    const numbered: Numbered[] = picked.map((x) => {
+    const shown = ordered.slice(0, MAX_POR_EMPRESA)
+    const numbered: Numbered[] = shown.map((task) => {
       n += 1
-      items.push({ n, task_id: x.task.id })
-      return { n, task: x.task, bucket: x.bucket }
+      items.push({ n, task_id: task.id })
+      return { n, task, bucket: bucketFor(task, today) }
     })
-    grupos.push({ name: s.name, nota: s.nota, items: numbered, isChelsea: s.isChelsea })
+    grupos.push({ id: s.id, name: s.name, nota: s.nota, items: numbered, extra: ordered.length - shown.length, isChelsea: s.isChelsea })
   }
 
   return { grupos, items }
@@ -209,18 +235,24 @@ function buildGrupos(
 
 function lineFor(item: Numbered, today: string): string {
   const text = escapeHtml(item.task.text)
-  // Fase 5: tasks with an hour show it ("· 3:00 pm 📅" when they have a Calendar event).
+  const sym = SIMBOLO[item.bucket]
+  // Tasks with an hour show it ("· 3:00 pm 📅" when they have a Calendar event).
   const hora = item.task.due_time ? ` · ${formatHoraEs(item.task.due_time.slice(0, 5))}${item.task.gcal_event_id ? ' 📅' : ''}` : ''
   switch (item.bucket) {
     case 'vencida': {
       const d = daysBetween(item.task.due_date!, today)
-      return `${SIMBOLO.vencida} ${item.n}. ${text} · hace ${d} ${d === 1 ? 'día' : 'días'}`
+      return `${sym} ${item.n}. ${text} · hace ${d} ${d === 1 ? 'día' : 'días'}`
     }
     case 'hoy':
-      return `${SIMBOLO.hoy} ${item.n}. ${text}${hora}`
-    case 'estrella':
-      return `${SIMBOLO.estrella} ${item.n}. ${text}${item.task.due_date ? ` · ${formatCortoEs(item.task.due_date)}` : ''}${hora}`
+      return `${sym} ${item.n}. ${text}${hora}`
+    default:
+      return `${sym} ${item.n}. ${text}${item.task.due_date ? ` · ${formatCortoEs(item.task.due_date)}` : ''}${hora}`
   }
+}
+
+function masLine(g: Grupo): string {
+  const url = g.id ? `${appUrl()}/tasks?company=${g.id}` : `${appUrl()}/tasks`
+  return `· +${g.extra} más en <a href="${url}">GabbyHQ</a>`
 }
 
 function chelseaMailLine(count: number | null): string {
@@ -229,10 +261,11 @@ function chelseaMailLine(count: number | null): string {
   return `📬 ${count} ${count === 1 ? 'correo pendiente' : 'correos pendientes'} → <a href="${appUrl()}/inbox">/inbox</a>`
 }
 
-function renderGrupo(g: Grupo, today: string, opts: { notas: boolean; chelseaMail?: number | null }): string[] {
-  const lines = [`<b>${escapeHtml(g.name)}</b>`]
+function renderGrupo(g: Grupo, today: string, opts: { notas: boolean; chelseaMail?: number | null; header?: boolean }): string[] {
+  const lines = opts.header === false ? [] : [`<b>${escapeHtml(g.name)}</b>`]
   if (opts.notas && g.nota) lines.push(`📝 ${escapeHtml(g.nota)}`)
   for (const item of g.items) lines.push(lineFor(item, today))
+  if (g.extra > 0) lines.push(masLine(g))
   if (g.isChelsea && opts.chelseaMail !== undefined) lines.push(chelseaMailLine(opts.chelseaMail))
   return lines
 }
@@ -252,17 +285,18 @@ export async function buildManana(today: string = cancunYmd()): Promise<Mensaje>
   const hasChelsea = grupos.some((g) => g.isChelsea)
   const chelseaCompany = companies.find((c) => isChelsea(c.name))
   if (!hasChelsea && (chelseaMail === null || chelseaMail > 0)) {
-    grupos.push({ name: chelseaCompany?.name.trim() ?? CHELSEA_COMPANY_NAME, nota: null, items: [], isChelsea: true })
+    grupos.push({ id: chelseaCompany?.id ?? null, name: chelseaCompany?.name.trim() ?? CHELSEA_COMPANY_NAME, nota: null, items: [], extra: 0, isChelsea: true })
   }
 
   const link = `<a href="${appUrl()}/hoy">abrir GabbyHQ</a>`
   if (grupos.length === 0) {
-    return { text: `☀️ Hoy no tienes nada urgente. Revisa Construir en GabbyHQ.\n${link}`, items: [] }
+    return { text: `☀️ No tienes nada pendiente. Revisa Construir en GabbyHQ.\n${link}`, items: [] }
   }
 
   const blocks: string[] = [`☀️ <b>Hoy, ${formatDiaLargoEs(today)}</b>`]
   for (const g of grupos) blocks.push(renderGrupo(g, today, { notas: true, chelseaMail }).join('\n'))
-  blocks.push(`Total: ${plural(items.length, 'tarea', 'tareas')} · ${link}`)
+  const total = grupos.reduce((acc, g) => acc + g.items.length + g.extra, 0)
+  blocks.push(`Total: ${plural(total, 'tarea abierta', 'tareas abiertas')} · ${link}`)
   return { text: blocks.join('\n\n'), items }
 }
 
@@ -290,9 +324,10 @@ export async function buildTarde(today: string = cancunYmd()): Promise<Mensaje> 
       : '✅ <b>Hecho hoy (0)</b> · nada registrado'
   )
 
-  // ⏳ Sigue pendiente — the morning selection, recomputed now and renumbered.
+  // ⏳ Sigue pendiente — every open task, recomputed now and renumbered.
+  const abiertas = grupos.reduce((acc, g) => acc + g.items.length + g.extra, 0)
   if (items.length > 0) {
-    const pendLines = [`⏳ <b>Sigue pendiente (${items.length})</b>`]
+    const pendLines = [`⏳ <b>Sigue pendiente (${abiertas})</b>`]
     for (const g of grupos) pendLines.push(...renderGrupo(g, today, { notas: false }))
     blocks.push(pendLines.join('\n'))
   } else {
@@ -314,6 +349,23 @@ export async function buildTarde(today: string = cancunYmd()): Promise<Mensaje> 
   return { text: blocks.join('\n\n'), items }
 }
 
+/**
+ * Fase 4d: "/pendientes IM" / "todo lo pendiente de IM" — the same full list
+ * for ONE company: "📋 Pendiente · IM (5)", numbered like the morning.
+ */
+export async function buildPendientes(company: Pick<Company, 'id' | 'name'>, today: string = cancunYmd()): Promise<Mensaje> {
+  const { tasks } = await loadOpenTasks()
+  const mine = tasks.filter((t) => t.company_id === company.id)
+  const { grupos, items } = buildGrupos(mine, [company as Company], [], today)
+  const name = escapeHtml(company.name.trim())
+  const link = `<a href="${appUrl()}/tasks?company=${company.id}">abrir en GabbyHQ</a>`
+  if (mine.length === 0) return { text: `📋 <b>Pendiente · ${name} (0)</b>\nNada abierto 🎉 · ${link}`, items: [] }
+  const blocks = [`📋 <b>Pendiente · ${name} (${mine.length})</b>`]
+  for (const g of grupos) blocks.push(renderGrupo(g, today, { notas: false, header: false }).join('\n'))
+  blocks.push(`Para cerrar o mover: <code>listo 2</code> · <code>pasa 3</code> · ${link}`)
+  return { text: blocks.join('\n\n'), items }
+}
+
 // ── Sending, recording, retrying ─────────────────────────────────────────
 
 export async function guardarAlarma(tipo: AlarmaTipo, items: AlarmaItem[]): Promise<void> {
@@ -328,10 +380,11 @@ export async function guardarAlarma(tipo: AlarmaTipo, items: AlarmaItem[]): Prom
  * Fase 4c: the same list, on demand ("/hoy", "dame la lista", "cierre"),
  * sent to ONE chat and recorded like the cron's, so "listo 3" works on it.
  */
-export async function enviarLista(chatId: number, tipo: 'manana' | 'tarde'): Promise<number> {
-  const built = tipo === 'manana' ? await buildManana() : await buildTarde()
+export async function enviarLista(chatId: number, tipo: 'manana' | 'tarde' | 'pendientes', company?: Pick<Company, 'id' | 'name'> | null): Promise<number> {
+  const built = tipo === 'tarde' ? await buildTarde() : tipo === 'pendientes' && company ? await buildPendientes(company) : await buildManana()
   await sendTelegram(chatId, built.text, { html: true, tag: `lista-${tipo}` })
-  await guardarAlarma(tipo, built.items)
+  // A per-company list is numbered like the morning one; bot_alarmas keeps the numbers under 'manana'.
+  await guardarAlarma(tipo === 'tarde' ? 'tarde' : 'manana', built.items)
   return built.items.length
 }
 

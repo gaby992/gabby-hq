@@ -259,9 +259,9 @@ async function handleText(chatId: number, text: string, prefix: string | null) {
       await reply(chatId, joinLines(prefix, 'Los pagos recurrentes se agregan, cambian y quitan en GabbyHQ → Settings → Pagos recurrentes. Por aquí solo los consulto: "pagos de IM", "qué pagos hay esta semana".'))
       return
     case 'lista':
-      // Fase 4c: the 8:00 / 6:00 pm message, now, recorded like the cron's.
+      // Fase 4c: the 8:00 / 6:00 pm message, now, recorded like the cron's; 4d: one company.
       if (prefix) await reply(chatId, prefix)
-      await enviarLista(chatId, parsed.tipo)
+      await enviarLista(chatId, parsed.tipo, parsed.empresa ?? null)
       return
     case 'que_sigue':
       // Fase 4b: ordered in code, same HTML style as the 8:00 list, numbered like an alarm.

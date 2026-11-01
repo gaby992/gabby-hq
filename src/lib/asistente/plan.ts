@@ -109,11 +109,12 @@ export function resolverAcciones(acciones: AccionLlm[], ctx: ContextoInterprete,
         r.error = res.error
       }
     }
-    if ((a.tipo === 'cambiar' || a.tipo === 'crear' || a.tipo === 'nota_empresa' || a.tipo === 'pagos_listar') && a.empresa) {
+    if ((a.tipo === 'cambiar' || a.tipo === 'crear' || a.tipo === 'nota_empresa' || a.tipo === 'pagos_listar' || a.tipo === 'lista') && a.empresa) {
       const e = resolverEmpresa(a.empresa, companies)
       if (e) r.empresa_ref = e
       else if (a.tipo !== 'crear') r.error = r.error ?? `no conozco la empresa «${a.empresa}»`
     }
+    if (a.tipo === 'nota_empresa' && !a.empresa) r.error = r.error ?? 'no sé de qué empresa es la nota: dime "nota IM: …"'
     if (a.tipo === 'cambiar' && !a.prioridad && !a.fecha && !a.empresa && !a.hora && !a.calendar) r.error = r.error ?? 'no dijiste qué cambiar'
     if (a.tipo === 'alarma') {
       const cuando = instanteDe(a)
@@ -169,7 +170,7 @@ function frase(a: AccionResuelta, today: string, conTarea: boolean): string {
     case 'alarma': return `Alarma «${corto(a.texto)}» · ${a.dispara_en ? formatFechaHoraEs(a.dispara_en) : `${a.fecha ? formatVenceEs(a.fecha) : 'hoy'} (sin hora → 9:00 am)`}`
     case 'pregunta': return `Responder «${corto(a.texto, 60)}»`
     case 'que_sigue': return `Qué sigue${a.empresa ? ` de ${a.empresa}` : ''}${a.solo_urgentes ? ' (solo urgentes)' : ''}${a.solo_vencer ? ' (por vencer)' : ''}`
-    case 'lista': return a.lista === 'tarde' ? 'Mandar el cierre del día' : 'Mandar la lista completa de hoy'
+    case 'lista': return a.lista === 'tarde' ? 'Mandar el cierre del día' : a.lista === 'pendientes' ? `Mandar todo lo pendiente de ${a.empresa_ref?.name.trim() ?? a.empresa ?? '?'}` : 'Mandar la lista completa de hoy'
     case 'calendar': return `Poner en calendar${tt}${a.hora ? ` a las ${formatHoraEs(a.hora)}` : a.todo_el_dia ? ' (todo el día)' : ''}`
     case 'pagos_listar': return `Listar pagos${a.empresa_ref ? ` de ${a.empresa_ref.name.trim()}` : ''}${a.semana ? ' de esta semana' : ''}`
     case 'desconocido': return `No entendí «${corto(a.texto, 60)}»`
@@ -304,7 +305,7 @@ export async function ejecutarUna(chatId: number, a: AccionResuelta): Promise<st
       return '🎯 (enviado arriba)'
     case 'lista':
       // Sent as its own HTML message (same builder as the cron); nothing to add here.
-      await enviarLista(chatId, a.lista)
+      await enviarLista(chatId, a.lista, a.empresa_ref ?? null)
       return a.lista === 'tarde' ? '📋 (cierre enviado arriba)' : '📋 (lista enviada arriba)'
     case 'calendar': {
       // In a plan, no hour → all-day (a single action asks with buttons in the webhook).

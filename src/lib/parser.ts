@@ -69,7 +69,7 @@ export interface Cambios {
   calendar?: boolean
 }
 
-export type ListaTipo = 'manana' | 'tarde'
+export type ListaTipo = 'manana' | 'tarde' | 'pendientes'
 
 export interface QueSigueOpts {
   empresa?: string | null
@@ -80,8 +80,8 @@ export interface QueSigueOpts {
 export type Parsed =
   | { kind: 'ayuda' }
   | { kind: 'que_sigue'; opts: QueSigueOpts }
-  /** Fase 4c: the 8:00 / 6:00 pm list, on demand. */
-  | { kind: 'lista'; tipo: ListaTipo }
+  /** Fase 4c: the 8:00 / 6:00 pm list, on demand; fase 4d: 'pendientes' + empresa = one company's full list. */
+  | { kind: 'lista'; tipo: ListaTipo; empresa?: CompanyRef | null }
   /** Fase 5-B: "pon en calendar la de TOTT" → the open task whose title contains `termino`. */
   | { kind: 'calendar'; termino: string }
   /** Fase 5-C: recurring payments — the bot only LISTS them (they are managed in /settings). */
@@ -428,13 +428,23 @@ function parsePagos(text: string, companies: CompanyRef[]): Parsed | null {
 // Fase 4c: the full list, now. "/hoy", "dame la lista", "la lista de la
 // mañana", "lista completa", "todo lo pendiente" → the 8:00 message;
 // "cierre", "lista de la tarde", "/cierre" → the 6:00 pm one.
-function parseLista(text: string): ListaTipo | null {
+function parseLista(text: string, companies: CompanyRef[]): { tipo: ListaTipo; empresa?: CompanyRef | null } | null {
   const n = sinAcentos(text.replace(/^[¿?¡!\s]+|[?!.\s]+$/g, ''))
-  if (/^\/?(hoy|lista)$/.test(n)) return 'manana'
-  if (/^(dame|mandame|pasame|ponme|quiero|ver)\s+(la\s+)?lista(\s+(completa|de\s+(la\s+)?manana|de\s+hoy))?$/.test(n)) return 'manana'
-  if (/^(la\s+)?lista\s+(completa|de\s+(la\s+)?manana|de\s+hoy)$/.test(n)) return 'manana'
-  if (/^todo\s+lo\s+pendiente$/.test(n) || /^(que|cuales)\s+(son\s+)?(todas\s+)?(mis|las)\s+(tareas\s+)?pendientes$/.test(n)) return 'manana'
-  if (/^\/?cierre(\s+del\s+dia)?$/.test(n) || /^(dame\s+|mandame\s+)?(el\s+|la\s+)?(cierre|lista\s+de\s+(la\s+)?tarde)$/.test(n)) return 'tarde'
+  // Fase 4d: "/pendientes IM", "pendientes de IM", "todo lo pendiente de IM", "qué tengo pendiente de PD".
+  const pend = n.match(/^\/?pendientes?(?:\s+(?:de\s+)?(.+))?$/)
+    ?? n.match(/^(?:todo\s+)?lo\s+pendiente\s+(?:de|en)\s+(.+)$/)
+    ?? n.match(/^(?:que|cuales)\s+(?:tengo|hay|queda)\s+pendientes?\s+(?:de|en)\s+(.+)$/)
+  if (pend) {
+    if (!pend[1]) return { tipo: 'manana' }
+    const empresa = findCompany(pend[1], companies)
+    if (empresa) return { tipo: 'pendientes', empresa }
+    return null
+  }
+  if (/^\/?(hoy|lista)$/.test(n)) return { tipo: 'manana' }
+  if (/^(dame|mandame|pasame|ponme|quiero|ver)\s+(la\s+)?lista(\s+(completa|de\s+(la\s+)?manana|de\s+hoy))?$/.test(n)) return { tipo: 'manana' }
+  if (/^(la\s+)?lista\s+(completa|de\s+(la\s+)?manana|de\s+hoy)$/.test(n)) return { tipo: 'manana' }
+  if (/^todo\s+lo\s+pendiente$/.test(n) || /^(que|cuales)\s+(son\s+)?(todas\s+)?(mis|las)\s+(tareas\s+)?pendientes$/.test(n)) return { tipo: 'manana' }
+  if (/^\/?cierre(\s+del\s+dia)?$/.test(n) || /^(dame\s+|mandame\s+)?(el\s+|la\s+)?(cierre|lista\s+de\s+(la\s+)?tarde)$/.test(n)) return { tipo: 'tarde' }
   return null
 }
 
@@ -475,8 +485,8 @@ export function parseMensaje(raw: string, companies: CompanyRef[], today: string
   const lower = text.toLowerCase()
 
   if (/^(?:\/start|\/help|\/ayuda|ayuda|help|formato)\b/i.test(lower)) return { kind: 'ayuda' }
-  const lista = parseLista(text)
-  if (lista) return { kind: 'lista', tipo: lista }
+  const lista = parseLista(text, companies)
+  if (lista) return { kind: 'lista', tipo: lista.tipo, empresa: lista.empresa ?? null }
   const pagos = parsePagos(text, companies)
   if (pagos) return pagos
   const calCmd = text.match(/^(?:pon|ponme|agrega|agr[ée]game|mete|m[ée]teme)\s+(?:en|al)\s+(?:el\s+)?(?:google\s+)?(?:calendar|calendario|agenda)\s+(?:la\s+(?:tarea\s+)?(?:de|del)\s+|la\s+|el\s+)?(.+)$/i)
@@ -494,7 +504,9 @@ export function parseMensaje(raw: string, companies: CompanyRef[], today: string
   if (radar) return { kind: 'radar', titulo: tidy(radar[1]) }
   const notaTarea = text.match(/^nota\s+en\s+([^:]+?)\s*:\s*([\s\S]*)$/i)
   if (notaTarea) return { kind: 'nota_tarea', termino: tidy(notaTarea[1]), texto: tidy(notaTarea[2]) }
+  // "nota IM: …" and, fase 4d, "por dónde iba IM: …" / "notas de IM: …": a note, never a task.
   const nota = text.match(/^nota\b\s*([\s\S]*)$/i)
+    ?? text.match(/^(?:por\s+d[oó]nde\s+(?:iba|voy|vamos|ibamos|íbamos)|notas?\s+de)\s*:?\s*([\s\S]*)$/i)
   if (nota) return { kind: 'nota', nota: parseNota(nota[1], companies) }
   if (/^(?:mis\s+)?alarmas\s*[.!?]?$/i.test(text)) return { kind: 'alarmas' }
   const quitar = text.match(/^(?:quita|quitar|borra|borrar|elimina|cancela)\s+(?:la\s+)?alarma\s+([\s\S]+)$/i)
@@ -549,7 +561,7 @@ export function ayuda(modelo: string): string {
   return [
     '💬 HÁBLAME NORMAL: "el 3 ya está", "pasa el 5 al lunes", "9 cancelar, no se va a hacer", "alarma mañana 9am revisar X" · varias órdenes en un mensaje y te muestro el plan antes de hacerlo',
     '🎯 ¿QUÉ SIGUE? · "qué hago primero" · "solo urgentes" · "qué vence esta semana" · "qué sigue de IM" → una tarea para ahora, 3 después, 3 por vencer; luego "listo 1" / "pasa el segundo"',
-    '📋 /hoy · "dame la lista" · "todo lo pendiente" → la lista completa de las 8:00, ahora · "cierre" → la de las 6:00 pm',
+    '📋 /hoy · "dame la lista" · "todo lo pendiente" → la lista completa de las 8:00, ahora · "cierre" → la de las 6:00 pm · /pendientes IM → solo esa empresa',
     '💳 PAGOS: "pagos de IM" · "qué pagos hay esta semana" (se administran en /settings → Pagos recurrentes)',
     '📥 AGREGAR',
     'urgente/normal/cuando [empresa] tarea [importante] [hoy · mañana · pasado mañana · el viernes · en 3 días · el 15 de nov] [3pm · a las 10] · "… y ponla en calendar" → también evento 📅 · "pon en calendar la de TOTT"',

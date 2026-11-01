@@ -38,7 +38,7 @@ export type AccionLlm =
   | { tipo: 'alarma'; texto: string; fecha?: string; hora?: string; en_minutos?: number }
   | { tipo: 'pregunta'; texto: string }
   | { tipo: 'que_sigue'; empresa?: string; solo_urgentes?: boolean; solo_vencer?: boolean }
-  | { tipo: 'lista'; lista: 'manana' | 'tarde' }
+  | { tipo: 'lista'; lista: 'manana' | 'tarde' | 'pendientes'; empresa?: string }
   | { tipo: 'desconocido'; texto: string }
 
 export type TipoAccionLlm = AccionLlm['tipo']
@@ -189,8 +189,9 @@ export function systemPrompt(today: string): string {
     '- {"tipo":"pregunta","texto":"…"}  → pregunta sobre sus tareas (qué tengo hoy, qué cerré ayer, cómo voy con IM)',
     '- {"tipo":"que_sigue",("empresa":"…"),("solo_urgentes":true),("solo_vencer":true)}  → "qué sigue", "qué hago primero", "qué es lo más urgente", "por dónde empiezo". ' +
       '"solo urgentes" → solo_urgentes; "qué vence / qué está por vencer esta semana" → solo_vencer; "qué sigue de IM" → empresa',
-    '- {"tipo":"lista","lista":"manana|tarde"}  → la LISTA COMPLETA numerada: "dame la lista", "la lista de la mañana", "lista completa", "todo lo pendiente", "mándame el /hoy" → manana; ' +
-      '"cierre", "lista de la tarde", "el cierre del día" → tarde. Esto NO es que_sigue (que_sigue es corto y ordenado; lista es todo)',
+    '- {"tipo":"lista","lista":"manana|tarde|pendientes",("empresa":"…")}  → la LISTA COMPLETA numerada: "dame la lista", "la lista de la mañana", "lista completa", "todo lo pendiente", "mándame el /hoy" → manana; ' +
+      '"cierre", "lista de la tarde", "el cierre del día" → tarde; "todo lo pendiente de IM", "qué tengo pendiente en PD", "pendientes de IM" → pendientes + empresa. ' +
+      'Esto NO es que_sigue (que_sigue es corto y ordenado; lista es todo)',
     '- {"tipo":"desconocido","texto":"…"}  → saludos, comentarios o algo que no es ninguna de las anteriores',
     '',
     'REF = a qué tarea se refiere: el id entre corchetes del contexto ("#3" = número de la última alarma, "t12" = otra tarea abierta), ' +
@@ -206,6 +207,7 @@ export function systemPrompt(today: string): string {
       'Si la hora de una alarma ya pasó hoy y no dijo día, es mañana.',
     'PRIORIDAD: "urgente" implica importante. EMPRESA: usa el nombre exacto de la lista EMPRESAS.',
     'Una frase sin verbo de orden ni número ("llamar a Juan", "revisar pagos PD mañana", "urgente IM mandar propuesta") es "crear". ' +
+      'PERO una frase que empieza por "por dónde iba", "nota:", "nota IM", "notas de PD" o parecido NUNCA es crear: es "nota_empresa" (texto = lo que sigue, modo reemplazar) con la empresa que mencione. ' +
       'En "crear", "hoy" / "mañana" / un día de la semana al final NO van en el título: van en "fecha". ' +
       'Si dicta los campos separados por comas ("Agregar un nuevo task, whatsapp, chelito, due date, mañana, compañía"), ' +
       'las palabras de campo (task, due date, compañía, prioridad) no son el título: titulo = "whatsapp chelito", fecha = mañana, y si dice "compañía" sin nombre, omite empresa.',
@@ -246,6 +248,21 @@ function hora(v: unknown): string | undefined {
   const mi = Number(m[2])
   if (h > 23 || mi > 59) return undefined
   return `${String(h).padStart(2, '0')}:${m[2]}`
+}
+
+/**
+ * "Por dónde iba IM: …", "nota IM: …", "notas de PD: …" typed as a task title
+ * → the nota_empresa action instead. Returns null when the title is not a note.
+ */
+const RE_POR_DONDE_IBA = /^por\s+d[oó]nde\s+(?:iba|voy|vamos|íbamos|ibamos)\b\s*(?:(?:con|de|en)\s+)?(?:([A-Za-zÁÉÍÓÚáéíóúÑñ]+)\s*:\s*)?:?\s*([\s\S]*)$/i
+// "nota: …", "nota IM: …", "notas de PD: …" — the colon is what makes it a note;
+// "Notas de reunión con Juan" (no colon) stays a task.
+const RE_NOTA = /^notas?(?:\s+de)?\b\s*(?::\s*|\s+([A-Za-zÁÉÍÓÚáéíóúÑñ]+)\s*:\s*)([\s\S]*)$/i
+export function comoNotaEmpresa(titulo: string, empresa?: string): AccionLlm | null {
+  const m = titulo.match(RE_POR_DONDE_IBA) ?? titulo.match(RE_NOTA)
+  if (!m) return null
+  const texto = (m[2] ?? '').trim()
+  return { tipo: 'nota_empresa', empresa: empresa ?? m[1] ?? '', texto: texto || titulo, modo: 'reemplazar' }
 }
 
 // Words that are the order itself, not a reason: "pídelo cancelar", "bórralo".
@@ -335,6 +352,12 @@ export function validarAcciones(raw: unknown): AccionLlm[] {
         break
       case 'crear': {
         const titulo = str(a.titulo) ?? str(a.texto)
+        // Fase 4d: a "note" never becomes a task, whatever the model said.
+        const nota = titulo ? comoNotaEmpresa(titulo, str(a.empresa)) : null
+        if (nota) {
+          out.push(nota)
+          break
+        }
         if (titulo) {
           const p = prioridad(a.prioridad)
           // The classic extractors run over the title the model returned: if it
@@ -351,9 +374,12 @@ export function validarAcciones(raw: unknown): AccionLlm[] {
       case 'que_sigue':
         out.push({ tipo, empresa: str(a.empresa), solo_urgentes: a.solo_urgentes === true, solo_vencer: a.solo_vencer === true })
         break
-      case 'lista':
-        out.push({ tipo, lista: str(a.lista)?.toLowerCase() === 'tarde' ? 'tarde' : 'manana' })
+      case 'lista': {
+        const l = str(a.lista)?.toLowerCase()
+        const empresa = str(a.empresa)
+        out.push({ tipo, lista: l === 'tarde' ? 'tarde' : l === 'pendientes' || empresa ? 'pendientes' : 'manana', empresa })
         break
+      }
       case 'calendar':
         if (ref) out.push({ tipo, ref, hora: hora(a.hora), todo_el_dia: a.todo_el_dia === true })
         break

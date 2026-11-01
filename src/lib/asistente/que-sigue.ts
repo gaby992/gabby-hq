@@ -16,7 +16,7 @@ import type { Company, NotaEmpresa, Priority } from '@/types'
 import { CHELSEA_COMPANY_NAME } from '@/lib/chelsea'
 import { NOTA_FRESCA_DIAS } from '@/lib/notas'
 import { daysSince } from '@/lib/dates'
-import { SIMBOLO, guardarAlarma, type AlarmaItem } from './alarmas'
+import { SIMBOLO, guardarAlarma, simboloDe, type AlarmaItem } from './alarmas'
 import { addDays, cancunYmd, daysBetween, formatHoraEs, formatVenceEs } from './cancun'
 import { escapeHtml, sendTelegram } from './telegram'
 
@@ -163,7 +163,7 @@ export async function calcularQueSigue(opts: QueSigueOpts = {}, now: Date = new 
     bloques.push([
       '<b>Por vencer esta semana</b>',
       ...(porVencer.length > 0
-        ? porVencer.map((t) => item(SIMBOLO.proxima, t, `${formatVenceEs(t.due_date!)}${t.due_time ? ` ${formatHoraEs(t.due_time.slice(0, 5))}` : ''}`))
+        ? porVencer.map((t) => item(simboloDe(t, today), t, `${formatVenceEs(t.due_date!)}${t.due_time ? ` ${formatHoraEs(t.due_time.slice(0, 5))}` : ''}`))
         : ['— nada vence esta semana']),
     ].join('\n'))
   }
