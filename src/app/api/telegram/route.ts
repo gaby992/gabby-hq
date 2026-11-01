@@ -344,6 +344,12 @@ async function handleLibre(chatId: number, text: string, parsed: Parsed, prefix:
     await guardarOPreguntar(chatId, text, tareaParsedDe(a), prefix)
     return
   }
+  if (a.tipo === 'borrar') {
+    // "bórralo": the same [Sí, borrar] [No] as "borra 3". Never without it.
+    const params: AccionParams = { accion: 'borra' }
+    await responderAccion(chatId, text, params, (nonce) => conIds(params, [a.tarea!.id], nonce), prefix)
+    return
+  }
   if (a.tipo === 'alarma' && !a.dispara_en) {
     const nonce = await borradorConNonce(chatId, text, { tipo: 'alarma_hora', texto: a.texto, fecha: a.fecha ?? null })
     const dia = a.fecha ? `el ${formatVenceEs(a.fecha)}` : 'hoy'
@@ -472,6 +478,12 @@ async function handleCallback(cq: CallbackQuery) {
       await borrarBorrador(borrador.id)
       const elegida = parsed.accion.candidatos?.find((t) => t.id === value)
       if (!elegida) return
+      if (parsed.accion.tipo === 'borrar') {
+        // Chosen, but still a delete: ask [Sí, borrar] [No] on a fresh draft.
+        const params: AccionParams = { accion: 'borra' }
+        await responderAccion(chatId, borrador.texto, params, (n) => conIds(params, [elegida.id], n), null)
+        return
+      }
       const accion: AccionResuelta = { ...parsed.accion, tarea: elegida, candidatos: undefined, error: undefined }
       await reply(chatId, await ejecutarUna(chatId, accion))
       return

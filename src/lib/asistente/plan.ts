@@ -121,7 +121,7 @@ export function resolverAcciones(acciones: AccionLlm[], ctx: ContextoInterprete,
 // ── Rendering ───────────────────────────────────────────────────────────
 
 const ICONO: Record<AccionLlm['tipo'], string> = {
-  completar: '✅', cancelar: '🗑', posponer: '➡️', renombrar: '✏️', cambiar: '✏️', crear: '➕',
+  completar: '✅', cancelar: '🗑', borrar: '❌', posponer: '➡️', renombrar: '✏️', cambiar: '✏️', crear: '➕',
   nota_empresa: '📝', nota_tarea: '📎', alarma: '⏰', pregunta: '❓', desconocido: '🤷',
 }
 
@@ -146,6 +146,7 @@ function frase(a: AccionResuelta, today: string, conTarea: boolean): string {
   switch (a.tipo) {
     case 'completar': return `Completar${tt}`
     case 'cancelar': return `Cancelar${tt}${a.motivo ? ` (nota: ${a.motivo})` : ''}`
+    case 'borrar': return `Borrar${tt} (se elimina)`
     case 'posponer': return `Pasar ${fechaDicha(a.fecha, today)}${tt}`
     case 'renombrar': return `Renombrar${tt} → «${a.titulo}»`
     case 'cambiar': return `Cambiar${tt} → ${describirCambios(a)}`
@@ -164,7 +165,7 @@ function frase(a: AccionResuelta, today: string, conTarea: boolean): string {
 
 /** True when an action adjacent to another on the same task reads well joined with " y ". */
 function enlazable(a: AccionResuelta): boolean {
-  return !!a.tarea && !a.error && ['posponer', 'renombrar', 'cambiar', 'completar', 'cancelar', 'nota_tarea'].includes(a.tipo)
+  return !!a.tarea && !a.error && ['posponer', 'renombrar', 'cambiar', 'completar', 'cancelar', 'borrar', 'nota_tarea'].includes(a.tipo)
 }
 
 /**
@@ -196,7 +197,11 @@ export function renderPlan(acciones: AccionResuelta[], today: string = cancunYmd
 
 // ── Execution ───────────────────────────────────────────────────────────
 
-/** Fase 4 rule: the plan needs an OK when there are 2+ actions or any of them cancels. */
+/**
+ * Fase 4 rule: the plan needs an OK when there are 2+ actions or any of them
+ * cancels. A single "borrar" is not here: it goes through the classic
+ * [Sí, borrar] [No] in the webhook instead.
+ */
 export function necesitaConfirmacion(acciones: AccionResuelta[]): boolean {
   const reales = acciones.filter((a) => a.tipo !== 'desconocido')
   return reales.length >= 2 || reales.some((a) => a.tipo === 'cancelar')
@@ -230,6 +235,10 @@ export async function ejecutarUna(chatId: number, a: AccionResuelta): Promise<st
       return ejecutarAccion({ accion: 'listo' }, [tareaDe(a).id])
     case 'cancelar':
       return cancelarTareas([tareaDe(a).id], a.motivo)
+    case 'borrar':
+      // Only reached from an approved plan (the "❌ Borrar" line was shown);
+      // a single "bórralo" asks [Sí, borrar] [No] in the webhook first.
+      return ejecutarAccion({ accion: 'borra' }, [tareaDe(a).id])
     case 'posponer': {
       const today = cancunYmd()
       if (a.fecha === addDays(today, 1)) return ejecutarAccion({ accion: 'pasa' }, [tareaDe(a).id])

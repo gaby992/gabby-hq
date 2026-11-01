@@ -869,7 +869,8 @@ con tipo y datos. Los comandos exactos siguen igual y no tocan el modelo:
 | Acción | Qué dice Gabby | Qué hace |
 | --- | --- | --- |
 | `completar {ref}` | "1 terminado", "el 3 ya está", "listo el de paypal" | `done = true` |
-| `cancelar {ref, motivo?}` | "9 cancelar no se va hacer" | `done = true` + línea en notas `1 nov: cancelada — no se va a hacer`. **No se borra.** |
+| `cancelar {ref, motivo?}` | "9 cancelar no se va hacer", "ya no aplica" | `done = true` + línea en notas `1 nov: cancelada — no se va a hacer`. **No se borra.** |
+| `borrar {ref}` | "bórralo", "elimina el 4", "borra la de paypal" | se elimina de verdad, **siempre** tras [🗑️ Sí, borrar] [No] |
 | `posponer {ref, fecha}` | "12 pasar para mañana", "pasa el 5 al lunes" | `due_date` |
 | `renombrar {ref, titulo}` | "11 se llama URo" | `text` |
 | `cambiar {ref, prioridad\|empresa\|fecha}` | "el 4 es urgente", "paypal es de PD" | lo que diga |
@@ -879,6 +880,14 @@ con tipo y datos. Los comandos exactos siguen igual y no tocan el modelo:
 | `alarma {texto, fecha, hora}` | "alarma mañana 3pm revisar pagos" | ver **Alarmas propias** |
 | `pregunta {texto}` | "qué tengo hoy" | va a `/pregunta` |
 | `desconocido {texto}` | "hola", "jaja" | ver **Reglas** |
+
+**Cancelar no es borrar.** "borra / elimina / bórralo" → `borrar` (la tarea
+desaparece, con la misma confirmación de botones que `borra 3`). "cancelar /
+no se va a hacer / ya no aplica" → `cancelar` (queda en Completadas con su
+nota). La nota de cancelación lleva el **motivo solo si lo dio** ("no se va a
+hacer", "el cliente se echó atrás"); nunca la orden literal ("pídelo
+cancelar", "bórralo"): el prompt lo pide y `limpiarMotivo()` lo filtra por si
+acaso. Sin motivo, la nota es solo `1 nov: cancelada`.
 
 `ref` puede ser el **número de la última alarma** (`#3` — "el 3", "1
 terminado"), el id de cualquier otra tarea abierta que el modelo ve en el
@@ -914,7 +923,9 @@ mismas confirmaciones de siempre: `✅ Hecha: …`, `🗑 Cancelada: …`, `✏�
 
 Una sola acción simple (completar, posponer, renombrar, cambiar, nota, alarma
 con hora, pregunta) se ejecuta directo y confirma en una línea, como hoy. Una
-sola `crear` entra al flujo normal de tareas (pregunta empresa/urgencia con
+sola `borrar` ("bórralo") pregunta [🗑️ Sí, borrar] [No] igual que `borra 3`;
+dentro de un plan, la línea `❌ Borrar «…» (se elimina)` y el **Hacer todo**
+son la confirmación. Una sola `crear` entra al flujo normal de tareas (pregunta empresa/urgencia con
 botones si faltan). Dentro de un plan aprobado, una `crear` sin empresa o
 urgencia se guarda tal cual (`Sin empresa · Normal`) — el plan ya lo decía y
 se corrige después con "zzz es de PD". Si la ref de una acción sola coincide
@@ -1001,7 +1012,9 @@ Ninguna.
    tarea 2 trae en notas `1 nov: cancelada — no se va a hacer`.
 2. **Una orden sola.** `el 3 ya está` → `✅ Hecha: …` directo, sin plan.
    `pasa el 4 al lunes` → `✏️ … → vence lun …`. `la anterior es urgente` →
-   cambia la que acabas de mover.
+   cambia la que acabas de mover. `bórralo` → pregunta [Sí, borrar] [No];
+   `cancélalo` → plan de una línea `🗑 Cancelar «…»` sin "(nota: …)", y en
+   Completadas la nota dice solo `1 nov: cancelada`.
 3. **Alarma con hora.** `alarma en 6 minutos probar el cron` →
    `⏰ Alarma: «probar el cron» · …`. Entre 6 y 11 minutos después llega
    `⏰ probar el cron` con los tres botones. Toca **+1h** → `⏰ Te lo recuerdo

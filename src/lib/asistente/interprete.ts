@@ -25,6 +25,7 @@ export type NotaModoLlm = 'reemplazar' | 'agregar'
 export type AccionLlm =
   | { tipo: 'completar'; ref: string }
   | { tipo: 'cancelar'; ref: string; motivo?: string }
+  | { tipo: 'borrar'; ref: string }
   | { tipo: 'posponer'; ref: string; fecha: string }
   | { tipo: 'renombrar'; ref: string; titulo: string }
   | { tipo: 'cambiar'; ref: string; prioridad?: Priority; empresa?: string; fecha?: string }
@@ -38,7 +39,7 @@ export type AccionLlm =
 export type TipoAccionLlm = AccionLlm['tipo']
 
 const TIPOS: TipoAccionLlm[] = [
-  'completar', 'cancelar', 'posponer', 'renombrar', 'cambiar', 'crear',
+  'completar', 'cancelar', 'borrar', 'posponer', 'renombrar', 'cambiar', 'crear',
   'nota_empresa', 'nota_tarea', 'alarma', 'pregunta', 'desconocido',
 ]
 
@@ -160,7 +161,9 @@ export function systemPrompt(today: string): string {
     '',
     'Tipos de acción (campos entre paréntesis son opcionales):',
     '- {"tipo":"completar","ref":REF}  → terminado, terminada, hecho, listo, ya está, ya quedó, done',
-    '- {"tipo":"cancelar","ref":REF,("motivo":"…")}  → cancelar, no se va a hacer, ya no aplica, quítala. motivo = sus palabras',
+    '- {"tipo":"cancelar","ref":REF,("motivo":"…")}  → SOLO cuando dice cancelar, no se va a hacer, ya no aplica. ' +
+      '"motivo" = la razón, SOLO si la dio ("no se va a hacer", "el cliente se echó atrás"); NUNCA la orden en sí ("cancélalo", "pídelo cancelar"). Sin razón → sin "motivo"',
+    '- {"tipo":"borrar","ref":REF}  → borra, elimina, bórralo, quítala de la lista. Se elimina de verdad (el bot pide confirmación)',
     '- {"tipo":"posponer","ref":REF,"fecha":"YYYY-MM-DD"}  → pasar/mover/dejar para otro día',
     '- {"tipo":"renombrar","ref":REF,"titulo":"…"}  → "se llama X", "cámbiale el nombre". Si solo corrige una palabra, devuelve el título completo corregido',
     '- {"tipo":"cambiar","ref":REF,("prioridad":"urgente|normal|cuando"),("empresa":"…"),("fecha":"YYYY-MM-DD")}  → solo lo que cambia',
@@ -187,8 +190,9 @@ export function systemPrompt(today: string): string {
     'PRIORIDAD: "urgente" implica importante. EMPRESA: usa el nombre exacto de la lista EMPRESAS.',
     'Una frase sin verbo de orden ni número ("llamar a Juan", "revisar pagos PD mañana", "urgente IM mandar propuesta") es "crear".',
     '',
-    'Ejemplo. MENSAJE: "1 terminado / 9 cancelar no se va hacer / 11 se llama URo, pasar para mañana / alarma mañana 3pm revisar pagos de PD"',
+    'Ejemplo. MENSAJE: "1 terminado / 9 cancelar no se va hacer / 11 se llama URo, pasar para mañana / bórrame el 4 / alarma mañana 3pm revisar pagos de PD"',
     `→ {"acciones":[{"tipo":"completar","ref":"#1"},{"tipo":"cancelar","ref":"#9","motivo":"no se va a hacer"},` +
+      `{"tipo":"borrar","ref":"#4"},` +
       `{"tipo":"renombrar","ref":"#11","titulo":"URo pendiente"},{"tipo":"posponer","ref":"#11","fecha":"${manana}"},` +
       `{"tipo":"alarma","texto":"revisar pagos de PD","fecha":"${manana}","hora":"15:00"}]}`,
   ].join('\n')
@@ -222,6 +226,35 @@ function hora(v: unknown): string | undefined {
   const mi = Number(m[2])
   if (h > 23 || mi > 59) return undefined
   return `${String(h).padStart(2, '0')}:${m[2]}`
+}
+
+// Words that are the order itself, not a reason: "pídelo cancelar", "bórralo".
+const PALABRAS_ORDEN = new Set([
+  'cancelar', 'cancela', 'cancelalo', 'cancelala', 'cancelarla', 'cancelarlo', 'cancelada', 'cancelado',
+  'borrar', 'borra', 'borralo', 'borrala', 'borrarla', 'borrarlo', 'eliminar', 'elimina', 'eliminalo', 'eliminala',
+  'quitar', 'quita', 'quitalo', 'quitala', 'pidelo', 'pidela', 'pide', 'por', 'favor', 'porfa',
+  'lo', 'la', 'el', 'esa', 'esta', 'ese', 'este', 'tarea', 'de', 'del', 'a', 'y',
+])
+
+/**
+ * The cancel reason as it will be written in notes: only a real reason ("no
+ * se va a hacer"), never the order itself ("pídelo cancelar", "bórralo").
+ */
+export function limpiarMotivo(v: unknown): string | undefined {
+  const m = str(v)
+  if (!m) return undefined
+  // Drop the order words at the front ("cancelar, no se va hacer" → "no se va hacer").
+  let texto = m
+  for (;;) {
+    const lead = texto.match(/^([^\s,.:;]+)[\s,.:;]+/)
+    if (!lead) break
+    const w = normalizar(lead[1])
+    if (!PALABRAS_ORDEN.has(w) || /^(lo|la|el|esa|esta|ese|este)$/.test(w)) break
+    texto = texto.slice(lead[0].length)
+  }
+  const palabras = normalizar(texto).replace(/[^a-z0-9ñ\s]/g, ' ').split(/\s+/).filter(Boolean)
+  const utiles = palabras.filter((w) => !PALABRAS_ORDEN.has(w))
+  return utiles.length > 0 ? texto.replace(/[.!]+$/, '').trim() : undefined
 }
 
 /** Tolerates a fenced or chatty answer: takes the first {…} block. */
@@ -261,7 +294,10 @@ export function validarAcciones(raw: unknown): AccionLlm[] {
         if (ref) out.push({ tipo, ref })
         break
       case 'cancelar':
-        if (ref) out.push({ tipo, ref, motivo: str(a.motivo) })
+        if (ref) out.push({ tipo, ref, motivo: limpiarMotivo(a.motivo) })
+        break
+      case 'borrar':
+        if (ref) out.push({ tipo, ref })
         break
       case 'posponer': {
         const f = fecha(a.fecha)
