@@ -14,7 +14,8 @@ sección y **no se empieza una fase hasta validar la anterior**.
 | 3c | Todo se maneja desde el bot: borrar, nota en tarea, editar, fecha de cierre | ✅ Construida — pendiente de validar |
 | 4 | El bot entiende lenguaje natural + alarmas propias | ✅ Construida — pendiente de validar |
 | 4b | "¿Qué sigue?" (bot + web), notas con edad, rediseño de /hoy, limpieza del parser | ✅ Construida — pendiente de validar |
-| 5 | Google Calendar | ⏳ Pendiente |
+| 4c | Lista completa a demanda, "qué sigue" siempre con 3 secciones, fechas en el intérprete | ✅ Construida — pendiente de validar |
+| 5 | Conexión de Google en Settings + Calendar | ✅ Construida — pendiente de validar |
 
 ---
 
@@ -80,6 +81,12 @@ Reglas que aplican a todo el asistente:
   (UTC-5, sin horario de verano). Vercel Cron trabaja en UTC, por eso los
   horarios en `vercel.json` están corridos 5 horas.
 - **Secretos solo en Vercel.** Nunca en el código ni en commits.
+- **Lo de la app en Vercel, lo de cada cuenta en Settings.** Lo que es de la
+  APP (token del bot, Supabase, OpenAI, `CRON_SECRET`, client id/secret de
+  Google, llave de cifrado) vive en Vercel como env var. Lo que es de UNA
+  CUENTA (su acceso a Google, sus listas, su chat) vive en la base, en
+  Settings → Conexiones, cifrado con la llave de Vercel. Así se agregan
+  cuentas (Chelsea, PD) con un click, sin tocar Vercel.
 - **Inbox-IM es producción.** El asistente solo *lee* `im_triaje` (cuenta
   correos). Nunca escribe ahí.
 - **Columnas nuevas en `tasks`** siempre nullable o con default, para que los
@@ -101,6 +108,14 @@ Archivos del asistente dentro del repo:
 | `src/lib/asistente/que-sigue.ts` | Fase 4b: "¿qué sigue?" — orden determinista en código, el LLM solo redacta; numeración en `bot_alarmas` |
 | `src/app/api/asistente/que-sigue/route.ts` | Fase 4b: el botón "¿Qué sigue?" de /hoy (sesión de la app, no cron) |
 | `src/lib/notas.ts` | Notas "por dónde iba": guardar (archiva la anterior en `notas_historial`), borrar, archivar, edad |
+| `src/lib/google/crypto.ts` | Fase 5: cifra/descifra el refresh token (AES-256-GCM, `APP_ENCRYPTION_KEY`) |
+| `src/lib/google/oauth.ts` | Fase 5: URL de consentimiento, canje del código, refresh del access token, desconectar |
+| `src/lib/google/calendar.ts` | Fase 5: crear / actualizar / borrar el evento de una tarea |
+| `src/lib/google/sync.ts` | Fase 5: decide si la tarea debe tener evento y lo deja igual a la fila |
+| `src/app/api/google/oauth/start/route.ts` | Fase 5: "Conectar" → Google |
+| `src/app/api/google/oauth/callback/route.ts` | Fase 5: Google → guarda la cuenta, vuelve a Settings |
+| `src/app/api/google/conexiones/route.ts` | Fase 5: lista y desconecta (sin el token) |
+| `src/app/(app)/settings/conexiones/page.tsx` | Fase 5: tarjeta "Google" con Conectar / Reconectar / Desconectar |
 | `src/lib/asistente/whisper.ts` | Audio → texto con OpenAI whisper-1 |
 | `src/lib/asistente/borradores.ts` | Tareas a medias esperando un botón (`bot_borradores`) |
 | `src/lib/asistente/tareas.ts` | Preguntas con botones, confirmación en una línea, guardado |
@@ -124,6 +139,7 @@ Archivos del asistente dentro del repo:
 | `sql/2026-10-asistente-fase4-pruebas.sql` | Prueba con rollback de la fase 4 + consultas para afinar el prompt |
 | `sql/2026-11-asistente-fase4b.sql` | Migración de la fase 4b: `notas_historial` + `bot_alarmas.tipo` admite `que_sigue` |
 | `sql/2026-11-limpieza-titulos-hoy-manana.sql` | Limpieza única: títulos que terminan en " hoy"/" mañana" → `due_date` (select primero, update después) |
+| `sql/2026-11-asistente-fase5.sql` | Migración de la fase 5: `conexiones_google` + `tasks.due_time` + `tasks.gcal_event_id` |
 
 ---
 
@@ -1182,17 +1198,198 @@ tiene vista en la app todavía.
    chelito» · vence …`. Texto: `Shift Google Ads y SEO hoy` → título sin
    "hoy", vence hoy.
 
-## 5. Fase 5 — Google Calendar
 
-_Pendiente._
+### 4g. Fase 4c — lista a demanda, "qué sigue" fijo, fechas en el intérprete
+
+**A) Lista completa a demanda.** `/hoy`, `dame la lista`, `lista de la
+mañana`, `lista completa`, `todo lo pendiente` → el bot manda **el mismo
+mensaje de la alarma de las 8:00** (misma función `buildManana`, mismo
+formato numerado) y guarda la misma fila en `bot_alarmas`, así que `listo 3`
+funciona igual. `cierre`, `lista de la tarde`, `/cierre` → el de las 6:00 pm.
+El intérprete también lo entiende dicho de otra forma ("mándame la lista",
+"el cierre del día") como acción `lista`, distinta de `que_sigue`. Está en
+`/ayuda` (📋).
+
+**B) "Qué sigue" siempre con 3 secciones.** Si no hay nada por vencer:
+`⏳ Nada vence esta semana`. Si no hay notas recientes: `📝 Sin notas de los
+últimos 3 días`. La respuesta tiene siempre la misma forma; el modelo debe
+copiar esas dos líneas tal cual y, si omite una sección, se usa el texto
+fijo. (`solo urgentes` sigue sin ⏳ y `qué vence esta semana` sigue solo con
+⏳, porque eso se pidió así.)
+
+**C) Bug: fecha dentro del título al crear por intérprete.** "normal IM
+revisar propuesta de TOTT para el viernes" creaba «revisar propuesta de TOTT
+para el viernes» sin fecha. Ahora hay **un solo extractor de fechas**,
+`extraerFecha()` en `src/lib/parser.ts`, que usan el parser clásico y el
+intérprete (sobre el título que devuelve el modelo). Entiende las 8 formas:
+
+| Dices | `due_date` |
+| --- | --- |
+| `… hoy` | hoy |
+| `… mañana` | mañana |
+| `… pasado mañana` | +2 |
+| `… el viernes` | el próximo viernes |
+| `… para el viernes` | el próximo viernes |
+| `… en 3 días` (también `en una semana`, `en dos semanas`) | hoy + 3 |
+| `… el 15 de noviembre` | ese día (el año que viene si ya pasó) |
+| `… due friday` | el próximo viernes |
+
+"hoy"/"mañana" en medio de la frase se quedan en el título ("avisar que hoy
+no voy"). Probado con las 8 formas en `revisar propuesta de TOTT …` → título
+«revisar propuesta de TOTT» y la fecha correcta.
+
+**Pruebas de la fase 4c**
+
+1. `/hoy` → llega el mismo mensaje de las 8:00; `listo 1` cierra la primera.
+   `cierre` → el de las 6:00 pm. Por voz: "dame la lista".
+2. `¿qué sigue?` sin nada esta semana ni notas → trae `⏳ Nada vence esta
+   semana` y `📝 Sin notas de los últimos 3 días`.
+3. `normal IM revisar propuesta de TOTT para el viernes` → `✅ IM · Normal ·
+   «revisar propuesta de TOTT» · vence vie …`. Repite con las otras 7 formas.
+
+## 5. Fase 5 — Conexión de Google en Settings + Calendar
+
+### 5a. Qué hace
+
+**A) Conector de Google en Settings.** Settings → **Conexiones (Google) →**
+(`/settings/conexiones`). La tarjeta "Google" tiene **Conectar**: abre la
+pantalla de consentimiento de Google en el navegador
+(`/api/google/oauth/start` → Google → `/api/google/oauth/callback`) pidiendo
+de una vez `calendar.events`, `gmail.readonly` y `gmail.modify` (el correo se
+usa en la fase 6; se pide todo junto para no reautorizar). Al volver, la
+tarjeta muestra `Conectado ✓ · email · conectada hace N días · usada hace N
+días` y los botones **Reconectar** / **Desconectar** (con confirmación).
+
+Lo que se guarda: una fila en `conexiones_google` (id, email,
+refresh_token_enc, scopes, conectado_en, ultimo_uso, activa). El refresh
+token va **cifrado** con AES-256-GCM usando `APP_ENCRYPTION_KEY` (env var de
+Vercel, 32 bytes en hex). La UI nunca lo ve: la página solo recibe email y
+fechas por `/api/google/conexiones`. Desconectar revoca el token en Google
+(si puede) y borra la fila. El asistente usa la cuenta activa más reciente.
+Reconectar la misma cuenta reemplaza su token (índice único por email).
+
+**B) Calendar.** El parser y el intérprete entienden **hora**: `mañana 3pm`,
+`el viernes a las 10`, `due friday 2pm`, `a las 3:30`, `15:00`, `8 de la
+noche`. Sin am/pm, 1–6 es tarde y 7–12 mañana. Se guarda en `tasks.due_time`
+(`time`, nullable). Sin fecha no hay hora; sin hora no hay evento.
+
+Tarea con fecha **y** hora → evento en el calendario principal de la cuenta
+conectada: título `[IM] Llamar a Juan`, 30 minutos, descripción con la
+prioridad y el link a /tasks, recordatorio emergente 15 minutos antes. El id
+queda en `tasks.gcal_event_id`. Confirmación:
+
+```
+✅ IM · Urgente ★ · «Llamar a Juan» · vie 6 nov 3:00 pm · 📅
+```
+
+Después, desde el bot: **completar** o **cancelar** → se borra el evento;
+**cambiar fecha u hora** (`paypal mañana 3pm`, "pasa el 3 al lunes", "el 3 a
+las 4") → se actualiza; **borrar** la tarea → se borra el evento antes que la
+fila; **renombrar** → se actualiza el título. Si Google falla, la tarea se
+guarda igual y el bot agrega una línea `⚠️ sin evento en Calendar: {motivo}`.
+Sin cuenta conectada el motivo es "no hay cuenta de Google conectada
+(Settings → Conexiones)". Las alarmas propias (`bot_recordatorios`) **no**
+van al calendario.
+
+Dónde más se ve la hora: la alarma de las 8:00 (`🟡 3. Llamar a Juan · 3:00
+pm 📅`), "¿qué sigue?", el chip de fecha en /hoy y /tasks (`📅 6 nov 3:00
+pm`) y el contexto de `/pregunta` (`vence hoy a las 3:00 pm`), con lo que
+"¿qué tengo a las 3?" se contesta.
+
+**Lo que no hace todavía**: editar o completar desde la **web** (/hoy,
+/tasks) no toca el calendario, porque el navegador escribe directo en
+Supabase sin pasar por el servidor; el formulario web tampoco tiene campo de
+hora. Queda para una fase 5b con una ruta de sincronización.
+
+### 5b. Lo que hay que hacer a mano (con cada click)
+
+**Paso 1 — Proyecto en Google Cloud**
+
+1. https://console.cloud.google.com → arriba a la izquierda, el selector de
+   proyecto → **New project** → nombre `gabbyhq-asistente` → **Create**.
+   Espera la notificación y selecciónalo.
+2. Menú ☰ → **APIs & Services → Library**. Busca **Google Calendar API** →
+   **Enable**. Vuelve a Library, busca **Gmail API** → **Enable**.
+3. **APIs & Services → OAuth consent screen** (en consolas nuevas se llama
+   **Google Auth Platform → Branding**). Tipo **External** → **Create**.
+   App name `GabbyHQ`, User support email = tu Gmail, Developer contact =
+   tu Gmail → **Save and continue**. En **Scopes** no hace falta agregar
+   nada (la app los pide al conectar) → **Save and continue**. En **Test
+   users** → **Add users** → tu Gmail (la cuenta cuyo calendario quieres
+   usar) → **Save and continue** → **Back to dashboard**. La app queda en
+   modo *Testing*: solo esos usuarios pueden conectar, y es suficiente.
+4. **APIs & Services → Credentials → Create credentials → OAuth client ID**.
+   Application type **Web application**, nombre `gabbyhq-web`. En
+   **Authorized redirect URIs** → **Add URI** →
+   `https://gabby-hq.vercel.app/api/google/oauth/callback` (exacto, sin
+   barra final) → **Create**. Copia **Client ID** y **Client secret**.
+
+**Paso 2 — Env vars en Vercel (Settings → Environment Variables, marcar Secret)**
+
+| Variable | Valor |
+| --- | --- |
+| `GOOGLE_CLIENT_ID` | el Client ID del paso 1.4 |
+| `GOOGLE_CLIENT_SECRET` | el Client secret del paso 1.4 |
+| `APP_ENCRYPTION_KEY` | `openssl rand -hex 32` en una terminal (64 caracteres hex) |
+
+`APP_URL` ya existe y debe ser `https://gabby-hq.vercel.app`: de ahí sale el
+redirect URI. **Redeploy** (Deployments → ⋯ → Redeploy).
+
+**Paso 3 — SQL en Supabase** (SQL Editor, una query):
+`sql/2026-11-asistente-fase5.sql`. Abajo: 7 columnas de `conexiones_google`,
+`rowsecurity = false`, y `due_time` / `gcal_event_id` en `tasks`.
+
+**Paso 4 — Conectar.** GabbyHQ → Settings → **Conexiones (Google) →** →
+**Conectar** → elige tu Gmail → Google avisa "app no verificada" (normal en
+modo Testing): **Continue** → marca los permisos → **Continue**. Vuelves a
+la tarjeta con `Conectado ✓ · tu@gmail.com`.
+
+### 5c. Env vars que agrega esta fase
+
+`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `APP_ENCRYPTION_KEY`. Nada por
+cuenta: cada cuenta se conecta desde Settings.
+
+### 5d. Cómo probar que funciona
+
+1. `urgente IM llamar a Juan mañana 3pm` → `✅ IM · Urgente ★ · «llamar a
+   Juan» · … 3:00 pm · 📅`. En Google Calendar: evento `[IM] llamar a Juan`
+   mañana 3:00–3:30 pm con recordatorio 15 min.
+2. `llamar a juan a las 4` → `✏️ … → a las 4:00 pm 📅` y el evento se movió.
+   `pasa llamar` → pasa a mañana y el evento también.
+3. `listo llamar` → `✅ Hecha: …` y el evento desapareció.
+4. Crea otra con hora y `bórrala` → [Sí, borrar] → evento borrado.
+5. Settings → Conexiones → **Desconectar**. Crea una tarea con hora → se
+   guarda y abajo `⚠️ sin evento en Calendar: no hay cuenta de Google
+   conectada`. Vuelve a **Conectar**.
+6. `¿qué tengo a las 3?` → contesta con la tarea de las 3:00 pm.
+7. `alarma mañana 9am revisar deploy` → llega el ⏰ pero **no** hay evento.
+
+### 5e. Qué puede fallar y dónde verlo
+
+| Síntoma | Causa probable | Dónde verlo / qué hacer |
+| --- | --- | --- |
+| "Faltan GOOGLE_CLIENT_ID…" en la tarjeta | Env vars sin cargar o sin redeploy | Vercel → Settings → Environment Variables; Redeploy. |
+| Google: `redirect_uri_mismatch` | La URI en Credentials no es exacta | Debe ser `https://gabby-hq.vercel.app/api/google/oauth/callback`. `APP_URL` sin barra final. |
+| Google: `access_denied` / "app no verificada" sin botón Continue | Tu Gmail no está en Test users | Consent screen → Test users → agrégalo. |
+| "Google no devolvió refresh_token" | Ya habías autorizado antes sin `prompt=consent` | https://myaccount.google.com/permissions → quita GabbyHQ → Conectar otra vez. |
+| "APP_ENCRYPTION_KEY debe ser 32 bytes en hex" | La llave no tiene 64 caracteres hex | `openssl rand -hex 32`; pégala completa; Redeploy. Si cambias la llave, las cuentas ya conectadas dejan de descifrarse: Reconectar. |
+| `⚠️ sin evento en Calendar: invalid_grant` | Token revocado o caducado (modo Testing caduca a los 7 días si la app no está publicada… solo si usas scopes sensibles sin verificación) | Settings → Conexiones → Reconectar. Si pasa cada semana: OAuth consent screen → **Publish app**. |
+| El evento no aparece | La tarea no tiene hora, o la hora se fue al título | /tasks: ¿el chip dice `6 nov 3:00 pm`? Si no, `paypal mañana 3pm` para ponerla. Logs: `[calendar]`. |
 
 ---
 
-## 6. Cómo replicarlo para otra persona
+## 6. Fase 6 — Gmail
+
+_Pendiente. La cuenta ya queda autorizada con `gmail.readonly` + `gmail.modify` desde la fase 5._
+
+---
+
+## 7. Cómo replicarlo para otra persona
 
 Checklist completo para levantar el mismo asistente para alguien más (por
 ejemplo Chelsea), desde cero hasta la primera alarma. Lo que cambia es: el bot
-(token), el `chat_id`, el proyecto de Supabase y, en la fase 5, el calendario.
+(token), el `chat_id`, el proyecto de Supabase y su cuenta de Google (que se
+conecta desde Settings → Conexiones, sin tocar Vercel).
 El código es el mismo repo.
 
 **A. El bot en Telegram (BotFather)**
@@ -1218,7 +1415,8 @@ El código es el mismo repo.
    `subtasks`, `radar`, `api_keys`) y corre en orden todos los archivos de
    `sql/` del repo, incluidos `sql/2026-10-asistente-fase1.sql`,
    `sql/2026-10-asistente-fase2.sql`, `sql/2026-10-asistente-fase3.sql` y
-   `sql/2026-10-asistente-fase4.sql` (y sus pruebas en queries aparte, ver
+   `sql/2026-10-asistente-fase4.sql`, `sql/2026-11-asistente-fase4b.sql` y
+   `sql/2026-11-asistente-fase5.sql` (y sus pruebas en queries aparte, ver
    1b, 2b, 3b y 4b Paso 1).
 4. En la app, en **Settings**, crea las empresas con los nombres que esa
    persona use. El orden fijo de la alarma (IM · DATAVIA · PD · Personal ·
@@ -1269,7 +1467,7 @@ verano; para una zona con DST hay que calcular el offset en vez de fijarlo).
 
 ---
 
-## 7. Costos estimados por mes
+## 8. Costos estimados por mes
 
 | Concepto | Fase | Costo | Nota |
 | --- | --- | --- | --- |
@@ -1279,7 +1477,7 @@ verano; para una zona con DST hay que calcular el offset en vez de fijarlo).
 | OpenAI Whisper (`whisper-1`) | 2 | **$0.006 USD por minuto de audio** (precio de lista a octubre 2026; se cobra por segundos, redondeado). Ejemplo: 30 audios de 30 s al mes = 15 min = **$0.09 USD/mes**. Con 100 audios de 1 min = $0.60. | El tope mensual de $5 en OpenAI equivale a ~830 minutos de audio: imposible de alcanzar con uso normal. |
 | LLM para `/pregunta` (`gpt-5-mini`) | 3 | **$0.25 USD / 1M tokens de entrada · $2.00 / 1M de salida** (precio de lista a octubre 2026). Una pregunta ≈ 3000 tokens de entrada (el contexto) + 150 de salida ≈ **$0.0011 USD**. Ejemplo: 20 preguntas al día × 30 días = 600 preguntas ≈ **$0.65 USD/mes**. | Si el contexto es corto (pocas tareas), baja a la mitad. Con `gpt-5-nano` cuesta ~5× menos; con Anthropic (`claude-haiku-5-5`) algo más. La consulta de costo real del mes está al final de `sql/2026-10-asistente-fase3-pruebas.sql`. |
 | LLM para el intérprete (`gpt-5-mini`) | 4 | Un mensaje libre ≈ 1500 tokens de entrada (prompt + tareas) + 100 de salida ≈ **$0.0006 USD**. 30 mensajes al día × 30 = 900 ≈ **$0.55 USD/mes**. | Los comandos exactos (`listo 3`, `pasa 2,5`, `nota IM: …`) no pasan por el modelo. El cron de 5 min no cuesta: corre en Vercel Pro. |
-| Google Calendar API | 5 | $0 | Gratis dentro de las cuotas normales. |
+| Google Calendar API | 5 | $0 | Gratis dentro de las cuotas normales (1M llamadas/día; aquí son unas pocas por tarea). |
 
 **Fase 1 total: $0 adicionales** sobre lo que ya se paga.
 **Fase 2 total: ~$0.10 USD/mes** con uso normal (requiere saldo prepagado en OpenAI, mínimo $5).

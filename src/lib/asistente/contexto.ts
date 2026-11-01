@@ -8,7 +8,7 @@
 import { createServerClient } from '@/lib/supabase-server'
 import type { Company, NotaEmpresa, Priority } from '@/types'
 import { CHELSEA_COMPANY_NAME } from '@/lib/chelsea'
-import { CANCUN_TZ, addDays, cancunDayBounds, cancunYmd, daysBetween, formatVenceEs } from './cancun'
+import { CANCUN_TZ, addDays, cancunDayBounds, cancunYmd, daysBetween, formatHoraEs, formatVenceEs } from './cancun'
 import { countChelseaMail } from './alarmas'
 
 /** Only these columns are read — `notes` is deliberately absent. */
@@ -18,6 +18,7 @@ interface TaskLite {
   priority: Priority
   importante: boolean
   due_date: string | null
+  due_time: string | null
   company_id: string | null
   completed_at: string | null
 }
@@ -50,12 +51,14 @@ function byUrgency(a: TaskLite, b: TaskLite): number {
 
 function tags(t: TaskLite, today: string): string {
   const out: string[] = []
+  // Fase 5: the hour, so "¿qué tengo a las 3?" can be answered.
+  const hora = t.due_time ? ` a las ${formatHoraEs(t.due_time.slice(0, 5))}` : ''
   if (t.due_date) {
     if (t.due_date < today) {
       const d = daysBetween(t.due_date, today)
-      out.push(`vencida hace ${d} ${d === 1 ? 'día' : 'días'} (${formatVenceEs(t.due_date)})`)
-    } else if (t.due_date === today) out.push('vence hoy')
-    else out.push(`vence ${formatVenceEs(t.due_date)}`)
+      out.push(`vencida hace ${d} ${d === 1 ? 'día' : 'días'} (${formatVenceEs(t.due_date)}${hora})`)
+    } else if (t.due_date === today) out.push(`vence hoy${hora}`)
+    else out.push(`vence ${formatVenceEs(t.due_date)}${hora}`)
   } else out.push('sin fecha')
   out.push(t.priority + (t.importante ? ' ★' : ''))
   return out.join(' · ')
@@ -92,7 +95,7 @@ export async function construirContexto(now: Date = new Date()): Promise<Context
   const hace7 = cancunDayBounds(addDays(today, -7)).startIso
 
   const db = createServerClient()
-  const cols = 'id, text, priority, importante, due_date, company_id, completed_at'
+  const cols = 'id, text, priority, importante, due_date, due_time, company_id, completed_at'
   const [openRes, doneRes, companiesRes, notasRes, chelseaMail] = await Promise.all([
     db.from('tasks').select(cols).eq('done', false),
     db.from('tasks').select(cols).eq('done', true).gte('completed_at', hace7).order('completed_at', { ascending: false }),

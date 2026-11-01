@@ -5,8 +5,9 @@ import { createServerClient } from '@/lib/supabase-server'
 import { PRIORITY_LABELS } from '@/types'
 import type { Company, Priority } from '@/types'
 import type { Faltante, TareaParsed } from '@/lib/parser'
-import { formatVenceEs } from './cancun'
+import { formatHoraEs, formatVenceEs } from './cancun'
 import { inlineKeyboard, type InlineButton } from './telegram'
+import { sincronizarTarea, type ResultadoSync } from '@/lib/google/sync'
 
 /** Button order for the company question. Other companies follow, alphabetically. */
 const EMPRESAS_BOTONES = ['IM', 'DATAVIA', 'PD', 'Personal', 'Chelsea']
@@ -46,28 +47,44 @@ export function pregunta(falta: Faltante, nonce: string, companies: CompanyRef[]
   return { text: '¿Qué urgencia?', replyMarkup: inlineKeyboard([buttons]) }
 }
 
-/** "✅ IM · Urgente ★ · «Llamar a Juan» · vence vie 1 nov" */
-export function confirmacion(t: TareaParsed): string {
+/**
+ * "✅ IM · Urgente ★ · «Llamar a Juan» · vence vie 1 nov"
+ * With an hour: "… · vie 6 nov 3:00 pm · 📅" when the Calendar event exists;
+ * a sync warning goes on its own line below.
+ */
+export function confirmacion(t: TareaParsed, sync?: ResultadoSync): string {
   const parts = [
     t.company_name ?? 'Sin empresa',
     `${PRIORITY_LABELS[t.priority ?? 'normal']}${t.importante ? ' ★' : ''}`,
     `«${t.text}»`,
   ]
-  if (t.due_date) parts.push(`vence ${formatVenceEs(t.due_date)}`)
-  return `✅ ${parts.join(' · ')}`
+  if (t.due_date) {
+    parts.push(t.due_time ? `${formatVenceEs(t.due_date)} ${formatHoraEs(t.due_time.slice(0, 5))}` : `vence ${formatVenceEs(t.due_date)}`)
+  }
+  if (sync && (sync.estado === 'creado' || sync.estado === 'actualizado')) parts.push('📅')
+  const linea = `✅ ${parts.join(' · ')}`
+  return sync?.aviso ? `${linea}\n${sync.aviso}` : linea
 }
 
-export async function guardarTarea(t: TareaParsed): Promise<void> {
+/** Inserts the task; with date + hour also creates its Calendar event (fase 5). */
+export async function guardarTarea(t: TareaParsed): Promise<ResultadoSync> {
   const db = createServerClient()
-  const { error } = await db.from('tasks').insert({
-    text: t.text,
-    priority: t.priority ?? 'normal',
-    importante: t.importante,
-    company_id: t.company_id,
-    due_date: t.due_date,
-    done: false,
-  })
+  const { data, error } = await db
+    .from('tasks')
+    .insert({
+      text: t.text,
+      priority: t.priority ?? 'normal',
+      importante: t.importante,
+      company_id: t.company_id,
+      due_date: t.due_date,
+      due_time: t.due_date && t.due_time ? t.due_time : null,
+      done: false,
+    })
+    .select('id')
+    .single<{ id: string }>()
   if (error) throw new Error(`Supabase tasks: ${error.message}`)
+  if (!t.due_date || !t.due_time) return { estado: 'sin_cambio' }
+  return sincronizarTarea(data.id)
 }
 
 export async function cargarEmpresas(): Promise<CompanyRef[]> {

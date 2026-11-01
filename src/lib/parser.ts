@@ -17,6 +17,10 @@
 //   /pregunta <…>  /  ? <pregunta>  /  ¿…?  /  pregunta <…>   (answered by the LLM)
 //   mis alarmas  /  quita alarma 2                           (fase 4 reminders)
 //   qué sigue / qué hago primero / solo urgentes / qué vence esta semana / qué sigue de IM   (fase 4b)
+//   /hoy · dame la lista · lista completa · todo lo pendiente   →  the 8:00 list, now   (fase 4c)
+//   cierre · lista de la tarde                                 →  the 6:00 pm list, now
+//   Dates: hoy · mañana · pasado mañana · el viernes · para el viernes · en 3 días · el 15 de noviembre · due friday
+//   Hours (fase 5): mañana 3pm · el viernes a las 10 · due friday 2pm · 15:00 · 3 de la tarde
 //   "Agregar un task, whatsapp chelito, due date, mañana, compañía"  (fields dictated by voice)
 //   /ayuda / ayuda / help / formato / /start
 // Anything else ("1 terminado / 9 cancelar", "alarma mañana 3pm revisar X")
@@ -33,6 +37,8 @@ export interface TareaParsed {
   company_name: string | null
   importante: boolean
   due_date: string | null
+  /** 'HH:MM' (24 h, Cancún). Only with a date; with both, the task becomes a Calendar event (fase 5). */
+  due_time?: string | null
 }
 
 export type Faltante = 'empresa' | 'urgencia'
@@ -53,9 +59,13 @@ export interface Cambios {
   priority?: Priority
   importante?: boolean
   due_date?: string
+  /** 'HH:MM'; '' clears the hour. */
+  due_time?: string
   company_id?: string
   company_name?: string
 }
+
+export type ListaTipo = 'manana' | 'tarde'
 
 export interface QueSigueOpts {
   empresa?: string | null
@@ -66,6 +76,8 @@ export interface QueSigueOpts {
 export type Parsed =
   | { kind: 'ayuda' }
   | { kind: 'que_sigue'; opts: QueSigueOpts }
+  /** Fase 4c: the 8:00 / 6:00 pm list, on demand. */
+  | { kind: 'lista'; tipo: ListaTipo }
   | { kind: 'alarmas' }
   | { kind: 'quitar_alarma'; arg: string }
   | { kind: 'pregunta'; texto: string }
@@ -169,22 +181,107 @@ function takeImportante(text: string): { importante: boolean; text: string } {
   return { importante: true, text: text.replace(re, ' ') }
 }
 
-function takeDueDate(text: string, today: string): { due_date: string | null; text: string } {
-  // "para (el) viernes", "due friday", "para mañana".
-  let m = text.match(new RegExp(`\\b(?:due|para)(?:\\s+el)?\\s+(${DAY_TOKEN})\\b`, 'i'))
+const MESES: Record<string, number> = {
+  enero: 1, ene: 1, febrero: 2, feb: 2, marzo: 3, mar: 3, abril: 4, abr: 4, mayo: 5, may: 5, junio: 6, jun: 6,
+  julio: 7, jul: 7, agosto: 8, ago: 8, septiembre: 9, setiembre: 9, sep: 9, sept: 9, octubre: 10, oct: 10,
+  noviembre: 11, nov: 11, diciembre: 12, dic: 12,
+}
+const NUMEROS: Record<string, number> = { un: 1, una: 1, uno: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7 }
+
+function sinAcentos(s: string): string {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+}
+
+/** "15 de noviembre" → this year's, or next year's if it already passed. */
+function ymdDiaMes(dia: number, mes: number, today: string): string | null {
+  if (dia < 1 || dia > 31) return null
+  const y = Number(today.slice(0, 4))
+  const mk = (yy: number) => `${yy}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`
+  const candidate = mk(y)
+  // Reject impossible dates (31 de febrero) by round-tripping through Date.
+  const d = new Date(`${candidate}T12:00:00Z`)
+  if (d.getUTCMonth() + 1 !== mes) return null
+  return candidate < today ? mk(y + 1) : candidate
+}
+
+/**
+ * The ONE date extractor, shared by the classic parser and the LLM
+ * interpreter (fase 4c): finds the date phrase, resolves it and removes it
+ * from the title. Forms, in order of precedence:
+ *   pasado mañana · en N días / en una semana · el 15 de noviembre ·
+ *   para (el) <día> / due <weekday> · el <día> (at the end) ·
+ *   hoy / mañana / <día> as the last word, or hoy / mañana as the first.
+ * "hoy"/"mañana" in the middle of a sentence stay ("avisar que hoy no voy").
+ */
+export function extraerFecha(text: string, today: string): { due_date: string | null; text: string } {
+  const quitar = (m: RegExpMatchArray) => text.replace(m[0], ' ')
+
+  let m = text.match(/(?:^|[\s,])(?:(?:para|due)\s+)?pasado\s+ma[ñn]ana\b\s*[.!]?/i)
+  if (m) return { due_date: addDays(today, 2), text: quitar(m) }
+
+  m = text.match(/(?:^|[\s,])(?:para\s+)?en\s+(\d{1,2}|un|una|uno|dos|tres|cuatro|cinco|seis|siete)\s+(d[ií]as?|semanas?)\b\s*[.!]?/i)
   if (m) {
-    const d = resolveDay(m[1], today)
-    if (d) return { due_date: d, text: text.replace(m[0], ' ') }
+    const n = /^\d/.test(m[1]) ? Number(m[1]) : NUMEROS[sinAcentos(m[1])]
+    if (n > 0) return { due_date: addDays(today, /^sem/i.test(m[2]) ? n * 7 : n), text: quitar(m) }
   }
-  // Bare "hoy" / "mañana" as the LAST word ("urgente IM shift Google Ads hoy")
-  // or the first one ("hoy llamar a Juan"). In the middle it stays: that's a
-  // sentence, not a date ("avisar que hoy no voy" is the title).
-  m = text.match(/[\s,]+(hoy|mañana|manana|today|tomorrow)\s*[.!]?$/i) ?? text.match(/^(hoy|mañana|manana|today|tomorrow)\b[\s,]*/i)
+
+  m = text.match(/(?:^|[\s,])(?:(?:para|due)\s+)?(?:el\s+)?(\d{1,2})\s+de\s+([a-záéíóú]+)\b\s*[.!]?/i)
+  if (m && MESES[sinAcentos(m[2])]) {
+    const d = ymdDiaMes(Number(m[1]), MESES[sinAcentos(m[2])], today)
+    if (d) return { due_date: d, text: quitar(m) }
+  }
+
+  // "para (el) viernes", "due friday", "para mañana".
+  m = text.match(new RegExp(`\\b(?:due|para)(?:\\s+el)?\\s+(${DAY_TOKEN})\\b\\s*[.!]?`, 'i'))
   if (m) {
     const d = resolveDay(m[1], today)
-    if (d) return { due_date: d, text: text.replace(m[0], ' ') }
+    if (d) return { due_date: d, text: quitar(m) }
+  }
+  // "… el viernes" at the end.
+  m = text.match(new RegExp(`[\\s,]+el\\s+(${WEEKDAY_ALT})\\s*[.!]?$`, 'i'))
+  if (m) {
+    const d = resolveDay(m[1], today)
+    if (d) return { due_date: d, text: quitar(m) }
+  }
+  // Bare "hoy" / "mañana" / "viernes" as the LAST word ("urgente IM shift Google Ads hoy")
+  // or hoy/mañana as the first one ("hoy llamar a Juan"). In the middle it stays: that's a
+  // sentence, not a date ("avisar que hoy no voy" is the title).
+  m = text.match(new RegExp(`[\\s,]+(${DAY_TOKEN})\\s*[.!]?$`, 'i')) ?? text.match(/^(hoy|mañana|manana|today|tomorrow)\b[\s,]*/i)
+  if (m) {
+    const d = resolveDay(m[1], today)
+    if (d) return { due_date: d, text: quitar(m) }
   }
   return { due_date: null, text }
+}
+
+/**
+ * Fase 5: the hour, as 'HH:MM' (24 h), removed from the title. Needs a
+ * marker so a bare number is never taken for a time ("llamar a 3 clientes"):
+ *   a las 3 · a las 3:30 · 3pm · 3 pm · 15:00 · 3 de la tarde · 10 de la mañana · 8 de la noche · 14h
+ * Without am/pm, 1–6 is afternoon and 7–12 is morning (office hours).
+ */
+export function extraerHora(text: string): { due_time: string | null; text: string } {
+  const re = /(?:^|[\s,])(a\s+las?\s+)?(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?|hrs?\b|h\b|de\s+la\s+(?:ma[ñn]ana|tarde|noche))?(?=$|[\s,.!])/gi
+  // The first number WITH a marker wins: "el 15 de noviembre a las 10" → 10.
+  let m: RegExpExecArray | null = null
+  for (const cand of Array.from(text.matchAll(re))) {
+    if (cand[1] || cand[3] || cand[4]) { m = cand as RegExpExecArray; break }
+  }
+  if (!m) return { due_time: null, text }
+  const [, , hh, mm, sufijo] = m
+  let h = Number(hh)
+  const min = Number(mm ?? '0')
+  if (h > 24 || min > 59) return { due_time: null, text }
+  const suf = sinAcentos(sufijo ?? '')
+  if (/^p/.test(suf) || /tarde|noche/.test(suf)) { if (h < 12) h += 12 }
+  else if (/^a\.?m/.test(suf) || /manana/.test(suf)) { if (h === 12) h = 0 }
+  else if (!suf && h >= 1 && h <= 6) h += 12
+  if (h === 24) h = 0
+  return { due_time: `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`, text: text.replace(m[0], ' ') }
+}
+
+function takeDueDate(text: string, today: string): { due_date: string | null; text: string } {
+  return extraerFecha(text, today)
 }
 
 // "nota IM: …" / "nota IM + …" / "nota IM:" — company first, then the mode.
@@ -218,6 +315,9 @@ function parseNota(rest: string, companies: CompanyRef[]): NotaParsed {
 function parseEdicion(text: string, companies: CompanyRef[], today: string): { termino: string; cambios: Cambios } | null {
   let rest = norm(text)
   const cambios: Cambios = {}
+  // "paypal mañana 3pm": the hour goes with the date.
+  const h = extraerHora(rest)
+  if (h.due_time) { cambios.due_time = h.due_time; rest = norm(h.text) }
   let found = true
   while (found) {
     found = false
@@ -244,7 +344,7 @@ function parseEdicion(text: string, companies: CompanyRef[], today: string): { t
       }
     }
   }
-  if (Object.keys(cambios).length === 0) return null
+  if (Object.keys(cambios).length === 0 || (Object.keys(cambios).length === 1 && cambios.due_time)) return null
   const termino = tidy(rest)
   // A bare modifier ("urgente") or a word-long term is a new task, not an edit.
   if (termino.length < 3) return null
@@ -272,6 +372,19 @@ function parseQueSigue(text: string, companies: CompanyRef[]): QueSigueOpts | nu
   return opts
 }
 
+// Fase 4c: the full list, now. "/hoy", "dame la lista", "la lista de la
+// mañana", "lista completa", "todo lo pendiente" → the 8:00 message;
+// "cierre", "lista de la tarde", "/cierre" → the 6:00 pm one.
+function parseLista(text: string): ListaTipo | null {
+  const n = sinAcentos(text.replace(/^[¿?¡!\s]+|[?!.\s]+$/g, ''))
+  if (/^\/?(hoy|lista)$/.test(n)) return 'manana'
+  if (/^(dame|mandame|pasame|ponme|quiero|ver)\s+(la\s+)?lista(\s+(completa|de\s+(la\s+)?manana|de\s+hoy))?$/.test(n)) return 'manana'
+  if (/^(la\s+)?lista\s+(completa|de\s+(la\s+)?manana|de\s+hoy)$/.test(n)) return 'manana'
+  if (/^todo\s+lo\s+pendiente$/.test(n) || /^(que|cuales)\s+(son\s+)?(todas\s+)?(mis|las)\s+(tareas\s+)?pendientes$/.test(n)) return 'manana'
+  if (/^\/?cierre(\s+del\s+dia)?$/.test(n) || /^(dame\s+|mandame\s+)?(el\s+|la\s+)?(cierre|lista\s+de\s+(la\s+)?tarde)$/.test(n)) return 'tarde'
+  return null
+}
+
 // A voice note that DICTATES the fields as a comma-separated list:
 // "Agregar un nuevo task, whatsapp, chelito, due date, mañana, compañía".
 // The field words are not the title; what is left between them is.
@@ -281,13 +394,15 @@ export function parseDictado(text: string, companies: CompanyRef[], today: strin
   if (partes.length < 3) return null
   const tieneCampo = partes.some((x) => /^(?:due\s*date|fecha|compañ[ií]a|company|empresa|task|tarea|prioridad)$/i.test(x) || /^(?:agregar?|agrega|crear?)\s+(?:un[a]?\s+)?(?:nuevo\s+|nueva\s+)?(?:task|tarea)\b/i.test(x))
   if (!tieneCampo) return null
-  const base: TareaParsed = { text: '', priority: null, company_id: null, company_name: null, importante: false, due_date: null }
+  const base: TareaParsed = { text: '', priority: null, company_id: null, company_name: null, importante: false, due_date: null, due_time: null }
   const titulo: string[] = []
   for (const parte of partes) {
     const words = parte.split(/\s+/)
     if (words.every((w) => CAMPO_RE.test(w))) continue
     const d = resolveDay(parte.toLowerCase().replace(/^(?:el|para el|para)\s+/, ''), today)
     if (d) { base.due_date = base.due_date ?? d; continue }
+    const hp = extraerHora(` ${parte}`)
+    if (hp.due_time && !tidy(hp.text)) { base.due_time = hp.due_time; continue }
     const pm = parte.match(/^(urgente|normal|cuando(?:\s+pueda)?)$/i)
     if (pm) { base.priority = pm[1].toLowerCase().startsWith('cuando') ? 'cuando' : (pm[1].toLowerCase() as Priority); continue }
     const c = companies.find((x) => x.name.trim().toLowerCase() === parte.toLowerCase())
@@ -298,6 +413,7 @@ export function parseDictado(text: string, companies: CompanyRef[], today: strin
   if (titulo.length === 0) return null
   base.text = tidy(titulo.join(' '))
   base.importante = base.importante || base.priority === 'urgente'
+  if (!base.due_date) base.due_time = null
   return base
 }
 
@@ -306,6 +422,8 @@ export function parseMensaje(raw: string, companies: CompanyRef[], today: string
   const lower = text.toLowerCase()
 
   if (/^(?:\/start|\/help|\/ayuda|ayuda|help|formato)\b/i.test(lower)) return { kind: 'ayuda' }
+  const lista = parseLista(text)
+  if (lista) return { kind: 'lista', tipo: lista }
   const qs = parseQueSigue(text, companies)
   if (qs) return { kind: 'que_sigue', opts: qs }
   if (/^[?¿]/.test(text) || /^\/?pregunta\b/i.test(text)) {
@@ -335,6 +453,8 @@ export function parseMensaje(raw: string, companies: CompanyRef[], today: string
   const p = takePriority(rest); rest = norm(p.text)
   const c = takeCompany(rest, companies); rest = norm(c.text)
   const i = takeImportante(rest); rest = norm(i.text)
+  // Hour before date: "mañana 3pm" leaves "mañana" as the last word for the date rule.
+  const h = extraerHora(rest); rest = norm(h.text)
   const d = takeDueDate(rest, today); rest = norm(d.text)
 
   const tarea: TareaParsed = {
@@ -345,6 +465,8 @@ export function parseMensaje(raw: string, companies: CompanyRef[], today: string
     // Same rule as the forms and the matrix: urgente implies ★.
     importante: i.importante || p.priority === 'urgente',
     due_date: d.due_date,
+    // An hour without a date means nothing to the calendar.
+    due_time: d.due_date ? h.due_time : null,
   }
   if (edicion) return { kind: 'edicion', termino: edicion.termino, cambios: edicion.cambios, fallback: tarea }
   return { kind: 'tarea', tarea }
@@ -363,8 +485,9 @@ export function ayuda(modelo: string): string {
   return [
     '💬 HÁBLAME NORMAL: "el 3 ya está", "pasa el 5 al lunes", "9 cancelar, no se va a hacer", "alarma mañana 9am revisar X" · varias órdenes en un mensaje y te muestro el plan antes de hacerlo',
     '🎯 ¿QUÉ SIGUE? · "qué hago primero" · "solo urgentes" · "qué vence esta semana" · "qué sigue de IM" → una tarea para ahora, 3 después, 3 por vencer; luego "listo 1" / "pasa el segundo"',
+    '📋 /hoy · "dame la lista" · "todo lo pendiente" → la lista completa de las 8:00, ahora · "cierre" → la de las 6:00 pm',
     '📥 AGREGAR',
-    'urgente/normal/cuando [empresa] tarea [importante] [hoy · mañana · para el viernes] · o "para IM: tarea"',
+    'urgente/normal/cuando [empresa] tarea [importante] [hoy · mañana · pasado mañana · el viernes · en 3 días · el 15 de nov] [3pm · a las 10] · con fecha y hora va a Google Calendar 📅',
     '🎤 Por voz igual (máx 2 min) · 💡 radar <idea> · si falta algo, te pregunto con botones',
     '✅ CERRAR / MOVER',
     'listo 3 · listo paypal (completa) · pasa 2,5 · pasa todo · pasa paypal (a mañana) · borra 3 · borra paypal',

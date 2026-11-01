@@ -220,7 +220,7 @@ export default function EisenhowerMatrix({
         <div className="flex-shrink-0 flex items-center gap-1.5">
           {!item.hideCompany && task.company && <CompanyBadge company={task.company} size="xs" />}
           <ImportantBadge importante={task.importante} />
-          <DueDateLabel date={task.due_date} today={today} />
+          <DueDateLabel date={task.due_date} time={task.due_time} today={today} />
         </div>
       </div>
     )

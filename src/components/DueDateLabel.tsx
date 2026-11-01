@@ -2,8 +2,16 @@ import { dueState, formatShortEs, type DueState } from '@/lib/dates'
 
 interface Props {
   date: string | null | undefined
+  /** 'HH:MM[:SS]' — shown after the date when the task has an hour (fase 5). */
+  time?: string | null
   /** Pass the current 'YYYY-MM-DD' to keep a long list consistent. */
   today?: string
+}
+
+function hora12(t: string): string {
+  const [h, m] = t.split(':').map(Number)
+  const h12 = h % 12 === 0 ? 12 : h % 12
+  return `${h12}:${String(m).padStart(2, '0')} ${h < 12 ? 'am' : 'pm'}`
 }
 
 const STYLES: Record<DueState, string> = {
@@ -13,11 +21,11 @@ const STYLES: Record<DueState, string> = {
 }
 
 /** Collapsed-card date chip. Renders nothing when the task has no due date. */
-export default function DueDateLabel({ date, today }: Props) {
+export default function DueDateLabel({ date, time, today }: Props) {
   if (!date) return null
 
   const state = dueState(date, today)
-  const label = state === 'today' ? 'Hoy' : formatShortEs(date)
+  const label = (state === 'today' ? 'Hoy' : formatShortEs(date)) + (time ? ` ${hora12(time)}` : '')
 
   return (
     <span

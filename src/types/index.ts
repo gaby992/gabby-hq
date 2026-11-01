@@ -22,6 +22,10 @@ export interface Task {
   text: string
   priority: Priority
   due_date: string | null
+  /** 'HH:MM:SS' or 'HH:MM' from Postgres `time`; with a date it is a Calendar event (fase 5). */
+  due_time?: string | null
+  /** Google Calendar event id when one exists for this task. */
+  gcal_event_id?: string | null
   start_date: string | null
   /** Second axis, independent of `priority`: does this build something? */
   importante: boolean
@@ -62,6 +66,16 @@ export interface RadarItem {
   categoria: string | null
   estado: RadarEstado
   created_at: string
+}
+
+/** A Google account connected in Settings → Conexiones (fase 5). The token never leaves the server. */
+export interface ConexionGoogle {
+  id: string
+  email: string
+  scopes: string
+  conectado_en: string
+  ultimo_uso: string | null
+  activa: boolean
 }
 
 export interface ApiKey {

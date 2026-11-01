@@ -10,7 +10,7 @@ import type { Company, NotaEmpresa, Task } from '@/types'
 import { CHELSEA_COMPANY_NAME } from '@/lib/chelsea'
 import { NOTA_FRESCA_DIAS } from '@/lib/notas'
 import { daysSince } from '@/lib/dates'
-import { cancunDayBounds, cancunYmd, daysBetween, formatCortoEs, formatDiaLargoEs } from './cancun'
+import { cancunDayBounds, cancunYmd, daysBetween, formatCortoEs, formatDiaLargoEs, formatHoraEs } from './cancun'
 import { allowedChatIds, escapeHtml, sendTelegram } from './telegram'
 
 /** 'que_sigue' (fase 4b) is the numbered "¿qué sigue?" answer, recorded like an alarm. */
@@ -202,15 +202,17 @@ function buildGrupos(
 
 function lineFor(item: Numbered, today: string): string {
   const text = escapeHtml(item.task.text)
+  // Fase 5: tasks with an hour show it ("· 3:00 pm 📅" when they have a Calendar event).
+  const hora = item.task.due_time ? ` · ${formatHoraEs(item.task.due_time.slice(0, 5))}${item.task.gcal_event_id ? ' 📅' : ''}` : ''
   switch (item.bucket) {
     case 'vencida': {
       const d = daysBetween(item.task.due_date!, today)
       return `🔴 ${item.n}. ${text} · hace ${d} ${d === 1 ? 'día' : 'días'}`
     }
     case 'hoy':
-      return `🟡 ${item.n}. ${text}`
+      return `🟡 ${item.n}. ${text}${hora}`
     case 'estrella':
-      return `⭐ ${item.n}. ${text}${item.task.due_date ? ` · ${formatCortoEs(item.task.due_date)}` : ''}`
+      return `⭐ ${item.n}. ${text}${item.task.due_date ? ` · ${formatCortoEs(item.task.due_date)}` : ''}${hora}`
   }
 }
 
@@ -313,6 +315,17 @@ export async function guardarAlarma(tipo: AlarmaTipo, items: AlarmaItem[]): Prom
     .from('bot_alarmas')
     .insert({ tipo, items, enviada_en: new Date().toISOString() })
   if (error) throw new Error(`Supabase bot_alarmas: ${error.message}`)
+}
+
+/**
+ * Fase 4c: the same list, on demand ("/hoy", "dame la lista", "cierre"),
+ * sent to ONE chat and recorded like the cron's, so "listo 3" works on it.
+ */
+export async function enviarLista(chatId: number, tipo: 'manana' | 'tarde'): Promise<number> {
+  const built = tipo === 'manana' ? await buildManana() : await buildTarde()
+  await sendTelegram(chatId, built.text, { html: true, tag: `lista-${tipo}` })
+  await guardarAlarma(tipo, built.items)
+  return built.items.length
 }
 
 function sleep(ms: number): Promise<void> {

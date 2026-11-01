@@ -11,7 +11,8 @@
 import { createServerClient } from '@/lib/supabase-server'
 import { PRIORITY_LABELS } from '@/types'
 import type { Accion, Cambios } from '@/lib/parser'
-import { addDays, cancunYmd, formatCortoEs, formatVenceEs } from './cancun'
+import { addDays, cancunYmd, formatCortoEs, formatHoraEs, formatVenceEs } from './cancun'
+import { avisosDe, borrarEventoDeTarea, sincronizarTarea } from '@/lib/google/sync'
 import type { AlarmaItem, AlarmaTipo } from './alarmas'
 import { inlineKeyboard, type InlineButton } from './telegram'
 
@@ -47,14 +48,16 @@ export interface TaskRow {
   done: boolean
   notes: string | null
   due_date: string | null
+  due_time?: string | null
+  gcal_event_id?: string | null
   priority: 'urgente' | 'normal' | 'cuando'
   importante: boolean
   company: { name: string } | null
 }
 
-const COLS = 'id, text, done, notes, due_date, priority, importante, company:companies(name)'
+const COLS = 'id, text, done, notes, due_date, due_time, gcal_event_id, priority, importante, company:companies(name)'
 /** Same without `notes`: what may travel to the LLM (fase 4 interpreter). */
-export const COLS_SIN_NOTAS = 'id, text, done, due_date, priority, importante, company:companies(name)'
+export const COLS_SIN_NOTAS = 'id, text, done, due_date, due_time, priority, importante, company:companies(name)'
 
 export interface Respuesta {
   text: string
@@ -176,8 +179,21 @@ function describirCambios(c: Cambios): string {
   const out: string[] = []
   if (c.company_name) out.push(c.company_name)
   if (c.priority) out.push(`${PRIORITY_LABELS[c.priority]}${c.importante ? ' ★' : ''}`)
-  if (c.due_date) out.push(`vence ${formatVenceEs(c.due_date)}`)
+  if (c.due_date) out.push(c.due_time ? `${formatVenceEs(c.due_date)} ${formatHoraEs(c.due_time)}` : `vence ${formatVenceEs(c.due_date)}`)
+  else if (c.due_time) out.push(`a las ${formatHoraEs(c.due_time)}`)
+  else if (c.due_time === '') out.push('sin hora')
   return out.join(' · ')
+}
+
+/** After a write: sync Calendar for each task and collect the warnings (fase 5). */
+async function sincronizar(ids: string[]): Promise<string[]> {
+  const out = []
+  for (const id of ids) out.push(await sincronizarTarea(id))
+  return avisosDe(out)
+}
+
+function conAvisos(texto: string, avisos: string[]): string {
+  return avisos.length > 0 ? `${texto}\n${avisos.join('\n')}` : texto
 }
 
 /** Runs the action on the given tasks and returns the one-line confirmation(s). */
@@ -185,11 +201,14 @@ export async function ejecutarAccion(params: AccionParams, ids: string[]): Promi
   const db = createServerClient()
 
   if (params.accion === 'borra') {
+    // The Calendar event goes first: once the row is gone its id is lost.
+    const { data: before } = await db.from('tasks').select(COLS).in('id', ids)
+    const avisos = avisosDe(await Promise.all(((before as unknown as TaskRow[]) ?? []).map(borrarEventoDeTarea)))
     const { data, error } = await db.from('tasks').delete().in('id', ids).select(COLS)
     if (error) throw new Error(`Supabase tasks: ${error.message}`)
     const rows = (data as unknown as TaskRow[]) ?? []
     if (rows.length === 0) return 'Esas tareas ya no existían.'
-    return rows.map((t) => `🗑️ Borrada: ${etiqueta(t)}`).join('\n')
+    return conAvisos(rows.map((t) => `🗑️ Borrada: ${etiqueta(t)}`).join('\n'), avisos)
   }
 
   if (params.accion === 'nota_tarea') {
@@ -214,13 +233,15 @@ export async function ejecutarAccion(params: AccionParams, ids: string[]): Promi
     if (c.priority) update.priority = c.priority
     if (c.importante) update.importante = true
     if (c.due_date) update.due_date = c.due_date
+    if (c.due_time !== undefined) update.due_time = c.due_time || null
     if (c.company_id) update.company_id = c.company_id
     if (Object.keys(update).length === 0) return USO.editar
     const { data, error } = await db.from('tasks').update(update).in('id', ids).eq('done', false).select(COLS)
     if (error) throw new Error(`Supabase tasks: ${error.message}`)
     const rows = (data as unknown as TaskRow[]) ?? []
     if (rows.length === 0) return 'Esa tarea ya está cerrada; no cambié nada.'
-    return rows.map((t) => `✏️ ${etiqueta(t)} → ${describirCambios(c)}`).join('\n')
+    const avisos = await sincronizar(rows.map((t) => t.id))
+    return conAvisos(rows.map((t) => `✏️ ${etiqueta(t)} → ${describirCambios(c)}${t.gcal_event_id || (t.due_date && t.due_time) ? ' 📅' : ''}`).join('\n'), avisos)
   }
 
   // listo / pasa
@@ -234,10 +255,12 @@ export async function ejecutarAccion(params: AccionParams, ids: string[]): Promi
   }
   const skipped = ids.length - rows.length
   const cola = skipped > 0 ? `\n(${skipped} ya ${skipped === 1 ? 'estaba cerrada' : 'estaban cerradas'})` : ''
-  if (params.accion === 'listo') return rows.map((t) => `✅ Hecha: ${etiqueta(t)}`).join('\n') + cola
+  // Done → its event goes; moved → its event moves (only tasks with an event or an hour).
+  const avisos = await sincronizar(rows.filter((t) => t.gcal_event_id || t.due_time).map((t) => t.id))
+  if (params.accion === 'listo') return conAvisos(rows.map((t) => `✅ Hecha: ${etiqueta(t)}`).join('\n') + cola, avisos)
   const fecha = formatCortoEs(manana)
-  if (rows.length === 1) return `📅 ${etiqueta(rows[0])} pasa a mañana (${fecha})${cola}`
-  return `✅ ${rows.length} tareas pasan a mañana (${fecha}):\n` + rows.map((t) => `• ${etiqueta(t)}`).join('\n') + cola
+  if (rows.length === 1) return conAvisos(`📅 ${etiqueta(rows[0])} pasa a mañana (${fecha})${cola}`, avisos)
+  return conAvisos(`✅ ${rows.length} tareas pasan a mañana (${fecha}):\n` + rows.map((t) => `• ${etiqueta(t)}`).join('\n') + cola, avisos)
 }
 
 /**
@@ -258,7 +281,8 @@ export async function cancelarTareas(ids: string[], motivo?: string | null): Pro
     if (e2) throw new Error(`Supabase tasks: ${e2.message}`)
     out.push(`🗑 Cancelada: ${etiqueta(t)}${motivo?.trim() ? ` (${motivo.trim()})` : ''}`)
   }
-  return out.join('\n')
+  const avisos = await sincronizar(rows.filter((t) => t.gcal_event_id).map((t) => t.id))
+  return conAvisos(out.join('\n'), avisos)
 }
 
 /** Fase 4 "renombrar": a new title for an open task. */
@@ -271,7 +295,8 @@ export async function renombrarTarea(id: string, titulo: string): Promise<string
   if (!before) return 'Esa tarea ya no existe.'
   const { error } = await db.from('tasks').update({ text: nuevo }).eq('id', id)
   if (error) throw new Error(`Supabase tasks: ${error.message}`)
-  return `✏️ «${before.text}» → «${nuevo}»`
+  const avisos = before.gcal_event_id ? await sincronizar([id]) : []
+  return conAvisos(`✏️ «${before.text}» → «${nuevo}»`, avisos)
 }
 
 /** What happens once the task ids are known: run it, or (borra) ask first. */

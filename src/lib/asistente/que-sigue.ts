@@ -15,7 +15,7 @@ import { CHELSEA_COMPANY_NAME } from '@/lib/chelsea'
 import { NOTA_FRESCA_DIAS } from '@/lib/notas'
 import { daysSince } from '@/lib/dates'
 import { guardarAlarma, type AlarmaItem } from './alarmas'
-import { addDays, cancunYmd, daysBetween, formatVenceEs } from './cancun'
+import { addDays, cancunYmd, daysBetween, formatHoraEs, formatVenceEs } from './cancun'
 import { llmConfig, preguntarLlm } from './llm'
 
 export interface QueSigueOpts {
@@ -33,6 +33,7 @@ interface TaskLite {
   priority: Priority
   importante: boolean
   due_date: string | null
+  due_time: string | null
   company_id: string | null
   company: { name: string } | null
 }
@@ -88,7 +89,7 @@ export async function calcularQueSigue(opts: QueSigueOpts = {}, now: Date = new 
   const domingo = addDays(today, (7 - dow) % 7 || 7)
   const db = createServerClient()
   const [tasksRes, companiesRes, notasRes] = await Promise.all([
-    db.from('tasks').select('id, text, priority, importante, due_date, company_id, company:companies(name)').eq('done', false),
+    db.from('tasks').select('id, text, priority, importante, due_date, due_time, company_id, company:companies(name)').eq('done', false),
     db.from('companies').select('*'),
     db.from('notas_empresa').select('*'),
   ])
@@ -152,17 +153,22 @@ export async function calcularQueSigue(opts: QueSigueOpts = {}, now: Date = new 
       for (const d of despues) lineas.push(`${num(d.task)}. «${d.task.text}» · ${emp(d.task)} · ${d.porque}`)
     }
   }
+  // Fase 4c: the answer always has the same shape — empty sections say so.
   if (!opts.solo_urgentes) {
     if (porVencer.length > 0) {
       lineas.push('⏳ Por vencer esta semana:')
-      for (const t of porVencer) lineas.push(`${num(t)}. «${t.text}» · ${emp(t)} · ${formatVenceEs(t.due_date!)}`)
-    } else if (opts.solo_vencer) {
-      lineas.push('⏳ Nada vence esta semana' + (opts.empresa ? ` de ${opts.empresa}` : '') + '.')
+      for (const t of porVencer) lineas.push(`${num(t)}. «${t.text}» · ${emp(t)} · ${formatVenceEs(t.due_date!)}${t.due_time ? ` ${formatHoraEs(t.due_time.slice(0, 5))}` : ''}`)
+    } else {
+      lineas.push('⏳ Nada vence esta semana' + (opts.empresa ? ` de ${opts.empresa}` : ''))
     }
   }
-  if (notasFrescas.length > 0) {
-    lineas.push('📝 Por dónde ibas:')
-    for (const n of notasFrescas) lineas.push(`${n.empresa}: ${n.texto}`)
+  if (!opts.solo_vencer) {
+    if (notasFrescas.length > 0) {
+      lineas.push('📝 Por dónde ibas:')
+      for (const n of notasFrescas) lineas.push(`${n.empresa}: ${n.texto}`)
+    } else {
+      lineas.push('📝 Sin notas de los últimos 3 días')
+    }
   }
 
   return { ahora, despues, porVencer, notas: notasFrescas, items, textoFijo: lineas.join('\n') }
@@ -176,7 +182,8 @@ const SYSTEM_PROMPT =
   '⏳ Por vencer esta semana:\nN. «título» · empresa · fecha   (hasta 3 líneas)\n' +
   '📝 Por dónde ibas:\nEmpresa: una línea por nota\n' +
   'Reglas: conserva los números, los títulos entre «» y el orden tal cual; no agregues ni quites tareas; ' +
-  'omite una sección si viene vacía; el "por qué" puede ir en tus palabras pero con el mismo dato ' +
+  'las líneas "⏳ Nada vence esta semana" y "📝 Sin notas de los últimos 3 días" se copian tal cual cuando vienen; ' +
+  'el "por qué" puede ir en tus palabras pero con el mismo dato ' +
   '("vencida hace 3 días", "vence hoy", "urgente ★"). Puedes resumir una nota larga a una línea. ' +
   'Sin saludos, sin encabezados, sin comentarios: solo las secciones.'
 
@@ -191,8 +198,10 @@ export async function responderQueSigue(chatId: number | null, opts: QueSigueOpt
     try {
       const cfg = llmConfig()
       const r = await preguntarLlm(SYSTEM_PROMPT, `LISTA ORDENADA:\n${q.textoFijo}`, { maxTokens: MAX_TOKENS, timeoutMs: TIMEOUT_MS })
-      // Keep the model's text only if it kept every number: that is what the refs rely on.
-      const ok = r.text && q.items.every((it) => new RegExp(`(^|\\s)${it.n}\\.\\s`).test(r.text))
+      // Keep the model's text only if it kept every number (the refs rely on
+      // them) and every section header (the fixed shape).
+      const cabeceras = ['🎯', '📌', '⏳', '📝'].filter((c) => q.textoFijo.includes(c))
+      const ok = r.text && q.items.every((it) => new RegExp(`(^|\\s)${it.n}\\.\\s`).test(r.text)) && cabeceras.every((c) => r.text.includes(c))
       if (ok) texto = r.text.trim()
       else console.warn(`[que-sigue] el modelo (${cfg.model}) cambió la numeración; uso el texto fijo`)
     } catch (err) {

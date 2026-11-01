@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import Link from 'next/link'
 import { Company, ApiKey, COMPANY_COLORS } from '@/types'
 import { supabase } from '@/lib/supabase'
 
@@ -100,8 +101,14 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-10">
-      <div>
+      <div className="flex items-center justify-between gap-3">
         <h1 className="text-lg font-semibold text-[#e8e8e8]">Settings</h1>
+        <Link
+          href="/settings/conexiones"
+          className="px-3 py-1.5 text-sm rounded-md text-[#888888] hover:text-[#e8e8e8] hover:bg-[#2a2a2a] transition-colors"
+        >
+          Conexiones (Google) →
+        </Link>
       </div>
 
       {/* Companies */}

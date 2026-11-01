@@ -11,6 +11,7 @@
 import { createServerClient } from '@/lib/supabase-server'
 import type { Priority } from '@/types'
 import { COLS_SIN_NOTAS, normalizar, ultimaAlarma, type TaskRow } from './acciones'
+import { extraerFecha, extraerHora } from '@/lib/parser'
 import { addDays, cancunHm, cancunYmd, formatDiaLargoEs } from './cancun'
 import { llmConfig, preguntarLlm } from './llm'
 
@@ -28,24 +29,25 @@ export type AccionLlm =
   | { tipo: 'borrar'; ref: string }
   | { tipo: 'posponer'; ref: string; fecha: string }
   | { tipo: 'renombrar'; ref: string; titulo: string }
-  | { tipo: 'cambiar'; ref: string; prioridad?: Priority; empresa?: string; fecha?: string }
-  | { tipo: 'crear'; titulo: string; empresa?: string; prioridad?: Priority; fecha?: string; importante?: boolean }
+  | { tipo: 'cambiar'; ref: string; prioridad?: Priority; empresa?: string; fecha?: string; hora?: string }
+  | { tipo: 'crear'; titulo: string; empresa?: string; prioridad?: Priority; fecha?: string; hora?: string; importante?: boolean }
   | { tipo: 'nota_empresa'; empresa: string; texto: string; modo: NotaModoLlm }
   | { tipo: 'nota_tarea'; ref: string; texto: string }
   | { tipo: 'alarma'; texto: string; fecha?: string; hora?: string; en_minutos?: number }
   | { tipo: 'pregunta'; texto: string }
   | { tipo: 'que_sigue'; empresa?: string; solo_urgentes?: boolean; solo_vencer?: boolean }
+  | { tipo: 'lista'; lista: 'manana' | 'tarde' }
   | { tipo: 'desconocido'; texto: string }
 
 export type TipoAccionLlm = AccionLlm['tipo']
 
 const TIPOS: TipoAccionLlm[] = [
   'completar', 'cancelar', 'borrar', 'posponer', 'renombrar', 'cambiar', 'crear',
-  'nota_empresa', 'nota_tarea', 'alarma', 'pregunta', 'que_sigue', 'desconocido',
+  'nota_empresa', 'nota_tarea', 'alarma', 'pregunta', 'que_sigue', 'lista', 'desconocido',
 ]
 
 /** A task as the interpreter and the plan see it: no notes. */
-export type TareaLite = Pick<TaskRow, 'id' | 'text' | 'due_date' | 'priority' | 'importante' | 'company'>
+export type TareaLite = Pick<TaskRow, 'id' | 'text' | 'due_date' | 'due_time' | 'priority' | 'importante' | 'company'>
 
 export interface ContextoInterprete {
   text: string
@@ -78,9 +80,10 @@ async function ultimaMencionada(chatId: number): Promise<string | null> {
 
 function fechaCorta(t: TareaLite, today: string): string {
   if (!t.due_date) return 'sin fecha'
-  if (t.due_date < today) return `vencida (${t.due_date})`
-  if (t.due_date === today) return 'vence hoy'
-  return `vence ${t.due_date}`
+  const hora = t.due_time ? ` ${t.due_time.slice(0, 5)}` : ''
+  if (t.due_date < today) return `vencida (${t.due_date}${hora})`
+  if (t.due_date === today) return `vence hoy${hora}`
+  return `vence ${t.due_date}${hora}`
 }
 
 export async function construirContextoInterprete(
@@ -168,8 +171,9 @@ export function systemPrompt(today: string): string {
     '- {"tipo":"borrar","ref":REF}  → borra, elimina, bórralo, quítala de la lista. Se elimina de verdad (el bot pide confirmación)',
     '- {"tipo":"posponer","ref":REF,"fecha":"YYYY-MM-DD"}  → pasar/mover/dejar para otro día',
     '- {"tipo":"renombrar","ref":REF,"titulo":"…"}  → "se llama X", "cámbiale el nombre". Si solo corrige una palabra, devuelve el título completo corregido',
-    '- {"tipo":"cambiar","ref":REF,("prioridad":"urgente|normal|cuando"),("empresa":"…"),("fecha":"YYYY-MM-DD")}  → solo lo que cambia',
-    '- {"tipo":"crear","titulo":"…",("empresa":"…"),("prioridad":"urgente|normal|cuando"),("fecha":"YYYY-MM-DD"),("importante":true)}  → tarea nueva',
+    '- {"tipo":"cambiar","ref":REF,("prioridad":"urgente|normal|cuando"),("empresa":"…"),("fecha":"YYYY-MM-DD"),("hora":"HH:MM")}  → solo lo que cambia',
+    '- {"tipo":"crear","titulo":"…",("empresa":"…"),("prioridad":"urgente|normal|cuando"),("fecha":"YYYY-MM-DD"),("hora":"HH:MM"),("importante":true)}  → tarea nueva. ' +
+      'La fecha ("para el viernes", "el 15 de noviembre", "en 3 días", "mañana") y la hora ("3pm", "a las 10") NUNCA van en el título: van en fecha/hora',
     '- {"tipo":"nota_empresa","empresa":"…","texto":"…","modo":"reemplazar|agregar"}  → "nota de IM: …", "apunta en PD que …" (agregar si dice agrega/suma/además)',
     '- {"tipo":"nota_tarea","ref":REF,"texto":"…"}  → un comentario sobre una tarea existente',
     '- {"tipo":"alarma","texto":"…",("fecha":"YYYY-MM-DD"),("hora":"HH:MM")}  → alarma, recuérdame, avísame, ponme un recordatorio. ' +
@@ -178,6 +182,8 @@ export function systemPrompt(today: string): string {
     '- {"tipo":"pregunta","texto":"…"}  → pregunta sobre sus tareas (qué tengo hoy, qué cerré ayer, cómo voy con IM)',
     '- {"tipo":"que_sigue",("empresa":"…"),("solo_urgentes":true),("solo_vencer":true)}  → "qué sigue", "qué hago primero", "qué es lo más urgente", "por dónde empiezo". ' +
       '"solo urgentes" → solo_urgentes; "qué vence / qué está por vencer esta semana" → solo_vencer; "qué sigue de IM" → empresa',
+    '- {"tipo":"lista","lista":"manana|tarde"}  → la LISTA COMPLETA numerada: "dame la lista", "la lista de la mañana", "lista completa", "todo lo pendiente", "mándame el /hoy" → manana; ' +
+      '"cierre", "lista de la tarde", "el cierre del día" → tarde. Esto NO es que_sigue (que_sigue es corto y ordenado; lista es todo)',
     '- {"tipo":"desconocido","texto":"…"}  → saludos, comentarios o algo que no es ninguna de las anteriores',
     '',
     'REF = a qué tarea se refiere: el id entre corchetes del contexto ("#3" = número de la última alarma, "t12" = otra tarea abierta), ' +
@@ -233,14 +239,6 @@ function hora(v: unknown): string | undefined {
   const mi = Number(m[2])
   if (h > 23 || mi > 59) return undefined
   return `${String(h).padStart(2, '0')}:${m[2]}`
-}
-
-/** "Shift Google Ads y SEO hoy" → title without the day, and the date if none was given. */
-export function sinFechaEnTitulo(titulo: string, fechaDada: string | undefined, today: string = cancunYmd()): { text: string; due_date: string | undefined } {
-  const m = titulo.match(/[\s,]+(hoy|mañana|manana)\s*[.!]?$/i)
-  if (!m) return { text: titulo, due_date: fechaDada }
-  const dia = m[1].toLowerCase() === 'hoy' ? today : addDays(today, 1)
-  return { text: titulo.slice(0, m.index).replace(/[\s,.\-–]+$/, '').trim() || titulo, due_date: fechaDada ?? dia }
 }
 
 // Words that are the order itself, not a reason: "pídelo cancelar", "bórralo".
@@ -326,19 +324,27 @@ export function validarAcciones(raw: unknown): AccionLlm[] {
         break
       }
       case 'cambiar':
-        if (ref) out.push({ tipo, ref, prioridad: prioridad(a.prioridad), empresa: str(a.empresa), fecha: fecha(a.fecha) })
+        if (ref) out.push({ tipo, ref, prioridad: prioridad(a.prioridad), empresa: str(a.empresa), fecha: fecha(a.fecha), hora: hora(a.hora) })
         break
       case 'crear': {
         const titulo = str(a.titulo) ?? str(a.texto)
         if (titulo) {
           const p = prioridad(a.prioridad)
-          const { text, due_date } = sinFechaEnTitulo(titulo, fecha(a.fecha))
-          out.push({ tipo, titulo: text, empresa: str(a.empresa), prioridad: p, fecha: due_date, importante: a.importante === true || p === 'urgente' })
+          // The classic extractors run over the title the model returned: if it
+          // left "para el viernes" or "3pm" inside, they come out here.
+          const h = extraerHora(titulo)
+          const f = extraerFecha(h.text, cancunYmd())
+          const text = f.text.replace(/\s{2,}/g, ' ').replace(/^[\s:,.\-–]+|[\s:,.\-–]+$/g, '').trim() || titulo
+          const due = fecha(a.fecha) ?? f.due_date ?? undefined
+          out.push({ tipo, titulo: text, empresa: str(a.empresa), prioridad: p, fecha: due, hora: due ? hora(a.hora) ?? h.due_time ?? undefined : undefined, importante: a.importante === true || p === 'urgente' })
         }
         break
       }
       case 'que_sigue':
         out.push({ tipo, empresa: str(a.empresa), solo_urgentes: a.solo_urgentes === true, solo_vencer: a.solo_vencer === true })
+        break
+      case 'lista':
+        out.push({ tipo, lista: str(a.lista)?.toLowerCase() === 'tarde' ? 'tarde' : 'manana' })
         break
       case 'nota_empresa': {
         const empresa = str(a.empresa)

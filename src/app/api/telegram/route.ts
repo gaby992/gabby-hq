@@ -46,6 +46,7 @@ import {
 import { cargarEmpresas, confirmacion, guardarTarea, pregunta } from '@/lib/asistente/tareas'
 import { responderPregunta } from '@/lib/asistente/pregunta'
 import { responderQueSigue } from '@/lib/asistente/que-sigue'
+import { enviarLista } from '@/lib/asistente/alarmas'
 import type { Priority } from '@/types'
 
 // Telegram → here (webhook). Text, voice notes and inline-button taps all end
@@ -99,8 +100,8 @@ async function borradorConNonce(chatId: number, texto: string, parsed: BorradorP
 async function guardarOPreguntar(chatId: number, texto: string, tarea: TareaParsed, prefix: string | null) {
   const falta = faltantes(tarea)
   if (falta.length === 0) {
-    await guardarTarea(tarea)
-    await reply(chatId, joinLines(prefix, confirmacion(tarea)))
+    const sync = await guardarTarea(tarea)
+    await reply(chatId, joinLines(prefix, confirmacion(tarea, sync)))
     return
   }
   const borrador = await crearBorrador(chatId, texto, tarea)
@@ -193,6 +194,11 @@ async function handleText(chatId: number, text: string, prefix: string | null) {
       await reply(chatId, joinLines(prefix, `✓ Radar: "${parsed.titulo}"`))
       return
     }
+    case 'lista':
+      // Fase 4c: the 8:00 / 6:00 pm message, now, recorded like the cron's.
+      if (prefix) await reply(chatId, prefix)
+      await enviarLista(chatId, parsed.tipo)
+      return
     case 'que_sigue':
       // Fase 4b: ordered in code, worded by the LLM, numbered like an alarm.
       await reply(chatId, joinLines(prefix, await responderQueSigue(chatId, parsed.opts)))
@@ -560,9 +566,9 @@ async function handleCallback(cq: CallbackQuery) {
       await reply(chatId, q.text, q.replyMarkup)
       return
     }
-    await guardarTarea(tarea)
+    const sync = await guardarTarea(tarea)
     await borrarBorrador(borrador.id)
-    await reply(chatId, confirmacion(tarea))
+    await reply(chatId, confirmacion(tarea, sync))
   } catch (err) {
     console.error('[bot] callback error:', err)
     await reply(chatId, ERROR_GENERICO)

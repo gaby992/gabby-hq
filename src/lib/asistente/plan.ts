@@ -10,7 +10,8 @@
 import { PRIORITY_LABELS } from '@/types'
 import type { Cambios, TareaParsed } from '@/lib/parser'
 import { cancelarTareas, ejecutarAccion, renombrarTarea } from './acciones'
-import { addDays, cancunYmd, formatFechaHoraEs, formatVenceEs } from './cancun'
+import { enviarLista } from './alarmas'
+import { addDays, cancunYmd, formatFechaHoraEs, formatHoraEs, formatVenceEs } from './cancun'
 import { buscarEnAbiertas, type AccionLlm, type ContextoInterprete, type TareaLite } from './interprete'
 import { ejecutarNota } from './notas-bot'
 import { responderPregunta } from './pregunta'
@@ -109,7 +110,7 @@ export function resolverAcciones(acciones: AccionLlm[], ctx: ContextoInterprete,
       if (e) r.empresa_ref = e
       else if (a.tipo !== 'crear') r.error = r.error ?? `no conozco la empresa «${a.empresa}»`
     }
-    if (a.tipo === 'cambiar' && !a.prioridad && !a.fecha && !a.empresa) r.error = r.error ?? 'no dijiste qué cambiar'
+    if (a.tipo === 'cambiar' && !a.prioridad && !a.fecha && !a.empresa && !a.hora) r.error = r.error ?? 'no dijiste qué cambiar'
     if (a.tipo === 'alarma') {
       const cuando = instanteDe(a)
       if (cuando) r.dispara_en = cuando
@@ -123,7 +124,7 @@ export function resolverAcciones(acciones: AccionLlm[], ctx: ContextoInterprete,
 
 const ICONO: Record<AccionLlm['tipo'], string> = {
   completar: '✅', cancelar: '🗑', borrar: '❌', posponer: '➡️', renombrar: '✏️', cambiar: '✏️', crear: '➕',
-  nota_empresa: '📝', nota_tarea: '📎', alarma: '⏰', pregunta: '❓', que_sigue: '🎯', desconocido: '🤷',
+  nota_empresa: '📝', nota_tarea: '📎', alarma: '⏰', pregunta: '❓', que_sigue: '🎯', lista: '📋', desconocido: '🤷',
 }
 
 function fechaDicha(ymd: string, today: string): string {
@@ -136,7 +137,8 @@ function describirCambios(a: Extract<AccionResuelta, { tipo: 'cambiar' }>): stri
   const out: string[] = []
   if (a.empresa_ref) out.push(a.empresa_ref.name.trim())
   if (a.prioridad) out.push(`${PRIORITY_LABELS[a.prioridad]}${a.prioridad === 'urgente' ? ' ★' : ''}`)
-  if (a.fecha) out.push(`vence ${formatVenceEs(a.fecha)}`)
+  if (a.fecha) out.push(a.hora ? `${formatVenceEs(a.fecha)} ${formatHoraEs(a.hora)}` : `vence ${formatVenceEs(a.fecha)}`)
+  else if (a.hora) out.push(`a las ${formatHoraEs(a.hora)}`)
   return out.join(' · ')
 }
 
@@ -153,7 +155,7 @@ function frase(a: AccionResuelta, today: string, conTarea: boolean): string {
     case 'cambiar': return `Cambiar${tt} → ${describirCambios(a)}`
     case 'crear': {
       const parts = [a.empresa_ref?.name.trim() ?? (a.empresa ? `empresa «${a.empresa}»?` : 'sin empresa'), PRIORITY_LABELS[a.prioridad ?? 'normal'] + (a.importante ? ' ★' : '')]
-      if (a.fecha) parts.push(`vence ${formatVenceEs(a.fecha)}`)
+      if (a.fecha) parts.push(a.hora ? `${formatVenceEs(a.fecha)} ${formatHoraEs(a.hora)} 📅` : `vence ${formatVenceEs(a.fecha)}`)
       return `Crear «${corto(a.titulo)}» · ${parts.join(' · ')}`
     }
     case 'nota_empresa': return `Nota de ${a.empresa_ref?.name.trim() ?? a.empresa} (${a.modo}): «${corto(a.texto, 60)}»`
@@ -161,6 +163,7 @@ function frase(a: AccionResuelta, today: string, conTarea: boolean): string {
     case 'alarma': return `Alarma «${corto(a.texto)}» · ${a.dispara_en ? formatFechaHoraEs(a.dispara_en) : `${a.fecha ? formatVenceEs(a.fecha) : 'hoy'} (sin hora → 9:00 am)`}`
     case 'pregunta': return `Responder «${corto(a.texto, 60)}»`
     case 'que_sigue': return `Qué sigue${a.empresa ? ` de ${a.empresa}` : ''}${a.solo_urgentes ? ' (solo urgentes)' : ''}${a.solo_vencer ? ' (por vencer)' : ''}`
+    case 'lista': return a.lista === 'tarde' ? 'Mandar el cierre del día' : 'Mandar la lista completa de hoy'
     case 'desconocido': return `No entendí «${corto(a.texto, 60)}»`
   }
 }
@@ -222,6 +225,7 @@ export function tareaParsedDe(a: Extract<AccionResuelta, { tipo: 'crear' }>): Ta
     company_name: a.empresa_ref?.name.trim() ?? null,
     importante: a.importante === true || a.prioridad === 'urgente',
     due_date: a.fecha ?? null,
+    due_time: a.fecha && a.hora ? a.hora : null,
   }
 }
 
@@ -255,6 +259,7 @@ export async function ejecutarUna(chatId: number, a: AccionResuelta): Promise<st
         if (a.prioridad === 'urgente') cambios.importante = true
       }
       if (a.fecha) cambios.due_date = a.fecha
+      if (a.hora) cambios.due_time = a.hora
       if (a.empresa_ref) {
         cambios.company_id = a.empresa_ref.id
         cambios.company_name = a.empresa_ref.name.trim()
@@ -263,8 +268,7 @@ export async function ejecutarUna(chatId: number, a: AccionResuelta): Promise<st
     }
     case 'crear': {
       const t = tareaParsedDe(a)
-      await guardarTarea(t)
-      return confirmacion(t)
+      return confirmacion(t, await guardarTarea(t))
     }
     case 'nota_empresa': {
       if (!a.empresa_ref) return `⚠️ No conozco la empresa «${a.empresa}»`
@@ -282,6 +286,10 @@ export async function ejecutarUna(chatId: number, a: AccionResuelta): Promise<st
       return responderPregunta(chatId, a.texto)
     case 'que_sigue':
       return responderQueSigue(chatId, { empresa: a.empresa, solo_urgentes: a.solo_urgentes, solo_vencer: a.solo_vencer })
+    case 'lista':
+      // Sent as its own HTML message (same builder as the cron); nothing to add here.
+      await enviarLista(chatId, a.lista)
+      return a.lista === 'tarde' ? '📋 (cierre enviado arriba)' : '📋 (lista enviada arriba)'
     case 'desconocido':
       return `🤷 No entendí «${corto(a.texto, 60)}»`
   }

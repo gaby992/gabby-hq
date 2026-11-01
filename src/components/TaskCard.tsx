@@ -164,7 +164,7 @@ export default function TaskCard({ task, companies, onUpdate, today }: Props) {
             {task.company && <CompanyBadge company={task.company} size="xs" />}
             <PriorityBadge priority={task.priority} />
             <ImportantBadge importante={task.importante} />
-            <DueDateLabel date={task.due_date} today={today} />
+            <DueDateLabel date={task.due_date} time={task.due_time} today={today} />
             {isCompleted && task.completed_at && (
               <span className="text-xs text-[#1D9E75]" title={task.completed_at}>
                 ✓ hecha {formatShortEs(ymd(new Date(task.completed_at)))}
