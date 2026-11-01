@@ -29,7 +29,7 @@ export type AccionLlm =
   | { tipo: 'borrar'; ref: string }
   | { tipo: 'posponer'; ref: string; fecha: string }
   | { tipo: 'renombrar'; ref: string; titulo: string }
-  | { tipo: 'cambiar'; ref: string; prioridad?: Priority; empresa?: string; fecha?: string; hora?: string }
+  | { tipo: 'cambiar'; ref: string; prioridad?: Priority; empresa?: string; fecha?: string; hora?: string; calendar?: boolean }
   | { tipo: 'crear'; titulo: string; empresa?: string; prioridad?: Priority; fecha?: string; hora?: string; importante?: boolean; calendar?: boolean }
   | { tipo: 'calendar'; ref: string; hora?: string; todo_el_dia?: boolean }
   | { tipo: 'pago_crear'; empresa?: string; nombre: string; dia: number; monto?: string }
@@ -177,7 +177,7 @@ export function systemPrompt(today: string): string {
     '- {"tipo":"borrar","ref":REF}  → borra, elimina, bórralo, quítala de la lista. Se elimina de verdad (el bot pide confirmación)',
     '- {"tipo":"posponer","ref":REF,"fecha":"YYYY-MM-DD"}  → pasar/mover/dejar para otro día',
     '- {"tipo":"renombrar","ref":REF,"titulo":"…"}  → "se llama X", "cámbiale el nombre". Si solo corrige una palabra, devuelve el título completo corregido',
-    '- {"tipo":"cambiar","ref":REF,("prioridad":"urgente|normal|cuando"),("empresa":"…"),("fecha":"YYYY-MM-DD"),("hora":"HH:MM")}  → solo lo que cambia',
+    '- {"tipo":"cambiar","ref":REF,("prioridad":"urgente|normal|cuando"),("empresa":"…"),("fecha":"YYYY-MM-DD"),("hora":"HH:MM"),("calendar":true)}  → solo lo que cambia; "y ponla en calendar" → calendar:true',
     '- {"tipo":"crear","titulo":"…",("empresa":"…"),("prioridad":"urgente|normal|cuando"),("fecha":"YYYY-MM-DD"),("hora":"HH:MM"),("importante":true)}  → tarea nueva. ' +
       'La fecha ("para el viernes", "el 15 de noviembre", "en 3 días", "mañana") y la hora ("3pm", "a las 10") NUNCA van en el título: van en fecha/hora. ' +
       'Si dice "y ponla en calendar" / "agrégala al calendario" / "en la agenda", pon "calendar":true y quítalo del título. Sin eso, la tarea NO va a Calendar aunque tenga hora',
@@ -336,7 +336,7 @@ export function validarAcciones(raw: unknown): AccionLlm[] {
         break
       }
       case 'cambiar':
-        if (ref) out.push({ tipo, ref, prioridad: prioridad(a.prioridad), empresa: str(a.empresa), fecha: fecha(a.fecha), hora: hora(a.hora) })
+        if (ref) out.push({ tipo, ref, prioridad: prioridad(a.prioridad), empresa: str(a.empresa), fecha: fecha(a.fecha), hora: hora(a.hora), calendar: a.calendar === true || undefined })
         break
       case 'crear': {
         const titulo = str(a.titulo) ?? str(a.texto)

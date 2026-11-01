@@ -115,7 +115,7 @@ export function resolverAcciones(acciones: AccionLlm[], ctx: ContextoInterprete,
       else if (a.tipo !== 'crear') r.error = r.error ?? `no conozco la empresa «${a.empresa}»`
     }
     if (a.tipo === 'pago_crear' && !a.empresa) r.error = '¿de qué empresa es el pago? ("pago IM Vercel el 15")'
-    if (a.tipo === 'cambiar' && !a.prioridad && !a.fecha && !a.empresa && !a.hora) r.error = r.error ?? 'no dijiste qué cambiar'
+    if (a.tipo === 'cambiar' && !a.prioridad && !a.fecha && !a.empresa && !a.hora && !a.calendar) r.error = r.error ?? 'no dijiste qué cambiar'
     if (a.tipo === 'alarma') {
       const cuando = instanteDe(a)
       if (cuando) r.dispara_en = cuando
@@ -158,7 +158,7 @@ function frase(a: AccionResuelta, today: string, conTarea: boolean): string {
     case 'borrar': return `Borrar${tt} (se elimina)`
     case 'posponer': return `Pasar ${fechaDicha(a.fecha, today)}${tt}`
     case 'renombrar': return `Renombrar${tt} → «${a.titulo}»`
-    case 'cambiar': return `Cambiar${tt} → ${describirCambios(a)}`
+    case 'cambiar': return `Cambiar${tt} → ${[describirCambios(a), a.calendar ? '📅 calendar' : ''].filter(Boolean).join(' · ')}`
     case 'crear': {
       const parts = [a.empresa_ref?.name.trim() ?? (a.empresa ? `empresa «${a.empresa}»?` : 'sin empresa'), PRIORITY_LABELS[a.prioridad ?? 'normal'] + (a.importante ? ' ★' : '')]
       if (a.fecha) parts.push(a.hora ? `${formatVenceEs(a.fecha)} ${formatHoraEs(a.hora)}` : `vence ${formatVenceEs(a.fecha)}`)
@@ -273,6 +273,7 @@ export async function ejecutarUna(chatId: number, a: AccionResuelta): Promise<st
       }
       if (a.fecha) cambios.due_date = a.fecha
       if (a.hora) cambios.due_time = a.hora
+      if (a.calendar) cambios.calendar = true
       if (a.empresa_ref) {
         cambios.company_id = a.empresa_ref.id
         cambios.company_name = a.empresa_ref.name.trim()

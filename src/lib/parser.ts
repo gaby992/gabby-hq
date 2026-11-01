@@ -65,6 +65,8 @@ export interface Cambios {
   due_time?: string
   company_id?: string
   company_name?: string
+  /** "paypal mañana 3pm y ponla en calendar": also create the event (fase 5-B). */
+  calendar?: boolean
 }
 
 export type ListaTipo = 'manana' | 'tarde'
@@ -511,6 +513,7 @@ export function parseMensaje(raw: string, companies: CompanyRef[], today: string
   if (dictado) return { kind: 'tarea', tarea: { ...dictado, calendar: cal.calendar } }
 
   const edicion = /^(urgente|normal|cuando|para)\b/i.test(sinCal) ? null : parseEdicion(sinCal, companies, today)
+  if (edicion && cal.calendar) edicion.cambios.calendar = true
 
   let rest = sinCal
   const p = takePriority(rest); rest = norm(p.text)

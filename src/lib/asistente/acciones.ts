@@ -12,7 +12,7 @@ import { createServerClient } from '@/lib/supabase-server'
 import { PRIORITY_LABELS } from '@/types'
 import type { Accion, Cambios } from '@/lib/parser'
 import { addDays, cancunYmd, formatCortoEs, formatHoraEs, formatVenceEs } from './cancun'
-import { avisosDe, borrarEventoDeTarea, sincronizarTarea } from '@/lib/google/sync'
+import { agregarACalendar, avisosDe, borrarEventoDeTarea, sincronizarTarea } from '@/lib/google/sync'
 import type { AlarmaItem, AlarmaTipo } from './alarmas'
 import { inlineKeyboard, type InlineButton } from './telegram'
 
@@ -235,13 +235,21 @@ export async function ejecutarAccion(params: AccionParams, ids: string[]): Promi
     if (c.due_date) update.due_date = c.due_date
     if (c.due_time !== undefined) update.due_time = c.due_time || null
     if (c.company_id) update.company_id = c.company_id
-    if (Object.keys(update).length === 0) return USO.editar
-    const { data, error } = await db.from('tasks').update(update).in('id', ids).eq('done', false).select(COLS)
+    if (Object.keys(update).length === 0 && !c.calendar) return USO.editar
+    const { data, error } = Object.keys(update).length === 0
+      ? await db.from('tasks').select(COLS).in('id', ids).eq('done', false)
+      : await db.from('tasks').update(update).in('id', ids).eq('done', false).select(COLS)
     if (error) throw new Error(`Supabase tasks: ${error.message}`)
     const rows = (data as unknown as TaskRow[]) ?? []
     if (rows.length === 0) return 'Esa tarea ya está cerrada; no cambié nada.'
-    const avisos = await sincronizar(rows.map((t) => t.id))
-    return conAvisos(rows.map((t) => `✏️ ${etiqueta(t)} → ${describirCambios(c)}${t.gcal_event_id ? ' 📅' : ''}`).join('\n'), avisos)
+    // "… y ponla en calendar" on an edit: create (or refresh) the event; otherwise only keep an existing one in step.
+    const resultados = c.calendar
+      ? await Promise.all(rows.map((t) => agregarACalendar(t.id, { todoElDia: !t.due_time && !c.due_time })))
+      : []
+    const avisos = c.calendar ? avisosDe(resultados) : await sincronizar(rows.map((t) => t.id))
+    const lineas = rows.map((t, i) => `✏️ ${etiqueta(t)} → ${describirCambios(c) || 'calendar'}${t.gcal_event_id || resultados[i]?.confirmacion ? ' 📅' : ''}`)
+    const extra = resultados.map((r) => r.confirmacion).filter((x): x is string => !!x)
+    return conAvisos([...lineas, ...extra].join('\n'), avisos)
   }
 
   // listo / pasa
