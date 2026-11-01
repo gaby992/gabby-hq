@@ -37,8 +37,10 @@ export interface TareaParsed {
   company_name: string | null
   importante: boolean
   due_date: string | null
-  /** 'HH:MM' (24 h, Cancún). Only with a date; with both, the task becomes a Calendar event (fase 5). */
+  /** 'HH:MM' (24 h, Cancún). Shown everywhere; goes to Calendar only on request. */
   due_time?: string | null
+  /** "y ponla en calendar": create the Calendar event too (fase 5-B). */
+  calendar?: boolean
 }
 
 export type Faltante = 'empresa' | 'urgencia'
@@ -78,6 +80,13 @@ export type Parsed =
   | { kind: 'que_sigue'; opts: QueSigueOpts }
   /** Fase 4c: the 8:00 / 6:00 pm list, on demand. */
   | { kind: 'lista'; tipo: ListaTipo }
+  /** Fase 5-B: "pon en calendar la de TOTT" → the open task whose title contains `termino`. */
+  | { kind: 'calendar'; termino: string }
+  /** Fase 5-C: recurring payments. */
+  | { kind: 'pagos'; empresa: CompanyRef | null }
+  | { kind: 'pago_quitar'; termino: string }
+  | { kind: 'pago_cambiar'; termino: string; dia: number }
+  | { kind: 'pago'; empresa: CompanyRef | null; nombre: string; dia: number; monto: string | null }
   | { kind: 'alarmas' }
   | { kind: 'quitar_alarma'; arg: string }
   | { kind: 'pregunta'; texto: string }
@@ -372,6 +381,51 @@ function parseQueSigue(text: string, companies: CompanyRef[]): QueSigueOpts | nu
   return opts
 }
 
+// Fase 5-B: "… y ponla en calendar", "… y agrégala al calendario", "calendar: …",
+// "… (en calendar)". Removed from the text; the flag travels in TareaParsed.
+const CALENDAR_RE = /(?:^calendar:\s*|[\s,]+(?:y\s+)?(?:ponla|ponlo|ponerla|ponerlo|agr[ée]gala|agr[ée]galo|agregarla|agregarlo|m[ée]tela|m[ée]telo|anótala|anotala)\s+(?:en|al)\s+(?:el\s+)?(?:google\s+)?(?:calendar|calendario|agenda)\b\s*[.!]?|[\s,]+(?:en|al)\s+(?:google\s+)?(?:calendar|calendario)\s*[.!]?$)/i
+export function extraerCalendar(text: string): { calendar: boolean; text: string } {
+  const m = text.match(CALENDAR_RE)
+  if (!m) return { calendar: false, text }
+  return { calendar: true, text: text.replace(m[0], ' ') }
+}
+
+// Fase 5-C: payments.
+//   pago IM Vercel el 15 de cada mes [· $20] · pagos de IM · pagos ·
+//   quita el pago Vercel · cambia el pago Vercel al 20
+function findCompany(name: string, companies: CompanyRef[]): CompanyRef | null {
+  const n = sinAcentos(name.trim())
+  return companies.find((c) => sinAcentos(c.name.trim()) === n) ?? null
+}
+function parsePagos(text: string, companies: CompanyRef[]): Parsed | null {
+  const t = text.replace(/[.!?]+$/, '').trim()
+  const n = sinAcentos(t)
+  let m = n.match(/^(?:mis\s+)?pagos(?:\s+(?:recurrentes|mensuales))?(?:\s+de\s+(.+))?$/)
+  if (m) {
+    const empresa = m[1] ? findCompany(m[1], companies) : null
+    if (m[1] && !empresa) return null
+    return { kind: 'pagos', empresa }
+  }
+  m = t.match(/^(?:quita|quitar|borra|borrar|elimina|cancela)\s+(?:el\s+)?pago\s+(?:de\s+)?(.+)$/i)
+  if (m) return { kind: 'pago_quitar', termino: tidy(m[1]) }
+  m = t.match(/^(?:cambia|cambiar|mueve|pasa)\s+(?:el\s+)?pago\s+(?:de\s+)?(.+?)\s+(?:al|para\s+el|a)\s+(?:d[ií]a\s+)?(\d{1,2})$/i)
+  if (m) return { kind: 'pago_cambiar', termino: tidy(m[1]), dia: Number(m[2]) }
+  m = t.match(/^(?:pago|pagos|agrega\s+(?:el\s+)?pago)\s+(.+?)\s+(?:el|los|cada|el\s+d[ií]a)\s+(\d{1,2})(?:\s+de\s+cada\s+mes|\s+cada\s+mes|\s+mensual(?:es)?)?(?:\s*[,·-]\s*(.+))?$/i)
+  if (m) {
+    let resto = m[1].trim()
+    let empresa: CompanyRef | null = null
+    const sorted = [...companies].sort((a, b) => b.name.length - a.name.length)
+    for (const c of sorted) {
+      const re = new RegExp(`^(?:de\\s+)?${escapeRe(c.name.trim())}\\b\\s*:?\\s*`, 'i')
+      if (re.test(resto)) { empresa = c; resto = resto.replace(re, ''); break }
+    }
+    const nombre = tidy(resto)
+    if (!nombre) return null
+    return { kind: 'pago', empresa, nombre, dia: Number(m[2]), monto: m[3] ? tidy(m[3]) : null }
+  }
+  return null
+}
+
 // Fase 4c: the full list, now. "/hoy", "dame la lista", "la lista de la
 // mañana", "lista completa", "todo lo pendiente" → the 8:00 message;
 // "cierre", "lista de la tarde", "/cierre" → the 6:00 pm one.
@@ -424,6 +478,11 @@ export function parseMensaje(raw: string, companies: CompanyRef[], today: string
   if (/^(?:\/start|\/help|\/ayuda|ayuda|help|formato)\b/i.test(lower)) return { kind: 'ayuda' }
   const lista = parseLista(text)
   if (lista) return { kind: 'lista', tipo: lista }
+  const pagos = parsePagos(text, companies)
+  if (pagos) return pagos
+  const calCmd = text.match(/^(?:pon|ponme|agrega|agr[ée]game|mete|m[ée]teme)\s+(?:en|al)\s+(?:el\s+)?(?:google\s+)?(?:calendar|calendario|agenda)\s+(?:la\s+(?:tarea\s+)?(?:de|del)\s+|la\s+|el\s+)?(.+)$/i)
+    ?? text.match(/^calendar\s+(.+)$/i)
+  if (calCmd && !/^calendar:/i.test(text)) return { kind: 'calendar', termino: tidy(calCmd[1]) }
   const qs = parseQueSigue(text, companies)
   if (qs) return { kind: 'que_sigue', opts: qs }
   if (/^[?¿]/.test(text) || /^\/?pregunta\b/i.test(text)) {
@@ -444,12 +503,16 @@ export function parseMensaje(raw: string, companies: CompanyRef[], today: string
   const accion = text.match(/^(pasa|listo|borra)\b\s*([\s\S]*)$/i)
   if (accion) return { kind: 'accion', accion: accion[1].toLowerCase() as Accion, arg: tidy(accion[2]) }
 
-  const dictado = parseDictado(text, companies, today)
-  if (dictado) return { kind: 'tarea', tarea: dictado }
+  // "calendar: …" / "… y ponla en calendar" comes off first, whatever the form.
+  const cal = extraerCalendar(text)
+  const sinCal = norm(cal.text)
 
-  const edicion = /^(urgente|normal|cuando|para)\b/i.test(text) ? null : parseEdicion(text, companies, today)
+  const dictado = parseDictado(sinCal, companies, today)
+  if (dictado) return { kind: 'tarea', tarea: { ...dictado, calendar: cal.calendar } }
 
-  let rest = norm(text)
+  const edicion = /^(urgente|normal|cuando|para)\b/i.test(sinCal) ? null : parseEdicion(sinCal, companies, today)
+
+  let rest = sinCal
   const p = takePriority(rest); rest = norm(p.text)
   const c = takeCompany(rest, companies); rest = norm(c.text)
   const i = takeImportante(rest); rest = norm(i.text)
@@ -467,6 +530,7 @@ export function parseMensaje(raw: string, companies: CompanyRef[], today: string
     due_date: d.due_date,
     // An hour without a date means nothing to the calendar.
     due_time: d.due_date ? h.due_time : null,
+    calendar: cal.calendar,
   }
   if (edicion) return { kind: 'edicion', termino: edicion.termino, cambios: edicion.cambios, fallback: tarea }
   return { kind: 'tarea', tarea }
@@ -486,8 +550,9 @@ export function ayuda(modelo: string): string {
     '💬 HÁBLAME NORMAL: "el 3 ya está", "pasa el 5 al lunes", "9 cancelar, no se va a hacer", "alarma mañana 9am revisar X" · varias órdenes en un mensaje y te muestro el plan antes de hacerlo',
     '🎯 ¿QUÉ SIGUE? · "qué hago primero" · "solo urgentes" · "qué vence esta semana" · "qué sigue de IM" → una tarea para ahora, 3 después, 3 por vencer; luego "listo 1" / "pasa el segundo"',
     '📋 /hoy · "dame la lista" · "todo lo pendiente" → la lista completa de las 8:00, ahora · "cierre" → la de las 6:00 pm',
+    '💳 PAGOS: "pago IM Vercel el 15 de cada mes" (evento mensual con avisos 7 días, 3 días y ese día) · "pagos de IM" · "quita el pago Vercel" · "cambia el pago Vercel al 20"',
     '📥 AGREGAR',
-    'urgente/normal/cuando [empresa] tarea [importante] [hoy · mañana · pasado mañana · el viernes · en 3 días · el 15 de nov] [3pm · a las 10] · con fecha y hora va a Google Calendar 📅',
+    'urgente/normal/cuando [empresa] tarea [importante] [hoy · mañana · pasado mañana · el viernes · en 3 días · el 15 de nov] [3pm · a las 10] · "… y ponla en calendar" → también evento 📅 · "pon en calendar la de TOTT"',
     '🎤 Por voz igual (máx 2 min) · 💡 radar <idea> · si falta algo, te pregunto con botones',
     '✅ CERRAR / MOVER',
     'listo 3 · listo paypal (completa) · pasa 2,5 · pasa todo · pasa paypal (a mañana) · borra 3 · borra paypal',

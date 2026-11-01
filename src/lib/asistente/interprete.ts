@@ -11,7 +11,7 @@
 import { createServerClient } from '@/lib/supabase-server'
 import type { Priority } from '@/types'
 import { COLS_SIN_NOTAS, normalizar, ultimaAlarma, type TaskRow } from './acciones'
-import { extraerFecha, extraerHora } from '@/lib/parser'
+import { extraerCalendar, extraerFecha, extraerHora } from '@/lib/parser'
 import { addDays, cancunHm, cancunYmd, formatDiaLargoEs } from './cancun'
 import { llmConfig, preguntarLlm } from './llm'
 
@@ -30,7 +30,12 @@ export type AccionLlm =
   | { tipo: 'posponer'; ref: string; fecha: string }
   | { tipo: 'renombrar'; ref: string; titulo: string }
   | { tipo: 'cambiar'; ref: string; prioridad?: Priority; empresa?: string; fecha?: string; hora?: string }
-  | { tipo: 'crear'; titulo: string; empresa?: string; prioridad?: Priority; fecha?: string; hora?: string; importante?: boolean }
+  | { tipo: 'crear'; titulo: string; empresa?: string; prioridad?: Priority; fecha?: string; hora?: string; importante?: boolean; calendar?: boolean }
+  | { tipo: 'calendar'; ref: string; hora?: string; todo_el_dia?: boolean }
+  | { tipo: 'pago_crear'; empresa?: string; nombre: string; dia: number; monto?: string }
+  | { tipo: 'pagos_listar'; empresa?: string }
+  | { tipo: 'pago_quitar'; nombre: string }
+  | { tipo: 'pago_cambiar'; nombre: string; dia?: number; monto?: string }
   | { tipo: 'nota_empresa'; empresa: string; texto: string; modo: NotaModoLlm }
   | { tipo: 'nota_tarea'; ref: string; texto: string }
   | { tipo: 'alarma'; texto: string; fecha?: string; hora?: string; en_minutos?: number }
@@ -43,7 +48,8 @@ export type TipoAccionLlm = AccionLlm['tipo']
 
 const TIPOS: TipoAccionLlm[] = [
   'completar', 'cancelar', 'borrar', 'posponer', 'renombrar', 'cambiar', 'crear',
-  'nota_empresa', 'nota_tarea', 'alarma', 'pregunta', 'que_sigue', 'lista', 'desconocido',
+  'nota_empresa', 'nota_tarea', 'alarma', 'pregunta', 'que_sigue', 'lista', 'calendar',
+  'pago_crear', 'pagos_listar', 'pago_quitar', 'pago_cambiar', 'desconocido',
 ]
 
 /** A task as the interpreter and the plan see it: no notes. */
@@ -173,7 +179,13 @@ export function systemPrompt(today: string): string {
     '- {"tipo":"renombrar","ref":REF,"titulo":"…"}  → "se llama X", "cámbiale el nombre". Si solo corrige una palabra, devuelve el título completo corregido',
     '- {"tipo":"cambiar","ref":REF,("prioridad":"urgente|normal|cuando"),("empresa":"…"),("fecha":"YYYY-MM-DD"),("hora":"HH:MM")}  → solo lo que cambia',
     '- {"tipo":"crear","titulo":"…",("empresa":"…"),("prioridad":"urgente|normal|cuando"),("fecha":"YYYY-MM-DD"),("hora":"HH:MM"),("importante":true)}  → tarea nueva. ' +
-      'La fecha ("para el viernes", "el 15 de noviembre", "en 3 días", "mañana") y la hora ("3pm", "a las 10") NUNCA van en el título: van en fecha/hora',
+      'La fecha ("para el viernes", "el 15 de noviembre", "en 3 días", "mañana") y la hora ("3pm", "a las 10") NUNCA van en el título: van en fecha/hora. ' +
+      'Si dice "y ponla en calendar" / "agrégala al calendario" / "en la agenda", pon "calendar":true y quítalo del título. Sin eso, la tarea NO va a Calendar aunque tenga hora',
+    '- {"tipo":"calendar","ref":REF,("hora":"HH:MM"),("todo_el_dia":true)}  → "pon en calendar la de TOTT", "agrega al calendario el 3", "la anterior al calendar": crear el evento de una tarea que ya existe',
+    '- {"tipo":"pago_crear","empresa":"…","nombre":"…","dia":15,("monto":"$20")}  → "pago IM Vercel el 15 de cada mes": fecha de pago mensual (evento recurrente en Calendar). NO es una tarea',
+    '- {"tipo":"pagos_listar",("empresa":"…")}  → "pagos de IM", "qué pagos tengo"',
+    '- {"tipo":"pago_quitar","nombre":"…"}  → "quita el pago Vercel"',
+    '- {"tipo":"pago_cambiar","nombre":"…",("dia":20),("monto":"…")}  → "cambia el pago Vercel al 20"',
     '- {"tipo":"nota_empresa","empresa":"…","texto":"…","modo":"reemplazar|agregar"}  → "nota de IM: …", "apunta en PD que …" (agregar si dice agrega/suma/además)',
     '- {"tipo":"nota_tarea","ref":REF,"texto":"…"}  → un comentario sobre una tarea existente',
     '- {"tipo":"alarma","texto":"…",("fecha":"YYYY-MM-DD"),("hora":"HH:MM")}  → alarma, recuérdame, avísame, ponme un recordatorio. ' +
@@ -332,11 +344,12 @@ export function validarAcciones(raw: unknown): AccionLlm[] {
           const p = prioridad(a.prioridad)
           // The classic extractors run over the title the model returned: if it
           // left "para el viernes" or "3pm" inside, they come out here.
-          const h = extraerHora(titulo)
+          const c = extraerCalendar(titulo)
+          const h = extraerHora(c.text)
           const f = extraerFecha(h.text, cancunYmd())
           const text = f.text.replace(/\s{2,}/g, ' ').replace(/^[\s:,.\-–]+|[\s:,.\-–]+$/g, '').trim() || titulo
           const due = fecha(a.fecha) ?? f.due_date ?? undefined
-          out.push({ tipo, titulo: text, empresa: str(a.empresa), prioridad: p, fecha: due, hora: due ? hora(a.hora) ?? h.due_time ?? undefined : undefined, importante: a.importante === true || p === 'urgente' })
+          out.push({ tipo, titulo: text, empresa: str(a.empresa), prioridad: p, fecha: due, hora: due ? hora(a.hora) ?? h.due_time ?? undefined : undefined, importante: a.importante === true || p === 'urgente', calendar: a.calendar === true || c.calendar })
         }
         break
       }
@@ -346,6 +359,29 @@ export function validarAcciones(raw: unknown): AccionLlm[] {
       case 'lista':
         out.push({ tipo, lista: str(a.lista)?.toLowerCase() === 'tarde' ? 'tarde' : 'manana' })
         break
+      case 'calendar':
+        if (ref) out.push({ tipo, ref, hora: hora(a.hora), todo_el_dia: a.todo_el_dia === true })
+        break
+      case 'pago_crear': {
+        const nombre = str(a.nombre)
+        const dia = Number(a.dia)
+        if (nombre && Number.isInteger(dia) && dia >= 1 && dia <= 31) out.push({ tipo, empresa: str(a.empresa), nombre, dia, monto: str(a.monto) })
+        break
+      }
+      case 'pagos_listar':
+        out.push({ tipo, empresa: str(a.empresa) })
+        break
+      case 'pago_quitar': {
+        const nombre = str(a.nombre)
+        if (nombre) out.push({ tipo, nombre })
+        break
+      }
+      case 'pago_cambiar': {
+        const nombre = str(a.nombre)
+        const dia = a.dia === undefined ? undefined : Number(a.dia)
+        if (nombre) out.push({ tipo, nombre, dia: Number.isInteger(dia) && dia! >= 1 && dia! <= 31 ? dia : undefined, monto: str(a.monto) })
+        break
+      }
       case 'nota_empresa': {
         const empresa = str(a.empresa)
         const t = str(a.texto)

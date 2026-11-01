@@ -241,7 +241,7 @@ export async function ejecutarAccion(params: AccionParams, ids: string[]): Promi
     const rows = (data as unknown as TaskRow[]) ?? []
     if (rows.length === 0) return 'Esa tarea ya está cerrada; no cambié nada.'
     const avisos = await sincronizar(rows.map((t) => t.id))
-    return conAvisos(rows.map((t) => `✏️ ${etiqueta(t)} → ${describirCambios(c)}${t.gcal_event_id || (t.due_date && t.due_time) ? ' 📅' : ''}`).join('\n'), avisos)
+    return conAvisos(rows.map((t) => `✏️ ${etiqueta(t)} → ${describirCambios(c)}${t.gcal_event_id ? ' 📅' : ''}`).join('\n'), avisos)
   }
 
   // listo / pasa

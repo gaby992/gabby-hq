@@ -15,7 +15,7 @@ sección y **no se empieza una fase hasta validar la anterior**.
 | 4 | El bot entiende lenguaje natural + alarmas propias | ✅ Construida — pendiente de validar |
 | 4b | "¿Qué sigue?" (bot + web), notas con edad, rediseño de /hoy, limpieza del parser | ✅ Construida — pendiente de validar |
 | 4c | Lista completa a demanda, "qué sigue" siempre con 3 secciones, fechas en el intérprete | ✅ Construida — pendiente de validar |
-| 5 | Conexión de Google en Settings + Calendar | ✅ Construida — pendiente de validar |
+| 5 | Conexión de Google en Settings + Calendar (solo a pedido) + pagos recurrentes | ✅ Construida — pendiente de validar |
 
 ---
 
@@ -140,6 +140,11 @@ Archivos del asistente dentro del repo:
 | `sql/2026-11-asistente-fase4b.sql` | Migración de la fase 4b: `notas_historial` + `bot_alarmas.tipo` admite `que_sigue` |
 | `sql/2026-11-limpieza-titulos-hoy-manana.sql` | Limpieza única: títulos que terminan en " hoy"/" mañana" → `due_date` (select primero, update después) |
 | `sql/2026-11-asistente-fase5.sql` | Migración de la fase 5: `conexiones_google` + `tasks.due_time` + `tasks.gcal_event_id` |
+| `sql/2026-11-asistente-fase5c.sql` | Migración de la fase 5-C: `pagos_recurrentes` |
+| `src/lib/asistente/pagos.ts` | Fase 5-C: pagos recurrentes (fila + evento mensual en Calendar) |
+| `src/app/api/calendar/tarea/route.ts` | Fase 5-B: botón "📅 Agregar a Calendar" del panel de edición |
+| `src/app/api/pagos/route.ts` | Fase 5-C: la tabla de pagos de Settings (lista, crea, cambia, quita; Calendar al día) |
+| `src/components/PagosRecurrentes.tsx` | Fase 5-C: pestañas por empresa + tabla editable en /settings |
 
 ---
 
@@ -1268,38 +1273,71 @@ fechas por `/api/google/conexiones`. Desconectar revoca el token en Google
 (si puede) y borra la fila. El asistente usa la cuenta activa más reciente.
 Reconectar la misma cuenta reemplaza su token (índice único por email).
 
-**B) Calendar.** El parser y el intérprete entienden **hora**: `mañana 3pm`,
-`el viernes a las 10`, `due friday 2pm`, `a las 3:30`, `15:00`, `8 de la
-noche`. Sin am/pm, 1–6 es tarde y 7–12 mañana. Se guarda en `tasks.due_time`
-(`time`, nullable). Sin fecha no hay hora; sin hora no hay evento.
+**B) Calendar, solo a pedido.** El parser y el intérprete entienden **hora**:
+`mañana 3pm`, `el viernes a las 10`, `due friday 2pm`, `a las 3:30`, `15:00`,
+`8 de la noche`. Sin am/pm, 1–6 es tarde y 7–12 mañana. Se guarda en
+`tasks.due_time` (`time`, nullable) y se ve en la alarma de las 8:00, "¿qué
+sigue?", los chips de fecha y el contexto de `/pregunta` ("¿qué tengo a las
+3?" se contesta).
 
-Tarea con fecha **y** hora → evento en el calendario principal de la cuenta
-conectada: título `[IM] Llamar a Juan`, 30 minutos, descripción con la
-prioridad y el link a /tasks, recordatorio emergente 15 minutos antes. El id
-queda en `tasks.gcal_event_id`. Confirmación:
+**Una tarea NUNCA va a Calendar sola, aunque tenga hora.** Va solo si Gabby
+lo pide:
 
-```
-✅ IM · Urgente ★ · «Llamar a Juan» · vie 6 nov 3:00 pm · 📅
-```
+| Dices | Qué pasa |
+| --- | --- |
+| `urgente IM llamar a Juan mañana 3pm y ponla en calendar` (o `agrégala al calendario`, `en la agenda`, `calendar: …`) | crea la tarea y el evento: `✅ IM · Urgente ★ · «llamar a Juan» · mar 3 nov 3:00 pm · 📅` |
+| lo mismo **sin hora** (`… el viernes y ponla en calendar`) | crea la tarea y pregunta `📅 ¿A qué hora la pongo en calendar?` con `9:00 am · 12:00 pm · 3:00 pm · 6:00 pm · 📆 Todo el día` |
+| `pon en calendar la de TOTT` (o `agrega al calendario el 3`, `la anterior al calendar`) | busca la tarea abierta por título, usa su fecha; sin hora pregunta igual; sin fecha avisa que necesita una |
 
-Después, desde el bot: **completar** o **cancelar** → se borra el evento;
-**cambiar fecha u hora** (`paypal mañana 3pm`, "pasa el 3 al lunes", "el 3 a
-las 4") → se actualiza; **borrar** la tarea → se borra el evento antes que la
-fila; **renombrar** → se actualiza el título. Si Google falla, la tarea se
-guarda igual y el bot agrega una línea `⚠️ sin evento en Calendar: {motivo}`.
-Sin cuenta conectada el motivo es "no hay cuenta de Google conectada
-(Settings → Conexiones)". Las alarmas propias (`bot_recordatorios`) **no**
-van al calendario.
+Confirmación del evento: `📅 En calendar: «título» · vie 6 nov 3:00 pm` (o
+`· vie 6 nov · todo el día`). El evento va al calendario principal de la
+cuenta conectada: `[IM] título`, 30 minutos (o todo el día), descripción con
+la prioridad y el link a /tasks, recordatorio emergente 15 minutos antes. El
+id queda en `tasks.gcal_event_id`.
 
-Dónde más se ve la hora: la alarma de las 8:00 (`🟡 3. Llamar a Juan · 3:00
-pm 📅`), "¿qué sigue?", el chip de fecha en /hoy y /tasks (`📅 6 nov 3:00
-pm`) y el contexto de `/pregunta` (`vence hoy a las 3:00 pm`), con lo que
-"¿qué tengo a las 3?" se contesta.
+**Sincronización** (solo para tareas que ya tienen `gcal_event_id`):
+completar o cancelar → se borra el evento; cambiar fecha u hora (`paypal
+mañana 3pm`, "pasa el 3 al lunes") → se actualiza; renombrar → se actualiza
+el título; borrar la tarea → se borra el evento antes que la fila. Si Google
+falla, la tarea se guarda igual y el bot agrega `⚠️ sin evento en Calendar:
+{motivo}`. Las alarmas propias (`bot_recordatorios`) **no** van al
+calendario.
 
-**Lo que no hace todavía**: editar o completar desde la **web** (/hoy,
-/tasks) no toca el calendario, porque el navegador escribe directo en
-Supabase sin pasar por el servidor; el formulario web tampoco tiene campo de
-hora. Queda para una fase 5b con una ruta de sincronización.
+**Web**: en /tasks (y en los bloques de /hoy), al editar una tarea, el panel
+tiene **📅 Agregar a Calendar** (necesita fecha guardada; usa la hora guardada
+o todo el día). Con evento muestra `📅 En Calendar · quitar`. Pasa por
+`/api/calendar/tarea` (sesión de la app), nunca llama a Google desde el
+navegador. Lo que sigue sin sincronizar desde la web: completar o cambiar la
+fecha desde /hoy o /tasks (el navegador escribe directo en Supabase); el
+formulario web no tiene campo de hora. Pendiente para una fase 5-D.
+
+**C) Fechas de pago recurrentes.** Caso: "agrega en calendar IM todas las
+fechas de pago con recordatorios de 1 semana, 3 días y el día, todos los
+meses". Tabla `pagos_recurrentes` (id, company_id, nombre, dia_del_mes,
+monto_texto, recordatorios `int[]` default `{7,3,0}`, gcal_event_id, activo,
+created_at). **No son tareas**: no entran en Hoy, la matriz ni las alarmas.
+
+| Dices | Qué pasa |
+| --- | --- |
+| `pago IM Vercel el 15 de cada mes` (opcional `· $20 USD` al final) | fila + evento **recurrente** mensual (`RRULE:FREQ=MONTHLY;BYMONTHDAY=15`), título `💳 IM · Vercel · $20 USD`, con avisos 7 días antes, 3 días antes y ese mismo día a las 9:00 am (Cancún) |
+| `pagos de IM` / `pagos` | la lista numerada |
+| `quita el pago Vercel` | borra fila y evento |
+| `cambia el pago Vercel al 20` | actualiza ambos |
+
+Por qué el evento es de 9:00 a 9:30 am y no "todo el día": en la API de
+Google los avisos de un evento de todo el día cuentan hacia atrás desde la
+medianoche, así que "ese mismo día a las 9" no se puede expresar. Con el
+evento a las 9:00, los avisos quedan exactos: 7 días (10080 min), 3 días
+(4320) y 0 (a las 9:00 de ese día). Día 31 en meses cortos: Google salta ese
+mes (regla de `BYMONTHDAY`).
+
+**Web**: /settings → sección **Pagos recurrentes**, una pestaña por empresa,
+tabla editable (nombre, día, monto), **📅 Agregar a Calendar** cuando la fila
+no tiene evento, Edit y Quitar. Pasa por `/api/pagos`, que actualiza Calendar
+en cada cambio.
+
+**Pendiente (fase 2 de los pagos, anotado):** que la alarma de las 8:00 diga
+`💳 Hoy vence: IM Vercel` leyendo `pagos_recurrentes`.
 
 ### 5b. Lo que hay que hacer a mano (con cada click)
 
@@ -1338,9 +1376,10 @@ hora. Queda para una fase 5b con una ruta de sincronización.
 `APP_URL` ya existe y debe ser `https://gabby-hq.vercel.app`: de ahí sale el
 redirect URI. **Redeploy** (Deployments → ⋯ → Redeploy).
 
-**Paso 3 — SQL en Supabase** (SQL Editor, una query):
-`sql/2026-11-asistente-fase5.sql`. Abajo: 7 columnas de `conexiones_google`,
-`rowsecurity = false`, y `due_time` / `gcal_event_id` en `tasks`.
+**Paso 3 — SQL en Supabase** (SQL Editor, dos queries):
+`sql/2026-11-asistente-fase5.sql` (7 columnas de `conexiones_google`,
+`rowsecurity = false`, y `due_time` / `gcal_event_id` en `tasks`) y luego
+`sql/2026-11-asistente-fase5c.sql` (`pagos_recurrentes`, 9 columnas).
 
 **Paso 4 — Conectar.** GabbyHQ → Settings → **Conexiones (Google) →** →
 **Conectar** → elige tu Gmail → Google avisa "app no verificada" (normal en
@@ -1354,18 +1393,29 @@ cuenta: cada cuenta se conecta desde Settings.
 
 ### 5d. Cómo probar que funciona
 
-1. `urgente IM llamar a Juan mañana 3pm` → `✅ IM · Urgente ★ · «llamar a
-   Juan» · … 3:00 pm · 📅`. En Google Calendar: evento `[IM] llamar a Juan`
-   mañana 3:00–3:30 pm con recordatorio 15 min.
-2. `llamar a juan a las 4` → `✏️ … → a las 4:00 pm 📅` y el evento se movió.
-   `pasa llamar` → pasa a mañana y el evento también.
-3. `listo llamar` → `✅ Hecha: …` y el evento desapareció.
-4. Crea otra con hora y `bórrala` → [Sí, borrar] → evento borrado.
-5. Settings → Conexiones → **Desconectar**. Crea una tarea con hora → se
-   guarda y abajo `⚠️ sin evento en Calendar: no hay cuenta de Google
-   conectada`. Vuelve a **Conectar**.
-6. `¿qué tengo a las 3?` → contesta con la tarea de las 3:00 pm.
-7. `alarma mañana 9am revisar deploy` → llega el ⏰ pero **no** hay evento.
+1. `urgente IM llamar a Juan mañana 3pm` → `✅ … · mar 3 nov 3:00 pm` **sin**
+   📅 y sin evento en Google (la hora sola no basta).
+2. `urgente IM llamar a Pedro mañana 3pm y ponla en calendar` → `… · 📅` y
+   abajo `📅 En calendar: «llamar a Pedro» · mar 3 nov 3:00 pm`. En Google:
+   `[IM] llamar a Pedro`, 3:00–3:30 pm, aviso 15 min.
+3. `IM revisar propuesta el viernes, agrégala al calendario` → crea la tarea
+   y pregunta la hora con 5 botones; toca **Todo el día** → `📅 En calendar:
+   … · vie 6 nov · todo el día`.
+4. `pon en calendar la de Juan` → pregunta la hora o crea directo si ya la
+   tiene. Luego `llamar a pedro a las 4` → `✏️ … → a las 4:00 pm 📅` y el
+   evento se movió; `listo pedro` → el evento desapareció.
+5. /tasks → edita una tarea con fecha → **📅 Agregar a Calendar** → aparece
+   `📅 En Calendar · quitar`.
+6. `pago IM Vercel el 15 de cada mes · $20 USD` → `💳 IM · Vercel · día 15 ·
+   $20 USD 📅 · cada mes · avisos …`. En Google: evento mensual el 15 a las
+   9:00 con 3 avisos. `pagos de IM` lo lista; `cambia el pago Vercel al 20`
+   mueve el evento; `quita el pago Vercel` lo borra. /settings → Pagos
+   recurrentes muestra la tabla de IM.
+7. Settings → Conexiones → **Desconectar**. `pon en calendar la de …` →
+   `⚠️ sin evento en Calendar: no hay cuenta de Google conectada`. Vuelve a
+   **Conectar**.
+8. `¿qué tengo a las 3?` → contesta con la tarea de las 3:00 pm.
+   `alarma mañana 9am revisar deploy` → llega el ⏰ pero no hay evento.
 
 ### 5e. Qué puede fallar y dónde verlo
 
@@ -1377,7 +1427,8 @@ cuenta: cada cuenta se conecta desde Settings.
 | "Google no devolvió refresh_token" | Ya habías autorizado antes sin `prompt=consent` | https://myaccount.google.com/permissions → quita GabbyHQ → Conectar otra vez. |
 | "APP_ENCRYPTION_KEY debe ser 32 bytes en hex" | La llave no tiene 64 caracteres hex | `openssl rand -hex 32`; pégala completa; Redeploy. Si cambias la llave, las cuentas ya conectadas dejan de descifrarse: Reconectar. |
 | `⚠️ sin evento en Calendar: invalid_grant` | Token revocado o caducado: con la app en modo *Testing*, Google caduca el refresh token a los 7 días | Settings → Conexiones → **Reconectar**. Para que no pase cada semana: OAuth consent screen → **Publish app** (sigue sin verificación; solo quita la caducidad de 7 días). |
-| El evento no aparece | La tarea no tiene hora, o la hora se fue al título | /tasks: ¿el chip dice `6 nov 3:00 pm`? Si no, `paypal mañana 3pm` para ponerla. Logs: `[calendar]`. |
+| El evento no aparece | No lo pediste ("y ponla en calendar") o la tarea no tiene fecha | `pon en calendar la de …`. Logs: `[calendar]`. |
+| El pago no aparece en Google | Google falló al crear (la fila sí quedó) | /settings → Pagos recurrentes → **📅 Agregar a Calendar** en esa fila. Logs: `[pagos]`. |
 
 ---
 
@@ -1419,8 +1470,8 @@ El código es el mismo repo.
    `sql/` del repo, incluidos `sql/2026-10-asistente-fase1.sql`,
    `sql/2026-10-asistente-fase2.sql`, `sql/2026-10-asistente-fase3.sql` y
    `sql/2026-10-asistente-fase4.sql`, `sql/2026-11-asistente-fase4b.sql` y
-   `sql/2026-11-asistente-fase5.sql` (y sus pruebas en queries aparte, ver
-   1b, 2b, 3b y 4b Paso 1).
+   `sql/2026-11-asistente-fase5.sql` y `sql/2026-11-asistente-fase5c.sql`
+   (y sus pruebas en queries aparte, ver 1b, 2b, 3b y 4b Paso 1).
 4. En la app, en **Settings**, crea las empresas con los nombres que esa
    persona use. El orden fijo de la alarma (IM · DATAVIA · PD · Personal ·
    Chelsea) está en `EMPRESAS_ORDEN` dentro de `src/lib/asistente/alarmas.ts`;

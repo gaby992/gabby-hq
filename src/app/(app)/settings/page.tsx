@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
+import PagosRecurrentes from '@/components/PagosRecurrentes'
 import { Company, ApiKey, COMPANY_COLORS } from '@/types'
 import { supabase } from '@/lib/supabase'
 
@@ -197,6 +198,12 @@ export default function SettingsPage() {
             )
           })}
         </div>
+      </section>
+
+      {/* Pagos recurrentes (fase 5-C) */}
+      <section className="space-y-4">
+        <h2 className="text-sm font-semibold text-[#888888] uppercase tracking-wider">Pagos recurrentes</h2>
+        <PagosRecurrentes companies={companies} />
       </section>
 
       {/* API Keys */}

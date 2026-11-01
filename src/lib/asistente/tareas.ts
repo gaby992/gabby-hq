@@ -7,7 +7,7 @@ import type { Company, Priority } from '@/types'
 import type { Faltante, TareaParsed } from '@/lib/parser'
 import { formatHoraEs, formatVenceEs } from './cancun'
 import { inlineKeyboard, type InlineButton } from './telegram'
-import { sincronizarTarea, type ResultadoSync } from '@/lib/google/sync'
+import { agregarACalendar, type ResultadoSync } from '@/lib/google/sync'
 
 /** Button order for the company question. Other companies follow, alphabetically. */
 const EMPRESAS_BOTONES = ['IM', 'DATAVIA', 'PD', 'Personal', 'Chelsea']
@@ -49,8 +49,8 @@ export function pregunta(falta: Faltante, nonce: string, companies: CompanyRef[]
 
 /**
  * "✅ IM · Urgente ★ · «Llamar a Juan» · vence vie 1 nov"
- * With an hour: "… · vie 6 nov 3:00 pm · 📅" when the Calendar event exists;
- * a sync warning goes on its own line below.
+ * With an hour: "… · vie 6 nov 3:00 pm"; "· 📅" when Gabby asked for the
+ * Calendar event and it exists; a Calendar warning goes on its own line.
  */
 export function confirmacion(t: TareaParsed, sync?: ResultadoSync): string {
   const parts = [
@@ -66,8 +66,19 @@ export function confirmacion(t: TareaParsed, sync?: ResultadoSync): string {
   return sync?.aviso ? `${linea}\n${sync.aviso}` : linea
 }
 
-/** Inserts the task; with date + hour also creates its Calendar event (fase 5). */
-export async function guardarTarea(t: TareaParsed): Promise<ResultadoSync> {
+export interface Guardada {
+  id: string
+  /** Only when `t.calendar` asked for the event. */
+  sync?: ResultadoSync
+  /** The event was asked for but the task has no hour: the webhook asks with buttons. */
+  faltaHora?: boolean
+}
+
+/**
+ * Inserts the task. Fase 5-B: it goes to Calendar ONLY when Gabby asked
+ * ("y ponla en calendar"); with a date but no hour the caller asks the hour.
+ */
+export async function guardarTarea(t: TareaParsed): Promise<Guardada> {
   const db = createServerClient()
   const { data, error } = await db
     .from('tasks')
@@ -83,8 +94,10 @@ export async function guardarTarea(t: TareaParsed): Promise<ResultadoSync> {
     .select('id')
     .single<{ id: string }>()
   if (error) throw new Error(`Supabase tasks: ${error.message}`)
-  if (!t.due_date || !t.due_time) return { estado: 'sin_cambio' }
-  return sincronizarTarea(data.id)
+  if (!t.calendar) return { id: data.id }
+  if (!t.due_date) return { id: data.id, sync: { estado: 'error', aviso: '⚠️ sin evento en Calendar: la tarea no tiene fecha' } }
+  if (!t.due_time) return { id: data.id, faltaHora: true }
+  return { id: data.id, sync: await agregarACalendar(data.id) }
 }
 
 export async function cargarEmpresas(): Promise<CompanyRef[]> {

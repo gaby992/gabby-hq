@@ -78,6 +78,20 @@ export interface ConexionGoogle {
   activa: boolean
 }
 
+/** A monthly payment date (fase 5-C). Not a task: lives in Settings and in Calendar. */
+export interface PagoRecurrente {
+  id: string
+  company_id: string
+  nombre: string
+  dia_del_mes: number
+  monto_texto: string | null
+  /** Days before to remind: default [7, 3, 0]. */
+  recordatorios: number[]
+  gcal_event_id: string | null
+  activo: boolean
+  created_at: string
+}
+
 export interface ApiKey {
   id: string
   label: string

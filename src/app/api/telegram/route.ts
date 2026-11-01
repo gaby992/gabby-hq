@@ -47,6 +47,11 @@ import { cargarEmpresas, confirmacion, guardarTarea, pregunta } from '@/lib/asis
 import { responderPregunta } from '@/lib/asistente/pregunta'
 import { responderQueSigue } from '@/lib/asistente/que-sigue'
 import { enviarLista } from '@/lib/asistente/alarmas'
+import { agregarACalendar, type ResultadoSync } from '@/lib/google/sync'
+import { buscarEnAbiertas } from '@/lib/asistente/interprete'
+import { buscarPago, cambiarPago, crearPago, quitarPago, textoListaPagos } from '@/lib/asistente/pagos'
+import { createServerClient as dbCliente } from '@/lib/supabase-server'
+import { COLS_SIN_NOTAS, type TaskRow } from '@/lib/asistente/acciones'
 import type { Priority } from '@/types'
 
 // Telegram → here (webhook). Text, voice notes and inline-button taps all end
@@ -100,13 +105,61 @@ async function borradorConNonce(chatId: number, texto: string, parsed: BorradorP
 async function guardarOPreguntar(chatId: number, texto: string, tarea: TareaParsed, prefix: string | null) {
   const falta = faltantes(tarea)
   if (falta.length === 0) {
-    const sync = await guardarTarea(tarea)
-    await reply(chatId, joinLines(prefix, confirmacion(tarea, sync)))
+    await guardarYConfirmar(chatId, tarea, prefix)
     return
   }
   const borrador = await crearBorrador(chatId, texto, tarea)
   const q = pregunta(falta[0], nonceDe(borrador.id), await cargarEmpresas())
   await reply(chatId, joinLines(prefix, q.text), q.replyMarkup)
+}
+
+function botonesHoraCalendar(nonce: string) {
+  return inlineKeyboard([
+    HORAS_BOTONES.map((h) => ({ text: formatHoraEs(`${h}:00`), callback_data: `h:${nonce}:${h}` })),
+    [{ text: '📆 Todo el día', callback_data: `h:${nonce}:dia` }],
+  ])
+}
+
+/**
+ * Saves and confirms. Fase 5-B: when she asked for Calendar and the task
+ * has a date but no hour, the confirmation comes with the hour buttons.
+ */
+async function guardarYConfirmar(chatId: number, tarea: TareaParsed, prefix: string | null) {
+  const g = await guardarTarea(tarea)
+  const linea = confirmacion(tarea, g.sync)
+  if (g.faltaHora) {
+    const nonce = await borradorConNonce(chatId, tarea.text, { tipo: 'calendar_hora', task_id: g.id, texto: tarea.text })
+    await reply(chatId, joinLines(prefix, linea, '📅 ¿A qué hora la pongo en calendar?'), botonesHoraCalendar(nonce))
+    return
+  }
+  await reply(chatId, joinLines(prefix, linea, g.sync?.confirmacion))
+}
+
+/** "pon en calendar la de TOTT": the open task by title, then the event (or the hour question). */
+async function ponerEnCalendar(chatId: number, termino: string, prefix: string | null) {
+  const { data, error } = await dbCliente().from('tasks').select(COLS_SIN_NOTAS).eq('done', false)
+  if (error) throw new Error(`Supabase tasks: ${error.message}`)
+  const hits = buscarEnAbiertas((data as unknown as TaskRow[]) ?? [], termino)
+  if (hits.length === 0) {
+    await reply(chatId, joinLines(prefix, `No encontré ninguna tarea abierta con «${termino}».`))
+    return
+  }
+  if (hits.length > 1) {
+    await reply(chatId, joinLines(prefix, `«${termino}» coincide con ${hits.length} tareas: ${hits.slice(0, 5).map((t) => `«${t.text}»`).join(', ')}. Dime algo más específico.`))
+    return
+  }
+  const t = hits[0]
+  if (!t.due_date) {
+    await reply(chatId, joinLines(prefix, `«${t.text}» no tiene fecha. Ponle una ("${t.text.split(' ').slice(0, 2).join(' ')} para el viernes") y vuelve a pedirlo.`))
+    return
+  }
+  if (!t.due_time) {
+    const nonce = await borradorConNonce(chatId, termino, { tipo: 'calendar_hora', task_id: t.id, texto: t.text })
+    await reply(chatId, joinLines(prefix, `📅 ¿A qué hora pongo «${t.text}» (${formatVenceEs(t.due_date)}) en calendar?`), botonesHoraCalendar(nonce))
+    return
+  }
+  const r: ResultadoSync = await agregarACalendar(t.id)
+  await reply(chatId, joinLines(prefix, r.confirmacion ?? r.aviso ?? '📅 sin cambios'))
 }
 
 /**
@@ -192,6 +245,31 @@ async function handleText(chatId: number, text: string, prefix: string | null) {
       const { error } = await createServerClient().from('radar').insert({ titulo: parsed.titulo, estado: 'idea' })
       if (error) throw new Error(`Supabase radar: ${error.message}`)
       await reply(chatId, joinLines(prefix, `✓ Radar: "${parsed.titulo}"`))
+      return
+    }
+    case 'calendar':
+      // Fase 5-B: Calendar only on request.
+      await ponerEnCalendar(chatId, parsed.termino, prefix)
+      return
+    case 'pagos':
+      await reply(chatId, joinLines(prefix, await textoListaPagos(parsed.empresa?.id ?? null, parsed.empresa?.name.trim() ?? null)))
+      return
+    case 'pago_quitar': {
+      const b = await buscarPago(parsed.termino)
+      await reply(chatId, joinLines(prefix, b.pago ? await quitarPago(b.pago.id) : b.error!))
+      return
+    }
+    case 'pago_cambiar': {
+      const b = await buscarPago(parsed.termino)
+      await reply(chatId, joinLines(prefix, b.pago ? await cambiarPago(b.pago.id, { dia_del_mes: parsed.dia }) : b.error!))
+      return
+    }
+    case 'pago': {
+      if (!parsed.empresa) {
+        await reply(chatId, joinLines(prefix, '¿De qué empresa es el pago? Ejemplo: pago IM Vercel el 15 de cada mes'))
+        return
+      }
+      await reply(chatId, joinLines(prefix, await crearPago({ company_id: parsed.empresa.id, nombre: parsed.nombre, dia_del_mes: parsed.dia, monto_texto: parsed.monto })))
       return
     }
     case 'lista':
@@ -361,6 +439,10 @@ async function handleLibre(chatId: number, text: string, parsed: Parsed, prefix:
     await responderAccion(chatId, text, params, (nonce) => conIds(params, [a.tarea!.id], nonce), prefix)
     return
   }
+  if (a.tipo === 'calendar' && a.tarea && !a.hora && !a.todo_el_dia) {
+    await ponerEnCalendar(chatId, a.tarea.text, prefix)
+    return
+  }
   if (a.tipo === 'alarma' && !a.dispara_en) {
     const nonce = await borradorConNonce(chatId, text, { tipo: 'alarma_hora', texto: a.texto, fecha: a.fecha ?? null })
     const dia = a.fecha ? `el ${formatVenceEs(a.fecha)}` : 'hoy'
@@ -510,6 +592,17 @@ async function handleCallback(cq: CallbackQuery) {
       return
     }
 
+    // ── Fase 5-B: "ponla en calendar" on a task without an hour ──
+    if (parsed.tipo === 'calendar_hora') {
+      if (kind !== 'h') return
+      const dia = value === 'dia'
+      if (!dia && !(HORAS_BOTONES as readonly string[]).includes(value)) return
+      await borrarBorrador(borrador.id)
+      const r = await agregarACalendar(parsed.task_id, dia ? { todoElDia: true } : { hora: `${value}:00` })
+      await reply(chatId, r.confirmacion ?? r.aviso ?? '📅 sin cambios')
+      return
+    }
+
     // ── Fase 4: "No te entendí" → [Tarea nueva] [Orden] [Alarma] ──
     if (parsed.tipo === 'aclarar') {
       if (kind !== 'q') return
@@ -566,9 +659,8 @@ async function handleCallback(cq: CallbackQuery) {
       await reply(chatId, q.text, q.replyMarkup)
       return
     }
-    const sync = await guardarTarea(tarea)
     await borrarBorrador(borrador.id)
-    await reply(chatId, confirmacion(tarea, sync))
+    await guardarYConfirmar(chatId, tarea, null)
   } catch (err) {
     console.error('[bot] callback error:', err)
     await reply(chatId, ERROR_GENERICO)

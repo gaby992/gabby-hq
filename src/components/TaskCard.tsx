@@ -47,6 +47,29 @@ export default function TaskCard({ task, companies, onUpdate, today }: Props) {
   const [notes, setNotes] = useState(task.notes ?? '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Fase 5-B: "📅 Agregar a Calendar" in the edit panel (server route, so Google is never called from the browser).
+  const [calBusy, setCalBusy] = useState(false)
+  const [calMsg, setCalMsg] = useState<string | null>(null)
+
+  async function calendar(quitar: boolean) {
+    setCalBusy(true)
+    setCalMsg(null)
+    try {
+      const res = await fetch('/api/calendar/tarea', {
+        method: quitar ? 'DELETE' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_id: task.id, todo_el_dia: !task.due_time }),
+      })
+      const json = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`)
+      setCalMsg(quitar ? 'Evento quitado de Calendar' : json?.confirmacion ?? '📅 En Calendar')
+      onUpdate()
+    } catch (err) {
+      setCalMsg(err instanceof Error ? err.message : String(err))
+    } finally {
+      setCalBusy(false)
+    }
+  }
 
   const subtasks = task.subtasks ?? []
   const completedCount = subtasks.filter((s) => s.done).length
@@ -272,6 +295,26 @@ export default function TaskCard({ task, companies, onUpdate, today }: Props) {
               </div>
 
               {error && <p className="text-xs text-red-400">{error}</p>}
+
+              {/* Calendar, on request only. Needs a saved date; uses the saved hour or all day. */}
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                {task.gcal_event_id ? (
+                  <>
+                    <span className="text-emerald-400">📅 En Calendar</span>
+                    <button onClick={() => calendar(true)} disabled={calBusy} className="text-[#888888] hover:text-red-400 disabled:opacity-40">quitar</button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => calendar(false)}
+                    disabled={calBusy || !task.due_date}
+                    title={task.due_date ? (task.due_time ? 'A la hora guardada' : 'Todo el día (sin hora)') : 'Guarda una fecha primero'}
+                    className="px-2.5 py-1 rounded-md bg-[#7F77DD]/15 text-[#7F77DD] hover:bg-[#7F77DD]/25 disabled:opacity-40 transition-colors"
+                  >
+                    {calBusy ? '📅 …' : '📅 Agregar a Calendar'}
+                  </button>
+                )}
+                {calMsg && <span className="text-[#888888]">{calMsg}</span>}
+              </div>
 
               <div className="flex gap-2">
                 <button

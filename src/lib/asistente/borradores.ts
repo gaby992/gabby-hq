@@ -28,6 +28,8 @@ export type BorradorParsed =
   | { tipo: 'elegir'; accion: AccionResuelta; candidatos: string[] }
   | { tipo: 'alarma_hora'; texto: string; fecha: string | null }
   | { tipo: 'aclarar'; texto: string }
+  /** Fase 5-B: "ponla en calendar" on a task without an hour: [9am] [12pm] [3pm] [6pm] [todo el día]. */
+  | { tipo: 'calendar_hora'; task_id: string; texto: string }
 
 export const BORRADOR_TTL_MS = 10 * 60 * 1000
 

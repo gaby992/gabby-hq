@@ -18,6 +18,8 @@ import { responderPregunta } from './pregunta'
 import { responderQueSigue } from './que-sigue'
 import { confirmacionAlarma, crearRecordatorio, instanteDe } from './recordatorios'
 import { confirmacion, guardarTarea } from './tareas'
+import { agregarACalendar, cuandoDe } from '@/lib/google/sync'
+import { buscarPago, cambiarPago, crearPago, quitarPago, textoListaPagos } from './pagos'
 
 export interface TareaRef {
   id: string
@@ -42,6 +44,8 @@ export type AccionResuelta = AccionLlm & {
 }
 
 export const MAX_CANDIDATOS = 5
+
+export { cuandoDe }
 
 function lite(t: TareaLite): TareaRef {
   return { id: t.id, text: t.text, company: t.company }
@@ -105,11 +109,12 @@ export function resolverAcciones(acciones: AccionLlm[], ctx: ContextoInterprete,
         r.error = res.error
       }
     }
-    if ((a.tipo === 'cambiar' || a.tipo === 'crear' || a.tipo === 'nota_empresa') && a.empresa) {
+    if ((a.tipo === 'cambiar' || a.tipo === 'crear' || a.tipo === 'nota_empresa' || a.tipo === 'pago_crear' || a.tipo === 'pagos_listar') && a.empresa) {
       const e = resolverEmpresa(a.empresa, companies)
       if (e) r.empresa_ref = e
       else if (a.tipo !== 'crear') r.error = r.error ?? `no conozco la empresa «${a.empresa}»`
     }
+    if (a.tipo === 'pago_crear' && !a.empresa) r.error = '¿de qué empresa es el pago? ("pago IM Vercel el 15")'
     if (a.tipo === 'cambiar' && !a.prioridad && !a.fecha && !a.empresa && !a.hora) r.error = r.error ?? 'no dijiste qué cambiar'
     if (a.tipo === 'alarma') {
       const cuando = instanteDe(a)
@@ -124,7 +129,8 @@ export function resolverAcciones(acciones: AccionLlm[], ctx: ContextoInterprete,
 
 const ICONO: Record<AccionLlm['tipo'], string> = {
   completar: '✅', cancelar: '🗑', borrar: '❌', posponer: '➡️', renombrar: '✏️', cambiar: '✏️', crear: '➕',
-  nota_empresa: '📝', nota_tarea: '📎', alarma: '⏰', pregunta: '❓', que_sigue: '🎯', lista: '📋', desconocido: '🤷',
+  nota_empresa: '📝', nota_tarea: '📎', alarma: '⏰', pregunta: '❓', que_sigue: '🎯', lista: '📋', calendar: '📅',
+  pago_crear: '💳', pagos_listar: '💳', pago_quitar: '🗑', pago_cambiar: '✏️', desconocido: '🤷',
 }
 
 function fechaDicha(ymd: string, today: string): string {
@@ -155,7 +161,8 @@ function frase(a: AccionResuelta, today: string, conTarea: boolean): string {
     case 'cambiar': return `Cambiar${tt} → ${describirCambios(a)}`
     case 'crear': {
       const parts = [a.empresa_ref?.name.trim() ?? (a.empresa ? `empresa «${a.empresa}»?` : 'sin empresa'), PRIORITY_LABELS[a.prioridad ?? 'normal'] + (a.importante ? ' ★' : '')]
-      if (a.fecha) parts.push(a.hora ? `${formatVenceEs(a.fecha)} ${formatHoraEs(a.hora)} 📅` : `vence ${formatVenceEs(a.fecha)}`)
+      if (a.fecha) parts.push(a.hora ? `${formatVenceEs(a.fecha)} ${formatHoraEs(a.hora)}` : `vence ${formatVenceEs(a.fecha)}`)
+      if (a.calendar) parts.push(a.fecha ? `📅 calendar${a.hora ? '' : ' (todo el día)'}` : '📅 calendar (sin fecha: no se podrá)')
       return `Crear «${corto(a.titulo)}» · ${parts.join(' · ')}`
     }
     case 'nota_empresa': return `Nota de ${a.empresa_ref?.name.trim() ?? a.empresa} (${a.modo}): «${corto(a.texto, 60)}»`
@@ -164,13 +171,18 @@ function frase(a: AccionResuelta, today: string, conTarea: boolean): string {
     case 'pregunta': return `Responder «${corto(a.texto, 60)}»`
     case 'que_sigue': return `Qué sigue${a.empresa ? ` de ${a.empresa}` : ''}${a.solo_urgentes ? ' (solo urgentes)' : ''}${a.solo_vencer ? ' (por vencer)' : ''}`
     case 'lista': return a.lista === 'tarde' ? 'Mandar el cierre del día' : 'Mandar la lista completa de hoy'
+    case 'calendar': return `Poner en calendar${tt}${a.hora ? ` a las ${formatHoraEs(a.hora)}` : a.todo_el_dia ? ' (todo el día)' : ''}`
+    case 'pago_crear': return `Pago recurrente ${a.empresa_ref?.name.trim() ?? a.empresa ?? '?'} · ${a.nombre} · día ${a.dia}${a.monto ? ` · ${a.monto}` : ''}`
+    case 'pagos_listar': return `Listar pagos${a.empresa_ref ? ` de ${a.empresa_ref.name.trim()}` : ''}`
+    case 'pago_quitar': return `Quitar el pago «${a.nombre}»`
+    case 'pago_cambiar': return `Cambiar el pago «${a.nombre}»${a.dia ? ` al día ${a.dia}` : ''}${a.monto ? ` · ${a.monto}` : ''}`
     case 'desconocido': return `No entendí «${corto(a.texto, 60)}»`
   }
 }
 
 /** True when an action adjacent to another on the same task reads well joined with " y ". */
 function enlazable(a: AccionResuelta): boolean {
-  return !!a.tarea && !a.error && ['posponer', 'renombrar', 'cambiar', 'completar', 'cancelar', 'borrar', 'nota_tarea'].includes(a.tipo)
+  return !!a.tarea && !a.error && ['posponer', 'renombrar', 'cambiar', 'completar', 'cancelar', 'borrar', 'nota_tarea', 'calendar'].includes(a.tipo)
 }
 
 /**
@@ -226,6 +238,7 @@ export function tareaParsedDe(a: Extract<AccionResuelta, { tipo: 'crear' }>): Ta
     importante: a.importante === true || a.prioridad === 'urgente',
     due_date: a.fecha ?? null,
     due_time: a.fecha && a.hora ? a.hora : null,
+    calendar: a.calendar === true,
   }
 }
 
@@ -268,7 +281,11 @@ export async function ejecutarUna(chatId: number, a: AccionResuelta): Promise<st
     }
     case 'crear': {
       const t = tareaParsedDe(a)
-      return confirmacion(t, await guardarTarea(t))
+      const g = await guardarTarea(t)
+      // Inside an approved plan an event without an hour is all-day (the plan said so).
+      const sync = g.faltaHora ? await agregarACalendar(g.id, { todoElDia: true }) : g.sync
+      const linea = confirmacion(t, sync)
+      return sync?.confirmacion ? `${linea}\n${sync.confirmacion}` : linea
     }
     case 'nota_empresa': {
       if (!a.empresa_ref) return `⚠️ No conozco la empresa «${a.empresa}»`
@@ -290,6 +307,24 @@ export async function ejecutarUna(chatId: number, a: AccionResuelta): Promise<st
       // Sent as its own HTML message (same builder as the cron); nothing to add here.
       await enviarLista(chatId, a.lista)
       return a.lista === 'tarde' ? '📋 (cierre enviado arriba)' : '📋 (lista enviada arriba)'
+    case 'calendar': {
+      // In a plan, no hour → all-day (a single action asks with buttons in the webhook).
+      const r = await agregarACalendar(tareaDe(a).id, { hora: a.hora ?? null, todoElDia: !a.hora })
+      return r.confirmacion ?? r.aviso ?? '📅 sin cambios'
+    }
+    case 'pago_crear':
+      return crearPago({ company_id: a.empresa_ref!.id, nombre: a.nombre, dia_del_mes: a.dia, monto_texto: a.monto ?? null })
+    case 'pagos_listar':
+      return textoListaPagos(a.empresa_ref?.id ?? null, a.empresa_ref?.name.trim() ?? null)
+    case 'pago_quitar': {
+      const b = await buscarPago(a.nombre)
+      return b.pago ? quitarPago(b.pago.id) : b.error!
+    }
+    case 'pago_cambiar': {
+      const b = await buscarPago(a.nombre)
+      if (!b.pago) return b.error!
+      return cambiarPago(b.pago.id, { dia_del_mes: a.dia, monto_texto: a.monto })
+    }
     case 'desconocido':
       return `🤷 No entendí «${corto(a.texto, 60)}»`
   }
