@@ -1518,7 +1518,10 @@ _Pendiente. La cuenta ya queda autorizada con `gmail.readonly` + `gmail.modify` 
 
 ## 7. Fase 7 — De comandos a conversación
 
-**La lección más importante del curso: tu asistente conversa.** Hablar con
+**La lección más importante del curso: tu asistente conversa.** La versión
+para pegar en un Gem / GPT / Proyecto, con las mismas reglas, está en
+[prompt-maestro.md](prompt-maestro.md); al final de ese archivo hay una tabla
+de qué cumple ya el bot y qué no. Hablar con
 el bot tiene que sentirse como hablar con una asistente humana, no con un
 menú. La alumna "no sabe organizarse"; el asistente organiza **por** ella,
 conversando. Todo lo construido antes (listas, acciones, alarmas, Calendar)
@@ -1575,7 +1578,8 @@ final: `Listo, Gabby 👏 Hoy: 3. Mañana: 4. Esta semana: 2. Cancelaste 2.` y
 borradores, 10).
 
 **D) Tono y personalidad.** Un solo system prompt (`personaPrompt()` en
-`config.ts`) para el intérprete, `/pregunta` y la línea de la mañana:
+`config.ts`, las reglas del prompt maestro en palabras de la app) para el
+intérprete, `/pregunta` y la línea de la mañana:
 español neutro, cálido, breve, sin voseo; usa el nombre de la persona;
 celebra en una palabra (`✅ Hecha 👏 «…»`); si no entiende, pregunta una cosa
 concreta con botones (`No pillé eso, Gabby. ¿Es una tarea nueva, una orden o
@@ -1584,6 +1588,9 @@ nombre de la persona, nombre del bot, tono (informal/formal) y si propone
 sugerencias o solo obedece (modo menú). Eso es lo que se personaliza por
 alumna; vive en `asistente_config` (una fila) y, mientras no exista la
 tabla, aplican los defaults (Gabby · Asistente · informal · propone).
+`/start` (o un "hola" solo) responde con la presentación: quién es, cómo
+hablarle, dónde cambiar los nombres, y "suéltame todo lo que tienes en la
+cabeza".
 
 **E) Mensajes del día más humanos.** La alarma de las 8 abre con una línea
 generada por el modelo a partir de los números del día (cuántas vencen hoy,

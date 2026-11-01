@@ -48,7 +48,7 @@ import { responderPregunta } from '@/lib/asistente/pregunta'
 import { enviarQueSigue } from '@/lib/asistente/que-sigue'
 import { enviarLista } from '@/lib/asistente/alarmas'
 import { guiaTelegram } from '@/lib/asistente/comandos'
-import { cargarConfig, type AsistenteConfig } from '@/lib/asistente/config'
+import { cargarConfig, presentacion, type AsistenteConfig } from '@/lib/asistente/config'
 import { guardarTurno, limpiarHilo } from '@/lib/asistente/conversacion'
 import { botonesDe, resolverSugerencia, trasCompletar, trasCrear, trasPregunta, trasOrganizar, type Sugerencia } from '@/lib/asistente/sugerencias'
 import { iniciarOrganizar, responderOrganizar, resumen as resumenOrganizar, tecladoOrganizar, type RespuestaOrganizar } from '@/lib/asistente/organizar'
@@ -250,6 +250,9 @@ async function handleText(chatId: number, text: string, prefix: string | null) {
       await reply(chatId, joinLines(prefix, o.texto), tecladoOrganizar(nonce))
       return
     }
+    case 'inicio':
+      await reply(chatId, joinLines(prefix, presentacion(await cargarConfig())))
+      return
     case 'ayuda':
       if (parsed.larga) {
         // The same guide as docs/comandos.md, in 2–3 HTML messages.

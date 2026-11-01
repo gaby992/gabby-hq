@@ -80,6 +80,8 @@ export interface QueSigueOpts {
 export type Parsed =
   /** `larga`: "/ayuda todo" — the full guide (docs/comandos.md) in 2–3 messages. */
   | { kind: 'ayuda'; larga: boolean }
+  /** "/start" / "hola": the presentation ("para empezar" of the master prompt). */
+  | { kind: 'inicio' }
   /** Fase 7: "organízame" / "no sé por dónde empezar" → the guided session. */
   | { kind: 'organizar' }
   /** Fase 7: "olvida lo anterior" / "empecemos de nuevo" → clears the thread. */
@@ -490,7 +492,8 @@ export function parseMensaje(raw: string, companies: CompanyRef[], today: string
   const lower = text.toLowerCase()
 
   if (/^\/?comandos\b|^\/?(?:ayuda|help)\s+(?:todo|toda|larga|completa|full)\b/i.test(lower)) return { kind: 'ayuda', larga: true }
-  if (/^(?:\/start|\/help|\/ayuda|ayuda|help|formato)\b/i.test(lower)) return { kind: 'ayuda', larga: false }
+  if (/^\/start\b/i.test(lower) || /^(?:hola|buenas|buenos\s+d[ií]as|buenas\s+tardes|hey|hi)[\s!.,]*$/i.test(lower)) return { kind: 'inicio' }
+  if (/^(?:\/help|\/ayuda|ayuda|help|formato)\b/i.test(lower)) return { kind: 'ayuda', larga: false }
   const n0 = sinAcentos(text.replace(/^[¿?¡!\s]+|[?!.\s]+$/g, ''))
   if (/^(?:olvida(?:te)?\s+(?:de\s+)?(?:lo\s+)?(?:anterior|todo|eso)|empecemos\s+de\s+nuevo|empezamos\s+de\s+nuevo|borron\s+y\s+cuenta\s+nueva|reinicia(?:r)?\s+(?:la\s+)?conversacion)$/.test(n0)) return { kind: 'olvidar' }
   if (/^(?:organizame|organiza(?:me)?\s+(?:mis\s+)?(?:pendientes|tareas|dia)|ayudame\s+con\s+(?:mis\s+)?(?:pendientes|tareas)|no\s+se\s+por\s+donde\s+empezar|estoy\s+abrumad[ao]|que\s+hago|ponme\s+en\s+orden|ordename)$/.test(n0)) return { kind: 'organizar' }
