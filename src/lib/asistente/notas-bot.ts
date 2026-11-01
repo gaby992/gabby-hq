@@ -31,7 +31,8 @@ export async function ejecutarNota(n: NotaParsed): Promise<string> {
     texto = actual ? `${actual}\n${n.texto}` : n.texto
   }
 
-  const { data, error } = await saveNota(n.company_id, texto, db)
+  // "agregar" only appends: the old note is not replaced, so it is not archived.
+  const { data, error } = await saveNota(n.company_id, texto, db, { archivarAnterior: n.modo !== 'agregar' })
   if (error) throw new Error(`Supabase notas_empresa: ${error.message}`)
   const lineas = (data?.nota ?? texto).split('\n').filter((l) => l.trim()).length
   return `📝 Nota de ${n.company_name} guardada (${lineas} ${lineas === 1 ? 'línea' : 'líneas'})`

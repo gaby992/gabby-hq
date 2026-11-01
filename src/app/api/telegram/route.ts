@@ -45,6 +45,7 @@ import {
 } from '@/lib/asistente/borradores'
 import { cargarEmpresas, confirmacion, guardarTarea, pregunta } from '@/lib/asistente/tareas'
 import { responderPregunta } from '@/lib/asistente/pregunta'
+import { responderQueSigue } from '@/lib/asistente/que-sigue'
 import type { Priority } from '@/types'
 
 // Telegram → here (webhook). Text, voice notes and inline-button taps all end
@@ -192,6 +193,10 @@ async function handleText(chatId: number, text: string, prefix: string | null) {
       await reply(chatId, joinLines(prefix, `✓ Radar: "${parsed.titulo}"`))
       return
     }
+    case 'que_sigue':
+      // Fase 4b: ordered in code, worded by the LLM, numbered like an alarm.
+      await reply(chatId, joinLines(prefix, await responderQueSigue(chatId, parsed.opts)))
+      return
     case 'alarmas':
       await reply(chatId, joinLines(prefix, await listarRecordatorios(chatId)))
       return

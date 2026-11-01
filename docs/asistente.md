@@ -13,6 +13,7 @@ sección y **no se empieza una fase hasta validar la anterior**.
 | 3b | Notas y `listo` por Telegram, avisos de OpenAI | ✅ Validada |
 | 3c | Todo se maneja desde el bot: borrar, nota en tarea, editar, fecha de cierre | ✅ Construida — pendiente de validar |
 | 4 | El bot entiende lenguaje natural + alarmas propias | ✅ Construida — pendiente de validar |
+| 4b | "¿Qué sigue?" (bot + web), notas con edad, rediseño de /hoy, limpieza del parser | ✅ Construida — pendiente de validar |
 | 5 | Google Calendar | ⏳ Pendiente |
 
 ---
@@ -97,6 +98,9 @@ Archivos del asistente dentro del repo:
 | `src/lib/asistente/interprete.ts` | Fase 4: contexto + prompt → JSON de acciones; registro en `bot_preguntas` |
 | `src/lib/asistente/plan.ts` | Fase 4: resuelve refs (#3, t12, "la anterior", título), pinta "Entendí: …" y ejecuta |
 | `src/lib/asistente/recordatorios.ts` | Fase 4: alarmas propias (`bot_recordatorios`): crear, listar, quitar, mandar, +1h/mañana |
+| `src/lib/asistente/que-sigue.ts` | Fase 4b: "¿qué sigue?" — orden determinista en código, el LLM solo redacta; numeración en `bot_alarmas` |
+| `src/app/api/asistente/que-sigue/route.ts` | Fase 4b: el botón "¿Qué sigue?" de /hoy (sesión de la app, no cron) |
+| `src/lib/notas.ts` | Notas "por dónde iba": guardar (archiva la anterior en `notas_historial`), borrar, archivar, edad |
 | `src/lib/asistente/whisper.ts` | Audio → texto con OpenAI whisper-1 |
 | `src/lib/asistente/borradores.ts` | Tareas a medias esperando un botón (`bot_borradores`) |
 | `src/lib/asistente/tareas.ts` | Preguntas con botones, confirmación en una línea, guardado |
@@ -118,6 +122,8 @@ Archivos del asistente dentro del repo:
 | `sql/2026-10-asistente-fase3-pruebas.sql` | Prueba con rollback de la fase 3 + consulta de costos |
 | `sql/2026-10-asistente-fase4.sql` | Migración de la fase 4: `bot_recordatorios` (correr en una query) |
 | `sql/2026-10-asistente-fase4-pruebas.sql` | Prueba con rollback de la fase 4 + consultas para afinar el prompt |
+| `sql/2026-11-asistente-fase4b.sql` | Migración de la fase 4b: `notas_historial` + `bot_alarmas.tipo` admite `que_sigue` |
+| `sql/2026-11-limpieza-titulos-hoy-manana.sql` | Limpieza única: títulos que terminan en " hoy"/" mañana" → `due_date` (select primero, update después) |
 
 ---
 
@@ -1047,6 +1053,134 @@ Ninguna.
 | `response_format` error en los logs | `LLM_MODEL` no soporta modo JSON | Cambia a `gpt-5-mini` / `gpt-4o-mini`; con Anthropic no se usa ese campo. |
 
 ---
+
+### 4f. Fase 4b — "¿Qué sigue?", notas con edad, rediseño de /hoy
+
+**Problema**: la matriz muestra todo pero no dirige. Gabby quiere que el
+sistema le diga "esto primero", como un asistente, no un tablero. Y la vista
+estaba apretada: notas de 40+ días en C1, sin aire entre empresas, tareas con
+"hoy" en el título y sin fecha.
+
+**A) "¿Qué sigue?" (bot + web).** Texto o voz: `¿qué sigue?`, `qué hago
+primero`, `qué es lo más urgente`, `por dónde empiezo`, `solo urgentes`, `qué
+vence esta semana`, `qué está por vencer`, `qué sigue de IM`. No es la lista
+completa (eso es la alarma de las 8): es una respuesta corta y ordenada con
+formato fijo:
+
+```
+🎯 Ahora: 1. «paypal statements» · IM · vencida hace 3 días
+📌 Después:
+2. «…» · PD · vence hoy
+3. «…» · IM · urgente ★
+4. «…» · DATAVIA · urgente
+⏳ Por vencer esta semana:
+5. «…» · IM · jue 6 nov
+6. «…» · PD · vie 7 nov
+📝 Por dónde ibas:
+IM: … (solo notas de los últimos 3 días, una línea cada una)
+```
+
+El orden lo decide el **código**, determinista, antes de llamar al modelo:
+vencidas (más vieja primero) > vence hoy > urgente★ > urgente > ★ con fecha
+esta semana > ★ sin fecha. "Por vencer" son las que vencen entre mañana y el
+domingo y no salieron arriba, por fecha. El LLM **solo redacta**
+(`SYSTEM_PROMPT` en `que-sigue.ts`, 15 s, 400 tokens); si cambia la
+numeración o falla, sale el texto fijo tal cual. Las tareas de Chelsea no
+entran (son delegadas) salvo que pidas `qué sigue de Chelsea`.
+
+| Variante | Qué cambia |
+| --- | --- |
+| `solo urgentes` | sin la sección ⏳ |
+| `qué sigue de IM` | filtra por empresa (también `… de PD`, `… en DATAVIA`) |
+| `qué vence esta semana` / `qué está por vencer` | solo la sección ⏳ |
+
+Los números se guardan en `bot_alarmas` con `tipo = 'que_sigue'`, igual que
+una alarma: después de la respuesta, `listo 1`, `pasa 2,5`, "listo el
+primero", "pasa el segundo al lunes" funcionan sobre ella (el intérprete ve
+"ÚLTIMA LISTA NUMERADA (respuesta a ¿qué sigue?)" en su contexto).
+
+En la web: botón **🎯 ¿Qué sigue?** arriba de /hoy → tarjeta destacada con el
+mismo texto (`GET /api/asistente/que-sigue`, protegido por la sesión de la
+app), con "actualizar" y ✕ para cerrarla. Desde la web no se guarda
+numeración.
+
+**B) Notas "por dónde iba" con edad.**
+
+| Edad | C1 y alarma de las 8 | Bloque de empresa en /hoy |
+| --- | --- | --- |
+| ≤ 3 días | sí | en el acento (morado), "escrita hace N días" |
+| 4–14 días | no | en gris, "escrita hace N días", con **archivar** |
+| > 14 días | no | una línea `📝 nota de hace 39 días — ver / archivar` |
+
+**Archivar** la guarda en `notas_historial` (company_id, nota, escrita_en,
+archivada_en) y borra la nota viva. Al **escribir una nota nueva encima de una
+vieja** (web o `nota IM: …`), la vieja va sola al historial; `nota IM + línea`
+solo agrega y no archiva nada; `nota IM:` (borrar) también archiva antes de
+borrar. Nada se pierde, pero deja de estorbar. El historial se consulta en
+Supabase (`select * from notas_historial order by archivada_en desc`); no
+tiene vista en la app todavía.
+
+**C) Rediseño de /hoy (solo layout, misma lógica).**
+
+- Matriz: 24px de padding por cuadrante; en C1 las notas van en su propia
+  zona (fondo `#222`, nombre de la empresa como encabezado) separadas de las
+  tareas por una línea sutil; cuando hay 2+ tareas seguidas de la misma
+  empresa, la empresa va como mini-encabezado (badge) y las tareas debajo sin
+  repetir el badge.
+- Tarjeta de tarea en la matriz: **una sola línea** (título truncado a 70
+  caracteres, el completo en el tooltip) con los badges a la derecha.
+- Bloques de empresa: título más grande, 32px entre empresas, nota primero
+  (acento) y tareas después (blanco).
+- Móvil: la matriz se apila C1 → C2 → C3 → C4; C4 arranca plegado (botón
+  "ver").
+
+**D) Limpieza del parser.**
+
+- "hoy" / "mañana" al final del título → fecha, fuera del título. El parser
+  clásico ya lo hacía desde la fase 2 (`Shift Google Ads y SEO hoy` → título
+  `Shift Google Ads y SEO`, vence hoy); lo que faltaba era el camino del
+  intérprete: ahora el prompt lo pide y `sinFechaEnTitulo()` lo garantiza
+  aunque el modelo deje la palabra en el título. En medio de la frase se
+  respeta ("avisar que hoy no voy").
+- Campos dictados por voz: `Agregar un nuevo task, whatsapp, chelito, due
+  date, mañana, compañía` → título `whatsapp chelito`, vence mañana, y
+  pregunta la empresa con botones. Lo entienden tanto el prompt del
+  intérprete como `parseDictado()` en el parser clásico (por si el modelo
+  falla): las palabras de campo (task, due date, compañía, prioridad…) no van
+  al título.
+- Migración de datos una sola vez: `sql/2026-11-limpieza-titulos-hoy-manana.sql`.
+  Primero el `select` (lista `titulo_actual → titulo_nuevo`, `due_date_nuevo`
+  relativo a `created_at` en hora de Cancún); si está bien, se descomenta el
+  `update`.
+
+**Lo que hay que hacer a mano (fase 4b)**
+
+1. Supabase → SQL Editor → `sql/2026-11-asistente-fase4b.sql` en una query.
+   Abajo: 5 columnas de `notas_historial`, las dos tablas de notas con el
+   **mismo** `rowsecurity`, y el check de `bot_alarmas` con `que_sigue`.
+2. Otra query: el `select` de `sql/2026-11-limpieza-titulos-hoy-manana.sql`.
+   Revisa la lista; si está bien, corre el `update` (descomentado).
+3. Push → redeploy. Sin env vars nuevas ni crons nuevos.
+
+**Pruebas de la fase 4b**
+
+1. `¿qué sigue?` → las secciones en ese orden, numeradas. `listo 1` → cierra
+   la de "Ahora". `qué sigue de IM` → solo IM. `solo urgentes` → sin ⏳.
+   `qué vence esta semana` → solo ⏳. Por voz: "qué hago primero".
+2. /hoy → **🎯 ¿Qué sigue?** → la tarjeta con el mismo texto; ✕ la cierra.
+3. Una nota de IM escrita hace 5+ días: ya no sale en C1 ni en la alarma de
+   las 8, y en el bloque de IM se ve en gris con "escrita hace N días". Con
+   una de 15+ días: una sola línea "nota de hace N días — ver / archivar";
+   **archivar** → desaparece y `select * from notas_historial` la tiene.
+4. `nota IM: texto nuevo` encima de una nota vieja → la vieja está en
+   `notas_historial` y /hoy muestra la nueva en morado.
+5. En el móvil, /hoy: C4 plegado con "ver". En escritorio, C1 con las notas
+   arriba y una línea antes de las tareas; una tarea larga en una línea con
+   el tooltip.
+6. Audio: "Agregar un nuevo task, whatsapp, chelito, due date, mañana,
+   compañía" → pregunta la empresa; al elegir: `✅ IM · … · «whatsapp
+   chelito» · vence …`. Texto: `Shift Google Ads y SEO hoy` → título sin
+   "hoy", vence hoy.
 
 ## 5. Fase 5 — Google Calendar
 

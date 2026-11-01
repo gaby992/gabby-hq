@@ -7,7 +7,9 @@ import { supabase } from '@/lib/supabase'
 import TaskCard from '@/components/TaskCard'
 import CompanyNote from '@/components/CompanyNote'
 import EisenhowerMatrix from '@/components/EisenhowerMatrix'
+import QueSigueCard from '@/components/QueSigueCard'
 import { todayYmd } from '@/lib/dates'
+import { edadNota } from '@/lib/notas'
 import { findChelseaCompany } from '@/lib/chelsea'
 
 const MAX_TASKS_PER_BLOCK = 5
@@ -95,6 +97,14 @@ export default function HoyPage() {
     })
   }
 
+  function removeNota(companyId: string) {
+    setNotas((prev) => prev.filter((n) => n.company_id !== companyId))
+  }
+
+  // Fase 4b: C1 only shows notes of the last 3 days. Older ones live in
+  // their company block below (greyed, or folded past 14 days).
+  const notasFrescas = notas.filter((n) => edadNota(n) === 'fresca')
+
   /** Overdue (oldest first) → due today → urgent with no date. Capped later. */
   function focusFor(open: Task[]): Task[] {
     const overdue = open
@@ -146,11 +156,14 @@ export default function HoyPage() {
 
   return (
     <div className="space-y-6">
+      {/* ── Fase 4b: "¿Qué sigue?" — the one thing to do now, on demand ── */}
+      <QueSigueCard />
+
       {/* ── Eisenhower matrix — above the strip and the company blocks ── */}
       <EisenhowerMatrix
         tasks={matrixTasks}
         companies={companies}
-        notas={notas}
+        notas={notasFrescas}
         radar={radar}
         inboxCount={inboxCount}
         today={today}
@@ -192,7 +205,8 @@ export default function HoyPage() {
         </p>
       )}
 
-      {/* ── One block per company ── */}
+      {/* ── One block per company (32px apart; note first, then the tasks) ── */}
+      <div className="space-y-8 pt-2">
       {blocks.map((block) => {
         const key = block.id ?? 'none'
         const hasNote = (block.nota?.nota?.trim().length ?? 0) > 0
@@ -221,9 +235,9 @@ export default function HoyPage() {
           // scroll-mt keeps the heading clear of the sticky nav when the
           // matrix scrolls us here.
           <section id={`block-${key}`} key={key} className="space-y-3 scroll-mt-20">
-            <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: block.color }} />
-              <h2 className="text-sm font-semibold" style={{ color: block.color }}>{block.name}</h2>
+            <div className="flex items-center gap-2.5">
+              <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: block.color }} />
+              <h2 className="text-lg font-semibold tracking-tight" style={{ color: block.color }}>{block.name}</h2>
               {block.openCount > 0 ? (
                 <Link
                   href={block.id ? `/tasks?company=${block.id}` : '/tasks'}
@@ -236,13 +250,13 @@ export default function HoyPage() {
               )}
             </div>
 
-            {/* "Por dónde iba" — above everything else in the block. */}
+            {/* "Por dónde iba" — above everything else in the block, in the accent. */}
             {block.id && (
-              <CompanyNote companyId={block.id} nota={block.nota} onSaved={upsertNota} />
+              <CompanyNote companyId={block.id} nota={block.nota} onSaved={upsertNota} onArchived={removeNota} />
             )}
 
             {shown.length > 0 ? (
-              <div className="space-y-2">
+              <div className="space-y-2 pt-1">
                 {shown.map((task) => (
                   <TaskCard
                     key={task.id}
@@ -268,6 +282,7 @@ export default function HoyPage() {
           </section>
         )
       })}
+      </div>
     </div>
   )
 }

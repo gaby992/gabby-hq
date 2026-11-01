@@ -8,10 +8,13 @@ import { createServerClient } from '@/lib/supabase-server'
 import { createInboxClient } from '@/lib/supabase-inboxim'
 import type { Company, NotaEmpresa, Task } from '@/types'
 import { CHELSEA_COMPANY_NAME } from '@/lib/chelsea'
+import { NOTA_FRESCA_DIAS } from '@/lib/notas'
+import { daysSince } from '@/lib/dates'
 import { cancunDayBounds, cancunYmd, daysBetween, formatCortoEs, formatDiaLargoEs } from './cancun'
 import { allowedChatIds, escapeHtml, sendTelegram } from './telegram'
 
-export type AlarmaTipo = 'manana' | 'tarde'
+/** 'que_sigue' (fase 4b) is the numbered "¿qué sigue?" answer, recorded like an alarm. */
+export type AlarmaTipo = 'manana' | 'tarde' | 'que_sigue'
 
 /** One numbered line of an alarm: `n` is what Gabby types in "pasa n". */
 export interface AlarmaItem {
@@ -231,7 +234,9 @@ function plural(n: number, one: string, many: string): string {
 
 export async function buildManana(today: string = cancunYmd()): Promise<Mensaje> {
   const [{ tasks, companies, notas }, chelseaMail] = await Promise.all([loadOpenTasks(), countChelseaMail()])
-  const { grupos, items } = buildGrupos(tasks, companies, notas, today)
+  // Fase 4b: only notes of the last 3 days are "por dónde iba"; older ones stay in /hoy, greyed.
+  const frescas = notas.filter((n) => daysSince(n.updated_at) <= NOTA_FRESCA_DIAS)
+  const { grupos, items } = buildGrupos(tasks, companies, frescas, today)
 
   // Chelsea's block also exists when the only thing to say is her mail count
   // (or that inbox-IM could not be read) — even if the company has no tasks.
@@ -302,7 +307,7 @@ export async function buildTarde(today: string = cancunYmd()): Promise<Mensaje> 
 
 // ── Sending, recording, retrying ─────────────────────────────────────────
 
-async function guardarAlarma(tipo: AlarmaTipo, items: AlarmaItem[]): Promise<void> {
+export async function guardarAlarma(tipo: AlarmaTipo, items: AlarmaItem[]): Promise<void> {
   const db = createServerClient()
   const { error } = await db
     .from('bot_alarmas')

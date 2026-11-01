@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { Task, Company, NotaEmpresa, RadarItem } from '@/types'
+import { Task, Company, NotaEmpresa, RadarItem, COMPANY_COLORS } from '@/types'
 import { supabase } from '@/lib/supabase'
 import { relativeDaysEs } from '@/lib/dates'
 import CompanyBadge from './CompanyBadge'
@@ -27,9 +27,18 @@ type QuadrantId = 1 | 2 | 3 | 4
  * entries as one sequence.
  */
 type Item =
-  | { kind: 'task'; key: string; task: Task }
+  | { kind: 'task'; key: string; task: Task; hideCompany?: boolean }
   | { kind: 'nota'; key: string; company: Company; nota: NotaEmpresa; text: string }
   | { kind: 'radar'; key: string; radar: RadarItem }
+  /** Mini-header above a run of 2+ tasks of the same company (fase 4b). */
+  | { kind: 'empresa'; key: string; company: Company }
+
+/** Title truncation inside the matrix; the full text is the tooltip. */
+const TITLE_MAX = 70
+
+function truncate(s: string, max: number = TITLE_MAX): string {
+  return s.length > max ? s.slice(0, max - 1).trimEnd() + '…' : s
+}
 
 interface Props {
   /** Open tasks only — the matrix never shows anything already done. */
@@ -69,8 +78,28 @@ function byDueAsc(a: Task, b: Task): number {
   return a.due_date < b.due_date ? -1 : a.due_date > b.due_date ? 1 : 0
 }
 
+/**
+ * Tasks as rows, with a company mini-header before every run of 2+ tasks of
+ * the same company (those rows then drop their own badge). A lone task keeps
+ * its badge inline.
+ */
 function asItems(tasks: Task[]): Item[] {
-  return tasks.map((task) => ({ kind: 'task' as const, key: `task-${task.id}`, task }))
+  const out: Item[] = []
+  let i = 0
+  while (i < tasks.length) {
+    const t = tasks[i]
+    let j = i + 1
+    while (j < tasks.length && t.company_id && tasks[j].company_id === t.company_id) j += 1
+    const run = tasks.slice(i, j)
+    if (run.length >= 2 && t.company) {
+      out.push({ kind: 'empresa', key: `empresa-${t.company_id}-${i}`, company: t.company })
+      for (const task of run) out.push({ kind: 'task', key: `task-${task.id}`, task, hideCompany: true })
+    } else {
+      for (const task of run) out.push({ kind: 'task', key: `task-${task.id}`, task })
+    }
+    i = j
+  }
+  return out
 }
 
 const STYLES: Record<QuadrantId, { border: string; title: string; count: string }> = {
@@ -153,34 +182,45 @@ export default function EisenhowerMatrix({
         <Link
           key={item.key}
           href="/radar"
-          className="flex items-start gap-2 text-xs leading-5 text-[#888888] hover:text-[#e8e8e8] transition-colors"
+          className="flex items-center gap-2 text-xs leading-5 text-[#888888] hover:text-[#e8e8e8] transition-colors"
         >
           <span className="flex-shrink-0 text-[#555555]">📡</span>
-          <span className="min-w-0 flex-1 truncate">{item.radar.titulo}</span>
+          <span className="min-w-0 flex-1 truncate" title={item.radar.titulo}>{item.radar.titulo}</span>
         </Link>
+      )
+    }
+
+    if (item.kind === 'empresa') {
+      // 12px above the run (the list gap already gives 8), badge as the heading.
+      return (
+        <div key={item.key} className="pt-1">
+          <CompanyBadge company={item.company} size="xs" />
+        </div>
       )
     }
 
     const { task } = item
     const busy = completing.has(task.id)
 
+    // One line: checkbox · title (truncated, full text on hover) · badges right.
     return (
-      <div key={item.key} className="flex items-start gap-2">
+      <div key={item.key} className={`flex items-center gap-2 ${item.hideCompany ? 'pl-2' : ''}`}>
         <button
           onClick={() => completeTask(task)}
           disabled={busy}
           title="Completar"
-          className="mt-0.5 flex-shrink-0 w-4 h-4 rounded border-2 border-[#2a2a2a] hover:border-[#888888] disabled:opacity-40 transition-colors"
+          className="flex-shrink-0 w-4 h-4 rounded border-2 border-[#2a2a2a] hover:border-[#888888] disabled:opacity-40 transition-colors"
         />
-        <div className="min-w-0 flex-1">
-          <p className={`text-xs leading-5 ${busy ? 'text-[#555555] line-through' : 'text-[#e8e8e8]'}`}>
-            {task.text}
-          </p>
-          <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
-            {task.company && <CompanyBadge company={task.company} size="xs" />}
-            <ImportantBadge importante={task.importante} />
-            <DueDateLabel date={task.due_date} today={today} />
-          </div>
+        <p
+          title={task.text}
+          className={`min-w-0 flex-1 truncate text-xs leading-5 ${busy ? 'text-[#555555] line-through' : 'text-[#e8e8e8]'}`}
+        >
+          {truncate(task.text)}
+        </p>
+        <div className="flex-shrink-0 flex items-center gap-1.5">
+          {!item.hideCompany && task.company && <CompanyBadge company={task.company} size="xs" />}
+          <ImportantBadge importante={task.importante} />
+          <DueDateLabel date={task.due_date} today={today} />
         </div>
       </div>
     )
@@ -193,8 +233,10 @@ export default function EisenhowerMatrix({
         id={1}
         title="Arranca por aquí"
         subtitle="Por dónde ibas + lo que vence"
-        items={[...notaItems, ...asItems(c1)]}
+        items={asItems(c1)}
         render={renderItem}
+        // Fase 4b: the notes (≤ 3 days) are their own zone, above a subtle line.
+        head={notaItems.length > 0 ? <div className="space-y-2">{notaItems.map(renderItem)}</div> : null}
       />
 
       <Quadrant
@@ -237,6 +279,7 @@ export default function EisenhowerMatrix({
         items={[...asItems(c4), ...radarItems]}
         render={renderItem}
         foot="¿Algo de aquí merece subir a Construir?"
+        collapsibleOnMobile
       />
     </div>
   )
@@ -272,36 +315,38 @@ function MatrixNote({ company, nota, text, onReveal }: MatrixNoteProps) {
     return () => window.removeEventListener('resize', measure)
   }, [text, expanded])
 
+  const color = COMPANY_COLORS[company.color] ?? '#888780'
+
   return (
-    <div className="flex items-start gap-2">
-      <span className="text-xs leading-5 flex-shrink-0">📝</span>
-      <div className="min-w-0 flex-1">
+    // Fase 4b: its own surface (#222 on #1c1c1c) and the company as a heading.
+    <div className="rounded-md bg-[#222222] px-3 py-2.5">
+      <button
+        onClick={() => onReveal(company.id)}
+        title="Ir al bloque de esta empresa"
+        className="flex items-center gap-1.5 text-xs font-semibold hover:opacity-80 transition-opacity"
+        style={{ color }}
+      >
+        <span>📝</span>
+        <span>{company.name}</span>
+      </button>
+      {/* whitespace-pre-wrap: she writes paragraphs with dashed bullets. */}
+      <p
+        ref={textRef}
+        className={`mt-1 text-xs leading-5 text-[#7F77DD] whitespace-pre-wrap break-words ${
+          expanded ? '' : NOTE_CLAMP
+        }`}
+      >
+        {text}
+      </p>
+      {clamped && !expanded && (
         <button
-          onClick={() => onReveal(company.id)}
-          title="Ir al bloque de esta empresa"
-          className="hover:opacity-80 transition-opacity"
+          onClick={() => setExpanded(true)}
+          className="text-[11px] text-[#7F77DD] hover:text-[#9b95e8] font-medium transition-colors"
         >
-          <CompanyBadge company={company} size="xs" />
+          ver más
         </button>
-        {/* whitespace-pre-wrap: she writes paragraphs with dashed bullets. */}
-        <p
-          ref={textRef}
-          className={`text-xs leading-5 text-[#7F77DD] whitespace-pre-wrap break-words ${
-            expanded ? '' : NOTE_CLAMP
-          }`}
-        >
-          {text}
-        </p>
-        {clamped && !expanded && (
-          <button
-            onClick={() => setExpanded(true)}
-            className="text-[11px] text-[#7F77DD] hover:text-[#9b95e8] font-medium transition-colors"
-          >
-            ver más
-          </button>
-        )}
-        <p className="text-[10px] text-[#555555] mt-0.5">escrita {relativeDaysEs(nota.updated_at)}</p>
-      </div>
+      )}
+      <p className="text-[10px] text-[#555555] mt-0.5">escrita {relativeDaysEs(nota.updated_at)}</p>
     </div>
   )
 }
@@ -316,50 +361,70 @@ interface QuadrantProps {
   head?: React.ReactNode
   /** Always-present closing line, below the items (C4's prompt). */
   foot?: string
+  /** Fase 4b: on phones the quadrant starts folded (C4). From md up it is always open. */
+  collapsibleOnMobile?: boolean
 }
 
-function Quadrant({ id, title, subtitle, items, render, head, foot }: QuadrantProps) {
+function Quadrant({ id, title, subtitle, items, render, head, foot, collapsibleOnMobile }: QuadrantProps) {
   const [expanded, setExpanded] = useState(false)
+  const [openOnMobile, setOpenOnMobile] = useState(false)
   const style = STYLES[id]
 
-  const shown = expanded ? items : items.slice(0, MAX_ITEMS)
-  const more = items.length - shown.length
+  // Headers don't count as items for the "+N más" cut.
+  const countable = items.filter((i) => i.kind !== 'empresa').length
+  const shown = expanded ? items : items.slice(0, MAX_ITEMS + (items.slice(0, MAX_ITEMS).filter((i) => i.kind === 'empresa').length))
+  const more = countable - shown.filter((i) => i.kind !== 'empresa').length
+  const folded = collapsibleOnMobile && !openOnMobile
 
   return (
     // The 2×2 shape holds even when a quadrant has nothing in it: no collapsing.
-    <section className={`bg-[#1c1c1c] border rounded-lg p-4 space-y-2.5 ${style.border}`}>
-      <div>
-        <div className="flex items-center gap-2">
-          <h2 className={`text-sm font-semibold ${style.title}`}>{title}</h2>
-          {items.length > 0 && (
-            <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${style.count}`}>
-              {items.length}
-            </span>
-          )}
+    <section className={`bg-[#1c1c1c] border rounded-lg p-6 space-y-3 ${style.border}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 className={`text-sm font-semibold ${style.title}`}>{title}</h2>
+            {countable > 0 && (
+              <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${style.count}`}>
+                {countable}
+              </span>
+            )}
+          </div>
+          <p className="text-[11px] text-[#555555] mt-0.5">{subtitle}</p>
         </div>
-        <p className="text-[11px] text-[#555555] mt-0.5">{subtitle}</p>
+        {collapsibleOnMobile && (
+          <button
+            onClick={() => setOpenOnMobile((v) => !v)}
+            className="md:hidden text-xs text-[#888888] hover:text-[#e8e8e8] transition-colors"
+          >
+            {folded ? 'ver' : 'ocultar'}
+          </button>
+        )}
       </div>
 
-      {head}
+      <div className={`space-y-3 ${folded ? 'hidden md:block' : ''}`}>
+        {head}
+        {/* A subtle line between the notes zone (or the inbox line) and the tasks. */}
+        {head && countable > 0 && <div className="border-t border-[#2a2a2a]" />}
 
-      {items.length === 0 ? (
-        // `head` already puts something on screen, so don't contradict it.
-        !head && <p className="text-xs text-[#555555]">— nada aquí</p>
-      ) : (
-        <div className="space-y-2">{shown.map(render)}</div>
-      )}
+        {countable === 0 ? (
+          // `head` already puts something on screen, so don't contradict it.
+          !head && <p className="text-xs text-[#555555]">— nada aquí</p>
+        ) : (
+          <div className="space-y-2">{shown.map(render)}</div>
+        )}
 
-      {more > 0 && (
-        <button
-          onClick={() => setExpanded(true)}
-          className="text-xs text-[#7F77DD] hover:text-[#9b95e8] font-medium transition-colors"
-        >
-          +{more} más
-        </button>
-      )}
+        {more > 0 && (
+          <button
+            onClick={() => setExpanded(true)}
+            className="text-xs text-[#7F77DD] hover:text-[#9b95e8] font-medium transition-colors"
+          >
+            +{more} más
+          </button>
+        )}
 
-      {/* Only worth asking when there's actually something parked here. */}
-      {foot && items.length > 0 && <p className="text-[11px] text-[#555555] pt-0.5">{foot}</p>}
+        {/* Only worth asking when there's actually something parked here. */}
+        {foot && countable > 0 && <p className="text-[11px] text-[#555555] pt-0.5">{foot}</p>}
+      </div>
     </section>
   )
 }

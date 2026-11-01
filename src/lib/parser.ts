@@ -16,6 +16,8 @@
 //   paypal para el viernes / paypal urgente / paypal es de PD   (edit an existing task)
 //   /pregunta <…>  /  ? <pregunta>  /  ¿…?  /  pregunta <…>   (answered by the LLM)
 //   mis alarmas  /  quita alarma 2                           (fase 4 reminders)
+//   qué sigue / qué hago primero / solo urgentes / qué vence esta semana / qué sigue de IM   (fase 4b)
+//   "Agregar un task, whatsapp chelito, due date, mañana, compañía"  (fields dictated by voice)
 //   /ayuda / ayuda / help / formato / /start
 // Anything else ("1 terminado / 9 cancelar", "alarma mañana 3pm revisar X")
 // is free text: the webhook sends it to the LLM interpreter first and only
@@ -55,8 +57,15 @@ export interface Cambios {
   company_name?: string
 }
 
+export interface QueSigueOpts {
+  empresa?: string | null
+  solo_urgentes?: boolean
+  solo_vencer?: boolean
+}
+
 export type Parsed =
   | { kind: 'ayuda' }
+  | { kind: 'que_sigue'; opts: QueSigueOpts }
   | { kind: 'alarmas' }
   | { kind: 'quitar_alarma'; arg: string }
   | { kind: 'pregunta'; texto: string }
@@ -244,11 +253,61 @@ function parseEdicion(text: string, companies: CompanyRef[], today: string): { t
 
 // ── Entry point ─────────────────────────────────────────────────────────
 
+// "¿qué sigue?", "qué hago primero", "qué es lo más urgente", "qué está por
+// vencer", "solo urgentes", "qué vence esta semana", "qué sigue de IM".
+function parseQueSigue(text: string, companies: CompanyRef[]): QueSigueOpts | null {
+  const t = text.replace(/^[¿?¡!\s]+|[?!.\s]+$/g, '').replace(/^\/?pregunta\s+/i, '').toLowerCase()
+  const n = t.normalize('NFD').replace(/[̀-ͯ]/g, '')
+  const opts: QueSigueOpts = {}
+  let match = false
+  if (/^(que|qué)\s+sigue\b/.test(n) || /^(que\s+)?(hago|toca)\s+(primero|ahora)\b/.test(n) || /^(que|cual)\s+es\s+lo\s+(mas\s+)?urgente\b/.test(n) || /^por\s+donde\s+(empiezo|arranco)\b/.test(n)) match = true
+  if (/^solo\s+(lo\s+)?urgentes?\b/.test(n)) { match = true; opts.solo_urgentes = true }
+  if (/^(que|cuales?)\s+(esta[n]?\s+por\s+vencer|vence[n]?)\b/.test(n) || /^por\s+vencer\b/.test(n)) { match = true; opts.solo_vencer = true }
+  if (!match) return null
+  const sorted = [...companies].sort((a, b) => b.name.length - a.name.length)
+  for (const c of sorted) {
+    const name = c.name.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    if (new RegExp(`\\b(?:de|en|para|con)\\s+${escapeRe(name)}\\b`).test(n)) { opts.empresa = c.name.trim(); break }
+  }
+  return opts
+}
+
+// A voice note that DICTATES the fields as a comma-separated list:
+// "Agregar un nuevo task, whatsapp, chelito, due date, mañana, compañía".
+// The field words are not the title; what is left between them is.
+const CAMPO_RE = /^(?:agregar?|agrega|añadir?|crear?|nuevo|nueva|un|una|task|tarea|tareas|titulo|título|due|date|fecha|vence|para|compañ[ií]a|company|empresa|prioridad|priority|urgencia)$/i
+export function parseDictado(text: string, companies: CompanyRef[], today: string): TareaParsed | null {
+  const partes = text.split(/\s*,\s*/).map((x) => x.trim()).filter(Boolean)
+  if (partes.length < 3) return null
+  const tieneCampo = partes.some((x) => /^(?:due\s*date|fecha|compañ[ií]a|company|empresa|task|tarea|prioridad)$/i.test(x) || /^(?:agregar?|agrega|crear?)\s+(?:un[a]?\s+)?(?:nuevo\s+|nueva\s+)?(?:task|tarea)\b/i.test(x))
+  if (!tieneCampo) return null
+  const base: TareaParsed = { text: '', priority: null, company_id: null, company_name: null, importante: false, due_date: null }
+  const titulo: string[] = []
+  for (const parte of partes) {
+    const words = parte.split(/\s+/)
+    if (words.every((w) => CAMPO_RE.test(w))) continue
+    const d = resolveDay(parte.toLowerCase().replace(/^(?:el|para el|para)\s+/, ''), today)
+    if (d) { base.due_date = base.due_date ?? d; continue }
+    const pm = parte.match(/^(urgente|normal|cuando(?:\s+pueda)?)$/i)
+    if (pm) { base.priority = pm[1].toLowerCase().startsWith('cuando') ? 'cuando' : (pm[1].toLowerCase() as Priority); continue }
+    const c = companies.find((x) => x.name.trim().toLowerCase() === parte.toLowerCase())
+    if (c) { base.company_id = c.id; base.company_name = c.name.trim(); continue }
+    if (/^importante$/i.test(parte)) { base.importante = true; continue }
+    titulo.push(parte)
+  }
+  if (titulo.length === 0) return null
+  base.text = tidy(titulo.join(' '))
+  base.importante = base.importante || base.priority === 'urgente'
+  return base
+}
+
 export function parseMensaje(raw: string, companies: CompanyRef[], today: string): Parsed {
   const text = raw.trim()
   const lower = text.toLowerCase()
 
   if (/^(?:\/start|\/help|\/ayuda|ayuda|help|formato)\b/i.test(lower)) return { kind: 'ayuda' }
+  const qs = parseQueSigue(text, companies)
+  if (qs) return { kind: 'que_sigue', opts: qs }
   if (/^[?¿]/.test(text) || /^\/?pregunta\b/i.test(text)) {
     // Keep the question as asked (its "¿…?" included) — only drop the trigger.
     // "? qué cerré ayer" → "qué cerré ayer"; "¿qué tengo hoy?" stays whole.
@@ -266,6 +325,9 @@ export function parseMensaje(raw: string, companies: CompanyRef[], today: string
   if (quitar) return { kind: 'quitar_alarma', arg: tidy(quitar[1]) }
   const accion = text.match(/^(pasa|listo|borra)\b\s*([\s\S]*)$/i)
   if (accion) return { kind: 'accion', accion: accion[1].toLowerCase() as Accion, arg: tidy(accion[2]) }
+
+  const dictado = parseDictado(text, companies, today)
+  if (dictado) return { kind: 'tarea', tarea: dictado }
 
   const edicion = /^(urgente|normal|cuando|para)\b/i.test(text) ? null : parseEdicion(text, companies, today)
 
@@ -300,6 +362,7 @@ export function faltantes(t: TareaParsed): Faltante[] {
 export function ayuda(modelo: string): string {
   return [
     '💬 HÁBLAME NORMAL: "el 3 ya está", "pasa el 5 al lunes", "9 cancelar, no se va a hacer", "alarma mañana 9am revisar X" · varias órdenes en un mensaje y te muestro el plan antes de hacerlo',
+    '🎯 ¿QUÉ SIGUE? · "qué hago primero" · "solo urgentes" · "qué vence esta semana" · "qué sigue de IM" → una tarea para ahora, 3 después, 3 por vencer; luego "listo 1" / "pasa el segundo"',
     '📥 AGREGAR',
     'urgente/normal/cuando [empresa] tarea [importante] [hoy · mañana · para el viernes] · o "para IM: tarea"',
     '🎤 Por voz igual (máx 2 min) · 💡 radar <idea> · si falta algo, te pregunto con botones',

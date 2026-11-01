@@ -14,6 +14,7 @@ import { addDays, cancunYmd, formatFechaHoraEs, formatVenceEs } from './cancun'
 import { buscarEnAbiertas, type AccionLlm, type ContextoInterprete, type TareaLite } from './interprete'
 import { ejecutarNota } from './notas-bot'
 import { responderPregunta } from './pregunta'
+import { responderQueSigue } from './que-sigue'
 import { confirmacionAlarma, crearRecordatorio, instanteDe } from './recordatorios'
 import { confirmacion, guardarTarea } from './tareas'
 
@@ -122,7 +123,7 @@ export function resolverAcciones(acciones: AccionLlm[], ctx: ContextoInterprete,
 
 const ICONO: Record<AccionLlm['tipo'], string> = {
   completar: '✅', cancelar: '🗑', borrar: '❌', posponer: '➡️', renombrar: '✏️', cambiar: '✏️', crear: '➕',
-  nota_empresa: '📝', nota_tarea: '📎', alarma: '⏰', pregunta: '❓', desconocido: '🤷',
+  nota_empresa: '📝', nota_tarea: '📎', alarma: '⏰', pregunta: '❓', que_sigue: '🎯', desconocido: '🤷',
 }
 
 function fechaDicha(ymd: string, today: string): string {
@@ -159,6 +160,7 @@ function frase(a: AccionResuelta, today: string, conTarea: boolean): string {
     case 'nota_tarea': return `Nota en${tt}: «${corto(a.texto, 60)}»`
     case 'alarma': return `Alarma «${corto(a.texto)}» · ${a.dispara_en ? formatFechaHoraEs(a.dispara_en) : `${a.fecha ? formatVenceEs(a.fecha) : 'hoy'} (sin hora → 9:00 am)`}`
     case 'pregunta': return `Responder «${corto(a.texto, 60)}»`
+    case 'que_sigue': return `Qué sigue${a.empresa ? ` de ${a.empresa}` : ''}${a.solo_urgentes ? ' (solo urgentes)' : ''}${a.solo_vencer ? ' (por vencer)' : ''}`
     case 'desconocido': return `No entendí «${corto(a.texto, 60)}»`
   }
 }
@@ -278,6 +280,8 @@ export async function ejecutarUna(chatId: number, a: AccionResuelta): Promise<st
     }
     case 'pregunta':
       return responderPregunta(chatId, a.texto)
+    case 'que_sigue':
+      return responderQueSigue(chatId, { empresa: a.empresa, solo_urgentes: a.solo_urgentes, solo_vencer: a.solo_vencer })
     case 'desconocido':
       return `🤷 No entendí «${corto(a.texto, 60)}»`
   }

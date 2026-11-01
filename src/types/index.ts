@@ -44,6 +44,15 @@ export interface NotaEmpresa {
   updated_at: string
 }
 
+/** A "por dónde iba" note that was replaced or archived (fase 4b). */
+export interface NotaHistorial {
+  id: string
+  company_id: string
+  nota: string
+  escrita_en: string | null
+  archivada_en: string
+}
+
 export type RadarEstado = 'idea' | 'explorando' | 'en progreso' | 'descartado'
 
 export interface RadarItem {

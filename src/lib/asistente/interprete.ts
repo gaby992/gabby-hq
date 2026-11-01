@@ -34,13 +34,14 @@ export type AccionLlm =
   | { tipo: 'nota_tarea'; ref: string; texto: string }
   | { tipo: 'alarma'; texto: string; fecha?: string; hora?: string; en_minutos?: number }
   | { tipo: 'pregunta'; texto: string }
+  | { tipo: 'que_sigue'; empresa?: string; solo_urgentes?: boolean; solo_vencer?: boolean }
   | { tipo: 'desconocido'; texto: string }
 
 export type TipoAccionLlm = AccionLlm['tipo']
 
 const TIPOS: TipoAccionLlm[] = [
   'completar', 'cancelar', 'borrar', 'posponer', 'renombrar', 'cambiar', 'crear',
-  'nota_empresa', 'nota_tarea', 'alarma', 'pregunta', 'desconocido',
+  'nota_empresa', 'nota_tarea', 'alarma', 'pregunta', 'que_sigue', 'desconocido',
 ]
 
 /** A task as the interpreter and the plan see it: no notes. */
@@ -104,7 +105,8 @@ export async function construirContextoInterprete(
 
   // 1. The last alarm, in its own numbering — "el 9" means this.
   if (alarma) {
-    lines.push(`ÚLTIMA ALARMA (${alarma.tipo === 'manana' ? '8:00 am' : '6:00 pm'}, ${alarma.enviada_en.slice(0, 10)}) — sus números:`)
+    const que = alarma.tipo === 'manana' ? 'alarma 8:00 am' : alarma.tipo === 'tarde' ? 'alarma 6:00 pm' : 'respuesta a "¿qué sigue?" (1 = "el primero", 2 = "el segundo"…)'
+    lines.push(`ÚLTIMA LISTA NUMERADA (${que}, ${alarma.enviada_en.slice(0, 16).replace('T', ' ')} UTC) — sus números:`)
     for (const it of alarma.items) {
       const t = byId.get(it.task_id)
       if (!t) {
@@ -174,11 +176,13 @@ export function systemPrompt(today: string): string {
       'Para "en 2 horas"/"en 30 minutos" usa "en_minutos":120 en vez de fecha/hora. Si no dijo hora, NO inventes una: omite "hora". ' +
       'texto = qué recordar, sin la fecha ni la hora. Una alarma NO es una tarea (salvo que diga "y agrégala como tarea": entonces también crear)',
     '- {"tipo":"pregunta","texto":"…"}  → pregunta sobre sus tareas (qué tengo hoy, qué cerré ayer, cómo voy con IM)',
+    '- {"tipo":"que_sigue",("empresa":"…"),("solo_urgentes":true),("solo_vencer":true)}  → "qué sigue", "qué hago primero", "qué es lo más urgente", "por dónde empiezo". ' +
+      '"solo urgentes" → solo_urgentes; "qué vence / qué está por vencer esta semana" → solo_vencer; "qué sigue de IM" → empresa',
     '- {"tipo":"desconocido","texto":"…"}  → saludos, comentarios o algo que no es ninguna de las anteriores',
     '',
     'REF = a qué tarea se refiere: el id entre corchetes del contexto ("#3" = número de la última alarma, "t12" = otra tarea abierta), ' +
       'o "anterior" (la última tarea mencionada), o un trozo del título si de verdad no la ves en la lista. ' +
-      'Un número suelto ("1 terminado", "el 9 cancelar", "pasa el 5") es el número de la última alarma → "#1", "#9", "#5". ' +
+      'Un número suelto ("1 terminado", "el 9 cancelar", "pasa el 5") o un ordinal ("listo el primero", "pasa el segundo") es el número de la ÚLTIMA LISTA NUMERADA → "#1", "#9", "#5", "#1", "#2". ' +
       'Gabby escribe rápido y con errores de dedo ("terminaso" = terminado, "URo" puede ser "Puro"): elige la tarea más parecida. ' +
       'Varias órdenes vienen separadas por "/", comas o saltos de línea: una acción por orden. ' +
       'Una orden con dos cosas ("11 se llama URo, pasar para mañana") son DOS acciones sobre el mismo ref.',
@@ -188,7 +192,10 @@ export function systemPrompt(today: string): string {
       'Horas en 24 h: "3pm" → "15:00", "9" o "9am" → "09:00", "a las 10" → "10:00" (o "22:00" si dice "de la noche"). ' +
       'Si la hora de una alarma ya pasó hoy y no dijo día, es mañana.',
     'PRIORIDAD: "urgente" implica importante. EMPRESA: usa el nombre exacto de la lista EMPRESAS.',
-    'Una frase sin verbo de orden ni número ("llamar a Juan", "revisar pagos PD mañana", "urgente IM mandar propuesta") es "crear".',
+    'Una frase sin verbo de orden ni número ("llamar a Juan", "revisar pagos PD mañana", "urgente IM mandar propuesta") es "crear". ' +
+      'En "crear", "hoy" / "mañana" / un día de la semana al final NO van en el título: van en "fecha". ' +
+      'Si dicta los campos separados por comas ("Agregar un nuevo task, whatsapp, chelito, due date, mañana, compañía"), ' +
+      'las palabras de campo (task, due date, compañía, prioridad) no son el título: titulo = "whatsapp chelito", fecha = mañana, y si dice "compañía" sin nombre, omite empresa.',
     '',
     'Ejemplo. MENSAJE: "1 terminado / 9 cancelar no se va hacer / 11 se llama URo, pasar para mañana / bórrame el 4 / alarma mañana 3pm revisar pagos de PD"',
     `→ {"acciones":[{"tipo":"completar","ref":"#1"},{"tipo":"cancelar","ref":"#9","motivo":"no se va a hacer"},` +
@@ -226,6 +233,14 @@ function hora(v: unknown): string | undefined {
   const mi = Number(m[2])
   if (h > 23 || mi > 59) return undefined
   return `${String(h).padStart(2, '0')}:${m[2]}`
+}
+
+/** "Shift Google Ads y SEO hoy" → title without the day, and the date if none was given. */
+export function sinFechaEnTitulo(titulo: string, fechaDada: string | undefined, today: string = cancunYmd()): { text: string; due_date: string | undefined } {
+  const m = titulo.match(/[\s,]+(hoy|mañana|manana)\s*[.!]?$/i)
+  if (!m) return { text: titulo, due_date: fechaDada }
+  const dia = m[1].toLowerCase() === 'hoy' ? today : addDays(today, 1)
+  return { text: titulo.slice(0, m.index).replace(/[\s,.\-–]+$/, '').trim() || titulo, due_date: fechaDada ?? dia }
 }
 
 // Words that are the order itself, not a reason: "pídelo cancelar", "bórralo".
@@ -317,10 +332,14 @@ export function validarAcciones(raw: unknown): AccionLlm[] {
         const titulo = str(a.titulo) ?? str(a.texto)
         if (titulo) {
           const p = prioridad(a.prioridad)
-          out.push({ tipo, titulo, empresa: str(a.empresa), prioridad: p, fecha: fecha(a.fecha), importante: a.importante === true || p === 'urgente' })
+          const { text, due_date } = sinFechaEnTitulo(titulo, fecha(a.fecha))
+          out.push({ tipo, titulo: text, empresa: str(a.empresa), prioridad: p, fecha: due_date, importante: a.importante === true || p === 'urgente' })
         }
         break
       }
+      case 'que_sigue':
+        out.push({ tipo, empresa: str(a.empresa), solo_urgentes: a.solo_urgentes === true, solo_vencer: a.solo_vencer === true })
+        break
       case 'nota_empresa': {
         const empresa = str(a.empresa)
         const t = str(a.texto)
