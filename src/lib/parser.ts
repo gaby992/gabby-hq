@@ -86,6 +86,9 @@ export type Parsed =
   | { kind: 'organizar' }
   /** Fase 7: "olvida lo anterior" / "empecemos de nuevo" → clears the thread. */
   | { kind: 'olvidar' }
+  /** Fase 7-H: "me da flojera «X»" / "divide X" → 3–5 subtasks; "siguiente paso" → the next one. */
+  | { kind: 'dividir'; termino: string }
+  | { kind: 'siguiente_paso' }
   | { kind: 'que_sigue'; opts: QueSigueOpts }
   /** Fase 4c: the 8:00 / 6:00 pm list, on demand; fase 4d: 'pendientes' + empresa = one company's full list. */
   | { kind: 'lista'; tipo: ListaTipo; empresa?: CompanyRef | null }
@@ -496,6 +499,9 @@ export function parseMensaje(raw: string, companies: CompanyRef[], today: string
   if (/^(?:\/help|\/ayuda|ayuda|help|formato)\b/i.test(lower)) return { kind: 'ayuda', larga: false }
   const n0 = sinAcentos(text.replace(/^[¿?¡!\s]+|[?!.\s]+$/g, ''))
   if (/^(?:olvida(?:te)?\s+(?:de\s+)?(?:lo\s+)?(?:anterior|todo|eso)|empecemos\s+de\s+nuevo|empezamos\s+de\s+nuevo|borron\s+y\s+cuenta\s+nueva|reinicia(?:r)?\s+(?:la\s+)?conversacion)$/.test(n0)) return { kind: 'olvidar' }
+  const div = text.match(/^(?:me\s+da\s+(?:flojera|pereza|hueva)(?:\s+con)?|no\s+s[eé]\s+por\s+d[oó]nde\s+empezar\s+con|div[ií]de(?:me)?|desgl[oó]sa(?:me)?|paso\s+a\s+paso(?:\s+con)?|parte(?:me)?\s+en\s+pasos)\s+(?:la\s+(?:tarea\s+)?(?:de|del)\s+|lo\s+de\s+|la\s+|el\s+)?[«"']?(.+?)[»"']?$/i)
+  if (div) return { kind: 'dividir', termino: tidy(div[1]) }
+  if (/^(?:siguiente|proximo|otro)\s+paso$|^el\s+que\s+sigue$|^paso\s+siguiente$/.test(n0)) return { kind: 'siguiente_paso' }
   if (/^(?:organizame|organiza(?:me)?\s+(?:mis\s+)?(?:pendientes|tareas|dia)|ayudame\s+con\s+(?:mis\s+)?(?:pendientes|tareas)|no\s+se\s+por\s+donde\s+empezar|estoy\s+abrumad[ao]|que\s+hago|ponme\s+en\s+orden|ordename)$/.test(n0)) return { kind: 'organizar' }
   const lista = parseLista(text, companies)
   if (lista) return { kind: 'lista', tipo: lista.tipo, empresa: lista.empresa ?? null }
@@ -573,6 +579,7 @@ export function ayuda(modelo: string): string {
   return [
     '💬 HÁBLAME NORMAL: "el 3 ya está", "pasa el 5 al lunes", "9 cancelar, no se va a hacer", "alarma mañana 9am revisar X" · varias órdenes en un mensaje y te muestro el plan antes de hacerlo · me acuerdo de lo último que hablamos ("sí", "la segunda", "lo mismo para PD") · "olvida lo anterior" limpia',
     '🧭 ORGANÍZAME · "no sé por dónde empezar" · "estoy abrumada" → repasamos tus pendientes uno por uno con botones (Hoy · Mañana · Esta semana · Cancelar · Delegar · Siguiente); "para" sale',
+    '🪜 "me da flojera «X»" · "divide X" → la parto en 3-5 pasos (subtareas) y te digo el primero · "siguiente paso" · 📆 Cuéntame la semana ("hoy…, mañana…, el miércoles…") y la armo por día sin duplicar',
     '🎯 ¿QUÉ SIGUE? · "qué hago primero" · "solo urgentes" · "qué vence esta semana" · "qué sigue de IM" → una tarea para ahora, 3 después, 3 por vencer; luego "listo 1" / "pasa el segundo"',
     '📋 /hoy · "dame la lista" · "todo lo pendiente" → la lista completa de las 8:00, ahora · "cierre" → la de las 6:00 pm · /pendientes IM → solo esa empresa',
     '💳 PAGOS: "pagos de IM" · "qué pagos hay esta semana" (se administran en /settings → Pagos recurrentes)',

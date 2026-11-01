@@ -35,6 +35,8 @@ export type AccionLlm =
   | { tipo: 'crear'; titulo: string; empresa?: string; prioridad?: Priority; fecha?: string; hora?: string; importante?: boolean; calendar?: boolean }
   | { tipo: 'calendar'; ref: string; hora?: string; todo_el_dia?: boolean }
   | { tipo: 'pagos_listar'; empresa?: string; semana?: boolean }
+  | { tipo: 'dividir'; ref: string }
+  | { tipo: 'siguiente_paso'; ref?: string }
   | { tipo: 'nota_empresa'; empresa: string; texto: string; modo: NotaModoLlm }
   | { tipo: 'nota_tarea'; ref: string; texto: string }
   | { tipo: 'alarma'; texto: string; fecha?: string; hora?: string; en_minutos?: number }
@@ -48,7 +50,7 @@ export type TipoAccionLlm = AccionLlm['tipo']
 const TIPOS: TipoAccionLlm[] = [
   'completar', 'cancelar', 'borrar', 'posponer', 'renombrar', 'cambiar', 'crear',
   'nota_empresa', 'nota_tarea', 'alarma', 'pregunta', 'que_sigue', 'lista', 'calendar',
-  'pagos_listar', 'desconocido',
+  'pagos_listar', 'dividir', 'siguiente_paso', 'desconocido',
 ]
 
 /** A task as the interpreter and the plan see it: no notes. */
@@ -205,6 +207,8 @@ export function systemPrompt(today: string, cfg: AsistenteConfig = { nombre_pers
     '- {"tipo":"lista","lista":"manana|tarde|pendientes",("empresa":"…")}  → la LISTA COMPLETA numerada: "dame la lista", "la lista de la mañana", "lista completa", "todo lo pendiente", "mándame el /hoy" → manana; ' +
       '"cierre", "lista de la tarde", "el cierre del día" → tarde; "todo lo pendiente de IM", "qué tengo pendiente en PD", "pendientes de IM" → pendientes + empresa. ' +
       'Esto NO es que_sigue (que_sigue es corto y ordenado; lista es todo)',
+    '- {"tipo":"dividir","ref":REF}  → "me da flojera X", "no sé por dónde empezar con X", "divide X", "paso a paso X": partir una tarea en pasos',
+    '- {"tipo":"siguiente_paso",("ref":REF)}  → "siguiente paso", "el que sigue" (sin ref = la última tarea dividida)',
     '- {"tipo":"desconocido","texto":"…"}  → saludos, comentarios o algo que no es ninguna de las anteriores',
     '',
     'REF = a qué tarea se refiere: el id entre corchetes del contexto ("#3" = número de la última alarma, "t12" = otra tarea abierta), ' +
@@ -213,6 +217,10 @@ export function systemPrompt(today: string, cfg: AsistenteConfig = { nombre_pers
       'Gabby escribe rápido y con errores de dedo ("terminaso" = terminado, "URo" puede ser "Puro"): elige la tarea más parecida. ' +
       'Varias órdenes vienen separadas por "/", comas o saltos de línea: una acción por orden. ' +
       'Una orden con dos cosas ("11 se llama URo, pasar para mañana") son DOS acciones sobre el mismo ref.',
+    'SEMANA: si el mensaje describe VARIOS días ("hoy…, mañana…, el miércoles…, el jueves…"), separa cada cosa mencionada en su propia acción "crear" con la fecha de ESE día ' +
+      '(en orden). "prioridad", "lo importante", "lo más importante", "me voy a concentrar en" → esa tarea con prioridad "urgente" e "importante":true. ' +
+      'Si una cosa mencionada es claramente una tarea que ya está en la lista (mismo tema: "lo de marketing", "Jobescape"), usa "posponer" o "cambiar" con su ref en vez de crear. ' +
+      'Un verbo dentro de la frase ("cancelar Jobescape") que describe la TAREA a hacer ese día sigue siendo crear ("Cancelar Jobescape"), salvo que esa tarea ya exista en la lista.',
     'CONVERSACIÓN: si el mensaje es una respuesta corta a tu último turno ("sí", "dale", "la segunda", "esa no, la otra", "lo mismo para PD", "¿y lo de ayer?", "cambia la hora a las 4"), ' +
       'resuélvelo con la CONVERSACIÓN RECIENTE del contexto: "la segunda" = la 2ª tarea mencionada en tu último mensaje (ahí viene su ref); "esa no, la otra" = la otra tarea mencionada; ' +
       '"lo mismo para PD" = repite la última acción que ella pidió, con empresa PD; "cambia la hora a las 4" = cambiar hora de la última tarea creada o mencionada. ' +
@@ -402,6 +410,12 @@ export function validarAcciones(raw: unknown): AccionLlm[] {
         break
       case 'pagos_listar':
         out.push({ tipo, empresa: str(a.empresa), semana: a.semana === true })
+        break
+      case 'dividir':
+        if (ref) out.push({ tipo, ref })
+        break
+      case 'siguiente_paso':
+        out.push({ tipo, ref })
         break
       case 'nota_empresa': {
         const empresa = str(a.empresa)

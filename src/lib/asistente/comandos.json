@@ -64,7 +64,9 @@
         { "ejemplo": "el 2 es urgente y es de IM", "que": "varios cambios a la misma tarea en una línea" },
         { "ejemplo": "sí · la segunda · esa no, la otra · lo mismo para PD", "que": "el bot recuerda lo último que hablaron (30 min): respuestas cortas funcionan" },
         { "ejemplo": "organízame", "que": "repasa tus pendientes uno por uno con botones (también \"no sé por dónde empezar\", \"estoy abrumada\"); \"para\" sale" },
-        { "ejemplo": "olvida lo anterior", "que": "limpia la conversación y empieza de cero" }
+        { "ejemplo": "olvida lo anterior", "que": "limpia la conversación y empieza de cero" },
+        { "ejemplo": "mañana los correos de Chelsea, el miércoles armar el equipo de marketing y el jueves pasar $500 a WSH", "que": "tu semana en un mensaje: la arma por día, sin duplicar lo que ya existía, y te la muestra para que digas \"así queda\"" },
+        { "ejemplo": "me da flojera armar el equipo de marketing", "que": "la parte en 3-5 pasos (subtareas) y te dice solo el primero; \"siguiente paso\" avanza" }
       ]
     },
     {

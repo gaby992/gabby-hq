@@ -111,6 +111,8 @@ Archivos del asistente dentro del repo:
 | `src/lib/asistente/conversacion.ts` | Fase 7: el hilo (`bot_conversacion`): últimos 10 turnos / 30 min, "olvida lo anterior", sugerencias declinadas |
 | `src/lib/asistente/sugerencias.ts` | Fase 7: la única sugerencia por mensaje, con botones, y qué hace cada botón |
 | `src/lib/asistente/organizar.ts` | Fase 7: el modo "organízame" (cola, botones, resumen) |
+| `src/lib/asistente/similitud.ts` | Fase 7-G: "nunca duplicar" — similitud de títulos y palabras clave |
+| `src/lib/asistente/pasos.ts` | Fase 7-H: dividir una tarea en 3–5 subtareas y "siguiente paso" |
 | `src/app/api/asistente/config/route.ts` | Fase 7: Settings → Asistente (config + costo del mes) |
 | `src/components/AsistenteConfigPanel.tsx` | Fase 7: el panel de Settings → Asistente |
 | `src/lib/asistente/comandos.json` | La guía de uso (fuente única): `docs/comandos.md` y `/ayuda todo` salen de aquí |
@@ -1609,6 +1611,50 @@ costo del mes: turnos por tipo, tokens y el estimado en USD a precio de lista
 de gpt-5-mini. Las sugerencias y "organízame" no usan el modelo: son reglas,
 y no cuestan.
 
+**G) Planificar la semana hablando.** Cuando el mensaje describe varios días
+("hoy…, mañana…, el miércoles…, el jueves…"), el intérprete separa cada cosa
+en su propia tarea con la fecha de ese día. Antes de crear, `buscarParecida()`
+(`similitud.ts`) busca una tarea abierta que sea lo mismo: similitud de título
+≥ 0.6 (Dice sobre bigramas, sin acentos) o una **palabra clave** compartida
+("marketing", "Jobescape", "Chelsea": palabras de 5+ letras que no sean
+genéricas). Si existe, no se duplica: se actualiza (fecha, prioridad, hora) y
+el plan lo dice. "prioridad", "lo importante", "me voy a concentrar en" →
+urgente ★ ese día. El plan se muestra **por día**, no por acción:
+
+```
+Así queda tu semana:
+Mañana (lun 2 nov):
+  ✴️ Correos de Chelsea pendientes · IM (ya existía, la muevo)
+Miércoles (4):
+  ▫️ Marketing Team · DATAVIA (ya existía, la muevo)
+  ▫️ Cancelar Jobescape · Personal
+Jueves (5):
+  ▫️ Pasar $500 de IM a WSH · IM
+💡 Si alguna tiene hora, dímelo ("la de marketing a las 10") y, si quieres, la pongo en calendar.
+[ ✅ Así queda ]  [ ✏️ Corrijo ]
+```
+
+Debajo va **una** sugerencia (qué le falta: empresa u hora), sin botones
+(los botones son los del plan). Al aprobar, las tareas creadas quedan en el
+hilo, así que "la de marketing a las 10", "lo de WSH ponlo en calendar" o
+"sí" aplican sobre ese plan con la memoria de conversación.
+
+**H) Un paso a la vez** (regla 4 del prompt maestro). `me da flojera «X»`,
+`no sé por dónde empezar con «X»`, `divide «X»`, `paso a paso «X»` → busca la
+tarea por título, el modelo propone 3–5 pasos concretos (solo recibe el
+título y la empresa, nunca las notas), se guardan como **subtareas** de esa
+tarea (las mismas que se ven en /tasks) y el bot dice solo el primero:
+`Empieza por: …`. `siguiente paso` marca ese como hecho y dice el que sigue;
+al terminar el último, propone cerrar la tarea. Si ya estaba dividida,
+repite los pasos pendientes sin volver a pedirlos al modelo.
+
+**Prueba obligatoria**: el mensaje de voz de Gabby con su semana, tal cual
+lo dicte ella (el del 1 nov: "mañana los correos de Chelsea y los míos en
+el asistente, eso es prioridad; el miércoles armar el equipo de marketing,
+el zip, y cancelar Jobescape; el jueves pasar 500 de IM a WSH"). Debe salir
+el plan por día de arriba, con «Marketing Team» marcada como existente si
+esa tarea está abierta, y nada duplicado en /tasks después de **Así queda**.
+
 ### 7b. Lo que hay que hacer a mano
 
 1. Supabase → SQL Editor → `sql/2026-11-asistente-fase7.sql` en una query.
@@ -1643,6 +1689,13 @@ Ninguna.
    [Sí] [Elijo].
 8. Settings → Asistente muestra el costo del mes con los turnos de estas
    pruebas.
+9. **La semana por voz** (obligatoria): el audio de Gabby con su semana →
+   plan por día con [Así queda] [Corrijo]; después `la de marketing a las
+   10` → le pone la hora a esa tarea; `lo de WSH ponlo en calendar` → el
+   evento. En /tasks no hay duplicados.
+10. `me da flojera armar el equipo de marketing` → 3–5 pasos y "Empieza
+    por: …"; en /tasks la tarea tiene esas subtareas. `siguiente paso` →
+    marca el primero y dice el segundo.
 
 ### 7e. Qué puede fallar y dónde verlo
 

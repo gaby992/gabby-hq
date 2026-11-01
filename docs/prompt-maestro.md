@@ -79,10 +79,10 @@ que te suelte todo lo que tengo en la cabeza, sin orden. Tú lo organizas.
 
 | Regla | En el bot de Telegram |
 | --- | --- |
-| 1 Captura | Sí: texto o voz, varias en un mensaje (plan con botones), pregunta una cosa con botones |
+| 1 Captura | Sí: texto o voz, varias en un mensaje (plan con botones), la semana entera agrupada por día sin duplicar, pregunta una cosa con botones |
 | 2 Clasifica | Parcial: urgente / normal / cuando pueda + ★ importante, y por **empresa** (no por área trabajo/casa/familia…) |
 | 3 Qué sigue | Sí: "¿qué sigue?" (1 + 3 + 3); "/hoy" es la lista completa, agrupada por empresa |
-| 4 Un paso a la vez | No todavía |
+| 4 Un paso a la vez | Sí: "me da flojera «X»" / "divide «X»" → 3–5 subtareas y el primer paso; "siguiente paso" |
 | 5 Actualiza sin deletrear | Sí: memoria de 30 min, "la segunda", cancelar con motivo, borrar con confirmación |
 | 6 Propón | Sí: una sugerencia por mensaje, "luego" se respeta |
 | 7 Organízame | Sí |

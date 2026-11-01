@@ -20,6 +20,9 @@ import { confirmacionAlarma, crearRecordatorio, instanteDe } from './recordatori
 import { confirmacion, guardarTarea } from './tareas'
 import { agregarACalendar, cuandoDe } from '@/lib/google/sync'
 import { textoListaPagos } from './pagos'
+import { dividirTarea, siguientePaso } from './pasos'
+import { buscarParecida } from './similitud'
+import { SIMBOLO } from './alarmas'
 
 export interface TareaRef {
   id: string
@@ -40,6 +43,8 @@ export type AccionResuelta = AccionLlm & {
   empresa_ref?: EmpresaRef
   /** alarma: when to fire (ISO). Missing when no hour was given. */
   dispara_en?: string
+  /** crear: an open task that is the same thing (fase 7-G) — update it instead of creating. */
+  existente?: TareaRef & { motivo: string }
   error?: string
 }
 
@@ -97,7 +102,7 @@ export function resolverAcciones(acciones: AccionLlm[], ctx: ContextoInterprete,
   const out: AccionResuelta[] = []
   for (const a of acciones) {
     const r: AccionResuelta = { ...a }
-    if ('ref' in a) {
+    if ('ref' in a && a.ref) {
       const res = resolverRef(a.ref, ctx, anterior)
       if ('tarea' in res) {
         r.tarea = res.tarea
@@ -120,6 +125,19 @@ export function resolverAcciones(acciones: AccionLlm[], ctx: ContextoInterprete,
       const cuando = instanteDe(a)
       if (cuando) r.dispara_en = cuando
     }
+    if (a.tipo === 'crear') {
+      // Never duplicate: a similar open task becomes an update of that task.
+      const p = buscarParecida(a.titulo, ctx.abiertas)
+      if (p) {
+        r.existente = { ...lite(p.tarea), motivo: p.motivo }
+        r.tarea = lite(p.tarea)
+        anterior = r.tarea
+      }
+    }
+    if (a.tipo === 'siguiente_paso' && !a.ref) {
+      if (anterior) r.tarea = anterior
+      else r.error = 'no sé de qué tarea: dime "siguiente paso de X"'
+    }
     out.push(r)
   }
   return out
@@ -130,7 +148,7 @@ export function resolverAcciones(acciones: AccionLlm[], ctx: ContextoInterprete,
 const ICONO: Record<AccionLlm['tipo'], string> = {
   completar: '✅', cancelar: '🗑', borrar: '❌', posponer: '➡️', renombrar: '✏️', cambiar: '✏️', crear: '➕',
   nota_empresa: '📝', nota_tarea: '📎', alarma: '⏰', pregunta: '❓', que_sigue: '🎯', lista: '📋', calendar: '📅',
-  pagos_listar: '💳', desconocido: '🤷',
+  pagos_listar: '💳', dividir: '🪜', siguiente_paso: '🪜', desconocido: '🤷',
 }
 
 function fechaDicha(ymd: string, today: string): string {
@@ -160,6 +178,10 @@ function frase(a: AccionResuelta, today: string, conTarea: boolean): string {
     case 'renombrar': return `Renombrar${tt} → «${a.titulo}»`
     case 'cambiar': return `Cambiar${tt} → ${[describirCambios(a), a.calendar ? '📅 calendar' : ''].filter(Boolean).join(' · ')}`
     case 'crear': {
+      if (a.existente) {
+        const cambios = [a.fecha ? (a.hora ? `${formatVenceEs(a.fecha)} ${formatHoraEs(a.hora)}` : fechaDicha(a.fecha, today).replace(/^a /, '')) : null, a.prioridad ? PRIORITY_LABELS[a.prioridad] + (a.importante ? ' ★' : '') : null].filter(Boolean)
+        return `«${corto(a.existente.text)}» ya existía → ${cambios.join(' · ') || 'sin cambios'}`
+      }
       const parts = [a.empresa_ref?.name.trim() ?? (a.empresa ? `empresa «${a.empresa}»?` : 'sin empresa'), PRIORITY_LABELS[a.prioridad ?? 'normal'] + (a.importante ? ' ★' : '')]
       if (a.fecha) parts.push(a.hora ? `${formatVenceEs(a.fecha)} ${formatHoraEs(a.hora)}` : `vence ${formatVenceEs(a.fecha)}`)
       if (a.calendar) parts.push(a.fecha ? `📅 calendar${a.hora ? '' : ' (todo el día)'}` : '📅 calendar (sin fecha: no se podrá)')
@@ -173,6 +195,8 @@ function frase(a: AccionResuelta, today: string, conTarea: boolean): string {
     case 'lista': return a.lista === 'tarde' ? 'Mandar el cierre del día' : a.lista === 'pendientes' ? `Mandar todo lo pendiente de ${a.empresa_ref?.name.trim() ?? a.empresa ?? '?'}` : 'Mandar la lista completa de hoy'
     case 'calendar': return `Poner en calendar${tt}${a.hora ? ` a las ${formatHoraEs(a.hora)}` : a.todo_el_dia ? ' (todo el día)' : ''}`
     case 'pagos_listar': return `Listar pagos${a.empresa_ref ? ` de ${a.empresa_ref.name.trim()}` : ''}${a.semana ? ' de esta semana' : ''}`
+    case 'dividir': return `Dividir en pasos${tt}`
+    case 'siguiente_paso': return `Siguiente paso${tt}`
     case 'desconocido': return `No entendí «${corto(a.texto, 60)}»`
   }
 }
@@ -180,6 +204,69 @@ function frase(a: AccionResuelta, today: string, conTarea: boolean): string {
 /** True when an action adjacent to another on the same task reads well joined with " y ". */
 function enlazable(a: AccionResuelta): boolean {
   return !!a.tarea && !a.error && ['posponer', 'renombrar', 'cambiar', 'completar', 'cancelar', 'borrar', 'nota_tarea', 'calendar'].includes(a.tipo)
+}
+
+function fechaDeAccion(a: AccionResuelta): string | null | undefined {
+  if (a.tipo === 'crear' || a.tipo === 'posponer' || a.tipo === 'cambiar') return a.fecha ?? null
+  return undefined
+}
+
+/** Fase 7-G: a message that laid out several days — 2+ distinct dates across its items. */
+export function esPlanSemana(acciones: AccionResuelta[]): boolean {
+  const fechas = new Set(acciones.map(fechaDeAccion).filter((f): f is string => !!f))
+  return fechas.size >= 2 && acciones.filter((a) => fechaDeAccion(a) !== undefined && !a.error).length >= 2
+}
+
+const DIAS_LARGOS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
+
+function cabeceraDia(ymd: string, today: string): string {
+  const [y, m, d] = ymd.split('-').map(Number)
+  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay()
+  const corto = formatVenceEs(ymd)
+  if (ymd === today) return `Hoy (${corto})`
+  if (ymd === addDays(today, 1)) return `Mañana (${corto})`
+  return `${DIAS_LARGOS[dow]} (${d})`
+}
+
+function simboloPlan(a: AccionResuelta): string {
+  const pr = a.tipo === 'crear' || a.tipo === 'cambiar' ? a.prioridad : undefined
+  const imp = a.tipo === 'crear' ? a.importante : false
+  if (pr === 'urgente' || imp) return SIMBOLO.estrella
+  if (pr === 'cuando') return SIMBOLO.cuando
+  return SIMBOLO.normal
+}
+
+/**
+ * The week, grouped by day instead of by action:
+ *   Mañana (lun 2): ✴️ Correos de Chelsea · IM
+ *   Miércoles (4):  ▫️ Armar equipo de marketing · DATAVIA
+ * An item that matched an existing task says so ("ya existía").
+ */
+export function renderPlanSemana(acciones: AccionResuelta[], today: string = cancunYmd()): string {
+  const porDia = new Map<string, string[]>()
+  const otros: string[] = []
+  for (const a of acciones) {
+    const f = fechaDeAccion(a)
+    const titulo = a.tipo === 'crear' ? (a.existente ? a.existente.text : a.titulo) : a.tarea?.text ?? '?'
+    const empresa = a.tipo === 'crear' ? (a.existente?.company?.name ?? a.empresa_ref?.name.trim() ?? (a.empresa ? `${a.empresa}?` : 'sin empresa')) : a.tarea?.company?.name ?? 'sin empresa'
+    const hora = (a.tipo === 'crear' || a.tipo === 'cambiar') && a.hora ? ` · ${formatHoraEs(a.hora)}` : ''
+    const nota = a.error ? ` ⚠️ ${a.error}` : a.tipo === 'crear' && a.existente ? ' (ya existía, la muevo)' : a.tipo === 'posponer' || a.tipo === 'cambiar' ? ' (la muevo)' : ''
+    const linea = `${simboloPlan(a)} ${corto(titulo, 50)} · ${empresa}${hora}${nota}`
+    if (f === undefined) otros.push(`${ICONO[a.tipo]} ${frase(a, today, true)}`)
+    else porDia.set(f ?? '', [...(porDia.get(f ?? '') ?? []), linea])
+  }
+  const dias = Array.from(porDia.keys()).sort((x, y) => (x === '' ? 1 : y === '' ? -1 : x.localeCompare(y)))
+  const bloques = dias.map((f) => `${f ? cabeceraDia(f, today) : 'Sin fecha'}:\n${porDia.get(f)!.map((l) => `  ${l}`).join('\n')}`)
+  return ['Así queda tu semana:', ...bloques, ...(otros.length > 0 ? ['También:', ...otros.map((o) => `  ${o}`)] : [])].join('\n')
+}
+
+/** The ONE line under a week plan: what is missing, if anything. */
+export function sugerenciaPlanSemana(acciones: AccionResuelta[]): string | null {
+  const nuevas = acciones.filter((a): a is Extract<AccionResuelta, { tipo: 'crear' }> => a.tipo === 'crear' && !a.existente && !a.error)
+  const sinEmpresa = nuevas.find((a) => !a.empresa_ref)
+  if (sinEmpresa) return `💡 A «${corto(sinEmpresa.titulo, 40)}» le falta empresa: dime "${corto(sinEmpresa.titulo, 25)} es de IM" y la apunto.`
+  if (nuevas.length > 0 && nuevas.every((a) => !a.hora)) return '💡 Si alguna tiene hora, dímelo ("la de marketing a las 10") y, si quieres, la pongo en calendar.'
+  return null
 }
 
 /**
@@ -278,13 +365,32 @@ export async function ejecutarUna(chatId: number, a: AccionResuelta): Promise<st
       return ejecutarAccion({ accion: 'editar', cambios }, [tareaDe(a).id])
     }
     case 'crear': {
+      if (a.existente) {
+        // Fase 7-G: the same thing already exists — move/raise it instead of duplicating.
+        const cambios: Cambios = {}
+        if (a.fecha) cambios.due_date = a.fecha
+        if (a.hora) cambios.due_time = a.hora
+        if (a.prioridad) {
+          cambios.priority = a.prioridad
+          if (a.prioridad === 'urgente' || a.importante) cambios.importante = true
+        }
+        if (a.calendar) cambios.calendar = true
+        const r = Object.keys(cambios).length > 0 ? await ejecutarAccion({ accion: 'editar', cambios }, [a.existente.id]) : `«${a.existente.text}» ya existía; sin cambios.`
+        return `«${a.existente.text}» ya existía: ${r.replace(/^✏️ /, '')}`
+      }
       const t = tareaParsedDe(a)
       const g = await guardarTarea(t)
+      // So the thread can refer to it ("la de marketing a las 10").
+      a.tarea = { id: g.id, text: t.text, company: a.empresa_ref ? { name: a.empresa_ref.name } : null }
       // Inside an approved plan an event without an hour is all-day (the plan said so).
       const sync = g.faltaHora ? await agregarACalendar(g.id, { todoElDia: true }) : g.sync
       const linea = confirmacion(t, sync)
       return sync?.confirmacion ? `${linea}\n${sync.confirmacion}` : linea
     }
+    case 'dividir':
+      return dividirTarea(tareaDe(a).id)
+    case 'siguiente_paso':
+      return siguientePaso(tareaDe(a).id)
     case 'nota_empresa': {
       if (!a.empresa_ref) return `⚠️ No conozco la empresa «${a.empresa}»`
       return ejecutarNota({ company_id: a.empresa_ref.id, company_name: a.empresa_ref.name.trim(), modo: a.modo, texto: a.texto })

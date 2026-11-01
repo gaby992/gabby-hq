@@ -13,13 +13,18 @@ import { interpretar, registrarInterpretacion, type Interpretacion } from '@/lib
 import {
   ejecutarPlan,
   ejecutarUna,
+  esPlanSemana,
   necesitaConfirmacion,
   renderPlan,
+  renderPlanSemana,
   resolverAcciones,
   resumenParaLog,
+  sugerenciaPlanSemana,
   tareaParsedDe,
   type AccionResuelta,
 } from '@/lib/asistente/plan'
+import { dividirTarea, siguientePaso } from '@/lib/asistente/pasos'
+import { tareasRecientes } from '@/lib/asistente/conversacion'
 import {
   HORAS_BOTONES,
   confirmacionAlarma,
@@ -235,6 +240,16 @@ async function handleText(chatId: number, text: string, prefix: string | null) {
   const companies = await cargarEmpresas()
   const parsed = parseMensaje(text, companies, cancunYmd())
   switch (parsed.kind) {
+    case 'dividir': {
+      // Fase 7-H: by title, then 3–5 subtasks and the first step.
+      await ponerPasos(chatId, parsed.termino, prefix)
+      return
+    }
+    case 'siguiente_paso': {
+      const ultima = (await tareasRecientes(chatId))[0]
+      await reply(chatId, joinLines(prefix, ultima ? await siguientePaso(ultima.id) : 'No sé de qué tarea: dime "siguiente paso de X".'))
+      return
+    }
     case 'olvidar':
       await limpiarHilo(chatId)
       await reply(chatId, joinLines(prefix, 'Listo, empezamos de cero.'))
@@ -397,6 +412,23 @@ async function preguntarQueEs(chatId: number, text: string, prefix: string | nul
   await reply(chatId, joinLines(prefix, `No pillé eso, ${cfg.nombre_persona}. ¿Es una tarea nueva, una orden sobre una tarea, o una alarma?`), botonesAclarar(nonce))
 }
 
+/** "divide X": the open task whose title contains X, then its steps. */
+async function ponerPasos(chatId: number, termino: string, prefix: string | null) {
+  const { data, error } = await dbCliente().from('tasks').select(COLS_SIN_NOTAS).eq('done', false)
+  if (error) throw new Error(`Supabase tasks: ${error.message}`)
+  const hits = buscarEnAbiertas((data as unknown as TaskRow[]) ?? [], termino)
+  if (hits.length === 0) {
+    await reply(chatId, joinLines(prefix, `No encontré ninguna tarea abierta con «${termino}». ¿La creo? Dímela como tarea y luego "divide …".`))
+    return
+  }
+  if (hits.length > 1) {
+    await reply(chatId, joinLines(prefix, `«${termino}» coincide con ${hits.length} tareas: ${hits.slice(0, 5).map((t) => `«${t.text}»`).join(', ')}. Dime algo más específico.`))
+    return
+  }
+  await guardarTurno(chatId, 'assistant', `[dividir] ${hits[0].text}`, { tareas: [{ id: hits[0].id, text: hits[0].text }] })
+  await reply(chatId, joinLines(prefix, await dividirTarea(hits[0].id)))
+}
+
 /** The task id behind "listo 3": number 3 of the last numbered list. */
 async function idDeNumero(n: string): Promise<string | null> {
   const { data } = await dbCliente().from('bot_alarmas').select('items').order('enviada_en', { ascending: false }).limit(1).maybeSingle<{ items: { n: number; task_id: string }[] }>()
@@ -421,10 +453,10 @@ async function registrar(chatId: number, text: string, r: Interpretacion, accion
   })
 }
 
-function botonesPlan(nonce: string) {
+function botonesPlan(nonce: string, semana = false) {
   return inlineKeyboard([[
-    { text: '✅ Hacer todo', callback_data: `k:${nonce}:1` },
-    { text: '✏️ No, corrijo', callback_data: `k:${nonce}:0` },
+    { text: semana ? '✅ Así queda' : '✅ Hacer todo', callback_data: `k:${nonce}:1` },
+    { text: semana ? '✏️ Corrijo' : '✏️ No, corrijo', callback_data: `k:${nonce}:0` },
   ]])
 }
 
@@ -472,9 +504,13 @@ async function handleLibre(chatId: number, text: string, parsed: Parsed, prefix:
   // ── Several actions, or anything that cancels: show the plan, ask OK ──
   if (necesitaConfirmacion(acciones)) {
     const nonce = await borradorConNonce(chatId, text, { tipo: 'plan', acciones })
+    // Fase 7-G: several days → grouped by day, with ONE suggestion line under it.
+    const semana = esPlanSemana(acciones)
+    const cuerpo = semana ? renderPlanSemana(acciones) : renderPlan(acciones)
+    const sugerencia = semana && (await cargarConfig()).sugerencias ? sugerenciaPlanSemana(acciones) : null
     // Fase 7-B: a long voice note closes with a door open for what was missed.
     const cierre = prefix && acciones.length >= 3 ? '¿Algo que se me escapó?' : null
-    await reply(chatId, joinLines(prefix, renderPlan(acciones), cierre), botonesPlan(nonce))
+    await reply(chatId, joinLines(prefix, cuerpo, sugerencia, cierre), botonesPlan(nonce, semana))
     return
   }
 
