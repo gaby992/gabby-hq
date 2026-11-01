@@ -9,7 +9,7 @@ import { createServerClient } from '@/lib/supabase-server'
 import type { PagoRecurrente } from '@/types'
 import { actualizarEventoPago, borrarEvento, crearEventoPago, type PagoEvento } from '@/lib/google/calendar'
 import { googleConfigurado } from '@/lib/google/oauth'
-import { cancunYmd } from './cancun'
+import { addDays, cancunYmd, formatVenceEs } from './cancun'
 import { normalizar } from './acciones'
 
 export interface PagoConEmpresa extends PagoRecurrente {
@@ -160,9 +160,28 @@ export async function cambiarPago(id: string, cambios: { dia_del_mes?: number; n
   return aviso ? `${linea}\n${aviso}` : linea
 }
 
-/** "pagos de IM" / "pagos" → the list, numbered. */
-export async function textoListaPagos(companyId?: string | null, companyName?: string | null): Promise<string> {
-  const rows = await listarPagos(companyId)
-  if (rows.length === 0) return `No hay pagos recurrentes${companyName ? ` de ${companyName}` : ''}. Agrega uno: "pago IM Vercel el 15 de cada mes".`
-  return [`💳 Pagos recurrentes${companyName ? ` de ${companyName}` : ''} (${rows.length}):`, ...rows.map((p, i) => `${i + 1}. ${describirPago(p).replace(/^💳 /, '')}`)].join('\n')
+/**
+ * "pagos de IM" / "pagos" → the list, numbered, with each one's next date.
+ * `semana` keeps only the ones falling between today and Sunday (asked on a
+ * Sunday: the week that starts tomorrow). Read-only: payments are managed in
+ * /settings → Pagos recurrentes.
+ */
+export async function textoListaPagos(companyId?: string | null, companyName?: string | null, opts: { semana?: boolean } = {}): Promise<string> {
+  const today = cancunYmd()
+  const dow = new Date(`${today}T12:00:00Z`).getUTCDay()
+  const domingo = addDays(today, (7 - dow) % 7 || 7)
+  const de = companyName ? ` de ${companyName}` : ''
+  let rows = (await listarPagos(companyId)).map((p) => ({ p, fecha: proximaFecha(p.dia_del_mes, today) }))
+  if (opts.semana) rows = rows.filter((r) => r.fecha <= domingo).sort((a, b) => a.fecha.localeCompare(b.fecha))
+  if (rows.length === 0) {
+    return opts.semana
+      ? `💳 Ningún pago${de} vence esta semana (hasta el ${formatVenceEs(domingo)}).`
+      : `No hay pagos recurrentes${de}. Se agregan en GabbyHQ → Settings → Pagos recurrentes.`
+  }
+  const titulo = opts.semana ? `💳 Pagos${de} esta semana (${rows.length}):` : `💳 Pagos recurrentes${de} (${rows.length}):`
+  return [
+    titulo,
+    ...rows.map(({ p, fecha }, i) => `${i + 1}. ${describirPago(p).replace(/^💳 /, '')} · próximo ${formatVenceEs(fecha)}`),
+    'Se administran en GabbyHQ → Settings → Pagos recurrentes.',
+  ].join('\n')
 }

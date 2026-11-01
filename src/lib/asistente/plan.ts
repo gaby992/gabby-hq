@@ -19,7 +19,7 @@ import { responderQueSigue } from './que-sigue'
 import { confirmacionAlarma, crearRecordatorio, instanteDe } from './recordatorios'
 import { confirmacion, guardarTarea } from './tareas'
 import { agregarACalendar, cuandoDe } from '@/lib/google/sync'
-import { buscarPago, cambiarPago, crearPago, quitarPago, textoListaPagos } from './pagos'
+import { textoListaPagos } from './pagos'
 
 export interface TareaRef {
   id: string
@@ -109,12 +109,11 @@ export function resolverAcciones(acciones: AccionLlm[], ctx: ContextoInterprete,
         r.error = res.error
       }
     }
-    if ((a.tipo === 'cambiar' || a.tipo === 'crear' || a.tipo === 'nota_empresa' || a.tipo === 'pago_crear' || a.tipo === 'pagos_listar') && a.empresa) {
+    if ((a.tipo === 'cambiar' || a.tipo === 'crear' || a.tipo === 'nota_empresa' || a.tipo === 'pagos_listar') && a.empresa) {
       const e = resolverEmpresa(a.empresa, companies)
       if (e) r.empresa_ref = e
       else if (a.tipo !== 'crear') r.error = r.error ?? `no conozco la empresa «${a.empresa}»`
     }
-    if (a.tipo === 'pago_crear' && !a.empresa) r.error = '¿de qué empresa es el pago? ("pago IM Vercel el 15")'
     if (a.tipo === 'cambiar' && !a.prioridad && !a.fecha && !a.empresa && !a.hora && !a.calendar) r.error = r.error ?? 'no dijiste qué cambiar'
     if (a.tipo === 'alarma') {
       const cuando = instanteDe(a)
@@ -130,7 +129,7 @@ export function resolverAcciones(acciones: AccionLlm[], ctx: ContextoInterprete,
 const ICONO: Record<AccionLlm['tipo'], string> = {
   completar: '✅', cancelar: '🗑', borrar: '❌', posponer: '➡️', renombrar: '✏️', cambiar: '✏️', crear: '➕',
   nota_empresa: '📝', nota_tarea: '📎', alarma: '⏰', pregunta: '❓', que_sigue: '🎯', lista: '📋', calendar: '📅',
-  pago_crear: '💳', pagos_listar: '💳', pago_quitar: '🗑', pago_cambiar: '✏️', desconocido: '🤷',
+  pagos_listar: '💳', desconocido: '🤷',
 }
 
 function fechaDicha(ymd: string, today: string): string {
@@ -172,10 +171,7 @@ function frase(a: AccionResuelta, today: string, conTarea: boolean): string {
     case 'que_sigue': return `Qué sigue${a.empresa ? ` de ${a.empresa}` : ''}${a.solo_urgentes ? ' (solo urgentes)' : ''}${a.solo_vencer ? ' (por vencer)' : ''}`
     case 'lista': return a.lista === 'tarde' ? 'Mandar el cierre del día' : 'Mandar la lista completa de hoy'
     case 'calendar': return `Poner en calendar${tt}${a.hora ? ` a las ${formatHoraEs(a.hora)}` : a.todo_el_dia ? ' (todo el día)' : ''}`
-    case 'pago_crear': return `Pago recurrente ${a.empresa_ref?.name.trim() ?? a.empresa ?? '?'} · ${a.nombre} · día ${a.dia}${a.monto ? ` · ${a.monto}` : ''}`
-    case 'pagos_listar': return `Listar pagos${a.empresa_ref ? ` de ${a.empresa_ref.name.trim()}` : ''}`
-    case 'pago_quitar': return `Quitar el pago «${a.nombre}»`
-    case 'pago_cambiar': return `Cambiar el pago «${a.nombre}»${a.dia ? ` al día ${a.dia}` : ''}${a.monto ? ` · ${a.monto}` : ''}`
+    case 'pagos_listar': return `Listar pagos${a.empresa_ref ? ` de ${a.empresa_ref.name.trim()}` : ''}${a.semana ? ' de esta semana' : ''}`
     case 'desconocido': return `No entendí «${corto(a.texto, 60)}»`
   }
 }
@@ -313,19 +309,8 @@ export async function ejecutarUna(chatId: number, a: AccionResuelta): Promise<st
       const r = await agregarACalendar(tareaDe(a).id, { hora: a.hora ?? null, todoElDia: !a.hora })
       return r.confirmacion ?? r.aviso ?? '📅 sin cambios'
     }
-    case 'pago_crear':
-      return crearPago({ company_id: a.empresa_ref!.id, nombre: a.nombre, dia_del_mes: a.dia, monto_texto: a.monto ?? null })
     case 'pagos_listar':
-      return textoListaPagos(a.empresa_ref?.id ?? null, a.empresa_ref?.name.trim() ?? null)
-    case 'pago_quitar': {
-      const b = await buscarPago(a.nombre)
-      return b.pago ? quitarPago(b.pago.id) : b.error!
-    }
-    case 'pago_cambiar': {
-      const b = await buscarPago(a.nombre)
-      if (!b.pago) return b.error!
-      return cambiarPago(b.pago.id, { dia_del_mes: a.dia, monto_texto: a.monto })
-    }
+      return textoListaPagos(a.empresa_ref?.id ?? null, a.empresa_ref?.name.trim() ?? null, { semana: a.semana === true })
     case 'desconocido':
       return `🤷 No entendí «${corto(a.texto, 60)}»`
   }

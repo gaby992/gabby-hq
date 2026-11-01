@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Company, Priority } from '@/types'
 import { supabase } from '@/lib/supabase'
+import { toggleCalendar } from '@/lib/calendar-client'
 import ImportanteCheckbox from './ImportanteCheckbox'
 
 interface Props {
@@ -24,6 +25,10 @@ export default function AddTaskForm({ companies, onAdded, onOpenChange }: Props)
   const [priority, setPriority] = useState<Priority>('normal')
   const [importante, setImportante] = useState(false)
   const [dueDate, setDueDate] = useState('')
+  // Fase 5-D: hour + "add to Calendar" at creation. The event is created by the server.
+  const [dueTime, setDueTime] = useState('')
+  const [calendar, setCalendar] = useState(false)
+  const [calMsg, setCalMsg] = useState<string | null>(null)
   const [startDate, setStartDate] = useState('')
   const [notes, setNotes] = useState('')
   const [linkUrl, setLinkUrl] = useState('')
@@ -44,18 +49,23 @@ export default function AddTaskForm({ companies, onAdded, onOpenChange }: Props)
     if (!title.trim()) return
     setSaving(true)
     setError(null)
-    const { error: err } = await supabase.from('tasks').insert({
-      text: title.trim(),
-      company_id: companyId || null,
-      priority,
-      importante,
-      due_date: dueDate || null,
-      start_date: startDate || null,
-      notes: notes.trim() || null,
-      link_url: linkUrl.trim() || null,
-      link_label: linkLabel.trim() || null,
-      done: false,
-    })
+    const { data: creada, error: err } = await supabase
+      .from('tasks')
+      .insert({
+        text: title.trim(),
+        company_id: companyId || null,
+        priority,
+        importante,
+        due_date: dueDate || null,
+        due_time: dueDate && dueTime ? dueTime : null,
+        start_date: startDate || null,
+        notes: notes.trim() || null,
+        link_url: linkUrl.trim() || null,
+        link_label: linkLabel.trim() || null,
+        done: false,
+      })
+      .select('id')
+      .single<{ id: string }>()
     // Surface failures instead of clearing the form on a silent error — a
     // missing column or an RLS rule would otherwise just look like "nothing
     // saved".
@@ -64,7 +74,14 @@ export default function AddTaskForm({ companies, onAdded, onOpenChange }: Props)
       setError(err.message)
       return
     }
+    setCalMsg(null)
+    if (calendar && creada?.id) {
+      const r = await toggleCalendar(creada.id, false, !dueTime)
+      setCalMsg(r.mensaje)
+    }
     setTitle('')
+    setDueTime('')
+    setCalendar(false)
     setCompanyId('')
     setPriority('normal')
     setImportante(false)
@@ -139,6 +156,23 @@ export default function AddTaskForm({ companies, onAdded, onOpenChange }: Props)
         </label>
 
         <label className="flex flex-col gap-0.5">
+          <span className="text-[10px] text-[#555555] uppercase tracking-wide">Hora</span>
+          <input
+            type="time"
+            value={dueTime}
+            onChange={(e) => setDueTime(e.target.value)}
+            disabled={!dueDate}
+            title={dueDate ? '' : 'Pon una fecha primero'}
+            className="text-xs border border-[#2a2a2a] rounded px-2 py-1.5 text-[#e8e8e8] focus:outline-none focus:border-[#7F77DD] bg-[#1c1c1c] disabled:opacity-40"
+          />
+        </label>
+
+        <label className={`flex items-center gap-1.5 text-xs self-end py-1.5 ${dueDate ? 'text-[#7F77DD] cursor-pointer' : 'text-[#555555]'}`} title={dueDate ? 'Crea también el evento en Google Calendar' : 'Pon una fecha primero'}>
+          <input type="checkbox" checked={calendar} disabled={!dueDate} onChange={(e) => setCalendar(e.target.checked)} className="accent-[#7F77DD]" />
+          📅 Calendar
+        </label>
+
+        <label className="flex flex-col gap-0.5">
           <span className="text-[10px] text-[#555555] uppercase tracking-wide">Start</span>
           <input
             type="date"
@@ -183,6 +217,7 @@ export default function AddTaskForm({ companies, onAdded, onOpenChange }: Props)
       </div>
 
       {error && <p className="text-xs text-red-400">{error}</p>}
+      {calMsg && <p className="text-xs text-[#888888]">{calMsg}</p>}
 
       <div className="flex gap-2 pt-1">
         <button

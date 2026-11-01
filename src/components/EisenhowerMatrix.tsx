@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { Task, Company, NotaEmpresa, RadarItem, COMPANY_COLORS } from '@/types'
 import { supabase } from '@/lib/supabase'
 import { relativeDaysEs } from '@/lib/dates'
+import { syncCalendar } from '@/lib/calendar-client'
 import CompanyBadge from './CompanyBadge'
 import DueDateLabel from './DueDateLabel'
 import ImportantBadge from './ImportantBadge'
@@ -154,6 +155,8 @@ export default function EisenhowerMatrix({
   async function completeTask(task: Task) {
     setCompleting((prev) => new Set(prev).add(task.id))
     await supabase.from('tasks').update({ done: true }).eq('id', task.id)
+    // Fase 5-D: its Calendar event (if any) goes too.
+    await syncCalendar(task)
     // The parent refetch drops the task from `tasks`, which re-runs every
     // quadrant above — that's the "se recalcula todo".
     onUpdate()

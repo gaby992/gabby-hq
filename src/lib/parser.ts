@@ -84,11 +84,10 @@ export type Parsed =
   | { kind: 'lista'; tipo: ListaTipo }
   /** Fase 5-B: "pon en calendar la de TOTT" → the open task whose title contains `termino`. */
   | { kind: 'calendar'; termino: string }
-  /** Fase 5-C: recurring payments. */
-  | { kind: 'pagos'; empresa: CompanyRef | null }
-  | { kind: 'pago_quitar'; termino: string }
-  | { kind: 'pago_cambiar'; termino: string; dia: number }
-  | { kind: 'pago'; empresa: CompanyRef | null; nombre: string; dia: number; monto: string | null }
+  /** Fase 5-C: recurring payments — the bot only LISTS them (they are managed in /settings). */
+  | { kind: 'pagos'; empresa: CompanyRef | null; semana: boolean }
+  /** "pago IM Vercel el 15" / "quita el pago …": managed in /settings only. */
+  | { kind: 'pagos_web' }
   | { kind: 'alarmas' }
   | { kind: 'quitar_alarma'; arg: string }
   | { kind: 'pregunta'; texto: string }
@@ -392,38 +391,31 @@ export function extraerCalendar(text: string): { calendar: boolean; text: string
   return { calendar: true, text: text.replace(m[0], ' ') }
 }
 
-// Fase 5-C: payments.
-//   pago IM Vercel el 15 de cada mes [· $20] · pagos de IM · pagos ·
-//   quita el pago Vercel · cambia el pago Vercel al 20
+// Fase 5-C: payments, read-only from the bot:
+//   pagos · pagos de IM · qué pagos hay esta semana · qué pagos vencen esta semana de PD
 function findCompany(name: string, companies: CompanyRef[]): CompanyRef | null {
   const n = sinAcentos(name.trim())
   return companies.find((c) => sinAcentos(c.name.trim()) === n) ?? null
 }
 function parsePagos(text: string, companies: CompanyRef[]): Parsed | null {
-  const t = text.replace(/[.!?]+$/, '').trim()
-  const n = sinAcentos(t)
-  let m = n.match(/^(?:mis\s+)?pagos(?:\s+(?:recurrentes|mensuales))?(?:\s+de\s+(.+))?$/)
+  const n = sinAcentos(text.replace(/^[¿?¡!\s]+|[?!.\s]+$/g, '').trim())
+  // Creating, changing or deleting a payment is web-only: say so instead of
+  // letting "pago IM Vercel el 15" become a task.
+  if (/^(?:(?:agrega|agregar|crea|crear|nuevo|pon|ponme)\s+(?:el\s+|un\s+)?pago\b|pago\s+\S|(?:quita|quitar|borra|borrar|elimina|cancela|cambia|cambiar|mueve|pasa)\s+(?:el\s+)?pago\b)/.test(n)) {
+    return { kind: 'pagos_web' }
+  }
+  let m = n.match(/^(?:que|cuales)\s+pagos\s+(?:hay|tengo|vencen|tocan|caen|se\s+vencen)(?:\s+(?:esta|en\s+la)\s+semana)?(?:\s+de\s+(.+?))?(?:\s+(?:esta|en\s+la)\s+semana)?$/)
+    ?? n.match(/^(?:mis\s+)?pagos\s+(?:de\s+)?(?:esta|la)\s+semana(?:\s+de\s+(.+))?$/)
   if (m) {
     const empresa = m[1] ? findCompany(m[1], companies) : null
     if (m[1] && !empresa) return null
-    return { kind: 'pagos', empresa }
+    return { kind: 'pagos', empresa, semana: /semana/.test(n) }
   }
-  m = t.match(/^(?:quita|quitar|borra|borrar|elimina|cancela)\s+(?:el\s+)?pago\s+(?:de\s+)?(.+)$/i)
-  if (m) return { kind: 'pago_quitar', termino: tidy(m[1]) }
-  m = t.match(/^(?:cambia|cambiar|mueve|pasa)\s+(?:el\s+)?pago\s+(?:de\s+)?(.+?)\s+(?:al|para\s+el|a)\s+(?:d[ií]a\s+)?(\d{1,2})$/i)
-  if (m) return { kind: 'pago_cambiar', termino: tidy(m[1]), dia: Number(m[2]) }
-  m = t.match(/^(?:pago|pagos|agrega\s+(?:el\s+)?pago)\s+(.+?)\s+(?:el|los|cada|el\s+d[ií]a)\s+(\d{1,2})(?:\s+de\s+cada\s+mes|\s+cada\s+mes|\s+mensual(?:es)?)?(?:\s*[,·-]\s*(.+))?$/i)
+  m = n.match(/^(?:mis\s+)?pagos(?:\s+(?:recurrentes|mensuales))?(?:\s+de\s+(.+))?$/)
   if (m) {
-    let resto = m[1].trim()
-    let empresa: CompanyRef | null = null
-    const sorted = [...companies].sort((a, b) => b.name.length - a.name.length)
-    for (const c of sorted) {
-      const re = new RegExp(`^(?:de\\s+)?${escapeRe(c.name.trim())}\\b\\s*:?\\s*`, 'i')
-      if (re.test(resto)) { empresa = c; resto = resto.replace(re, ''); break }
-    }
-    const nombre = tidy(resto)
-    if (!nombre) return null
-    return { kind: 'pago', empresa, nombre, dia: Number(m[2]), monto: m[3] ? tidy(m[3]) : null }
+    const empresa = m[1] ? findCompany(m[1], companies) : null
+    if (m[1] && !empresa) return null
+    return { kind: 'pagos', empresa, semana: false }
   }
   return null
 }
@@ -553,7 +545,7 @@ export function ayuda(modelo: string): string {
     '💬 HÁBLAME NORMAL: "el 3 ya está", "pasa el 5 al lunes", "9 cancelar, no se va a hacer", "alarma mañana 9am revisar X" · varias órdenes en un mensaje y te muestro el plan antes de hacerlo',
     '🎯 ¿QUÉ SIGUE? · "qué hago primero" · "solo urgentes" · "qué vence esta semana" · "qué sigue de IM" → una tarea para ahora, 3 después, 3 por vencer; luego "listo 1" / "pasa el segundo"',
     '📋 /hoy · "dame la lista" · "todo lo pendiente" → la lista completa de las 8:00, ahora · "cierre" → la de las 6:00 pm',
-    '💳 PAGOS: "pago IM Vercel el 15 de cada mes" (evento mensual con avisos 7 días, 3 días y ese día) · "pagos de IM" · "quita el pago Vercel" · "cambia el pago Vercel al 20"',
+    '💳 PAGOS: "pagos de IM" · "qué pagos hay esta semana" (se administran en /settings → Pagos recurrentes)',
     '📥 AGREGAR',
     'urgente/normal/cuando [empresa] tarea [importante] [hoy · mañana · pasado mañana · el viernes · en 3 días · el 15 de nov] [3pm · a las 10] · "… y ponla en calendar" → también evento 📅 · "pon en calendar la de TOTT"',
     '🎤 Por voz igual (máx 2 min) · 💡 radar <idea> · si falta algo, te pregunto con botones',

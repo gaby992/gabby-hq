@@ -142,7 +142,9 @@ Archivos del asistente dentro del repo:
 | `sql/2026-11-asistente-fase5.sql` | Migración de la fase 5: `conexiones_google` + `tasks.due_time` + `tasks.gcal_event_id` |
 | `sql/2026-11-asistente-fase5c.sql` | Migración de la fase 5-C: `pagos_recurrentes` |
 | `src/lib/asistente/pagos.ts` | Fase 5-C: pagos recurrentes (fila + evento mensual en Calendar) |
-| `src/app/api/calendar/tarea/route.ts` | Fase 5-B: botón "📅 Agregar a Calendar" del panel de edición |
+| `src/app/api/calendar/tarea/route.ts` | Fase 5-B: botón "📅 Agregar a Calendar" del panel de edición y casilla del formulario |
+| `src/app/api/calendar/sync/route.ts` | Fase 5-D: la web avisa después de escribir una tarea para que su evento siga a la fila |
+| `src/lib/calendar-client.ts` | Fase 5-D: helpers del navegador (sync, quitar antes de borrar, agregar/quitar) |
 | `src/app/api/pagos/route.ts` | Fase 5-C: la tabla de pagos de Settings (lista, crea, cambia, quita; Calendar al día) |
 | `src/components/PagosRecurrentes.tsx` | Fase 5-C: pestañas por empresa + tabla editable en /settings |
 
@@ -1303,13 +1305,15 @@ falla, la tarea se guarda igual y el bot agrega `⚠️ sin evento en Calendar:
 {motivo}`. Las alarmas propias (`bot_recordatorios`) **no** van al
 calendario.
 
-**Web**: en /tasks (y en los bloques de /hoy), al editar una tarea, el panel
-tiene **📅 Agregar a Calendar** (necesita fecha guardada; usa la hora guardada
-o todo el día). Con evento muestra `📅 En Calendar · quitar`. Pasa por
-`/api/calendar/tarea` (sesión de la app), nunca llama a Google desde el
-navegador. Lo que sigue sin sincronizar desde la web: completar o cambiar la
-fecha desde /hoy o /tasks (el navegador escribe directo en Supabase); el
-formulario web no tiene campo de hora. Pendiente para una fase 5-D.
+**Web (fase 5-D).** El formulario de nueva tarea y el panel de edición tienen
+campo **Hora** (solo con fecha) y **📅 Calendar**: en el formulario es una
+casilla ("crea también el evento"); en el panel de edición es el botón
+**📅 Agregar a Calendar** (con evento: `📅 En Calendar · quitar`). Ambos pasan
+por `/api/calendar/tarea`. Y todo lo que la web escribe en una tarea con
+evento (guardar cambios, completar desde /tasks, /hoy o la matriz, borrar)
+llama después a `/api/calendar/sync` para que el evento siga a la fila o se
+borre; el navegador nunca habla con Google. Si Google falla, la tarea se
+guarda igual y el aviso sale en gris debajo del panel.
 
 **C) Fechas de pago recurrentes.** Caso: "agrega en calendar IM todas las
 fechas de pago con recordatorios de 1 semana, 3 días y el día, todos los
@@ -1317,12 +1321,23 @@ meses". Tabla `pagos_recurrentes` (id, company_id, nombre, dia_del_mes,
 monto_texto, recordatorios `int[]` default `{7,3,0}`, gcal_event_id, activo,
 created_at). **No son tareas**: no entran en Hoy, la matriz ni las alarmas.
 
+Se administran **solo en la web**: /settings → **Pagos recurrentes**, una
+pestaña por empresa, tabla editable (nombre, día, monto), **📅 Agregar a
+Calendar** cuando la fila no tiene evento, Edit y Quitar. Pasa por
+`/api/pagos`, que al crear o cambiar un pago crea o actualiza su evento
+**recurrente** mensual (`RRULE:FREQ=MONTHLY;BYMONTHDAY=15`), título `💳 IM ·
+Vercel · $20 USD`, con avisos 7 días antes, 3 días antes y ese mismo día a las
+9:00 am (Cancún); al quitarlo, borra fila y evento.
+
+Por el bot **solo se consultan**:
+
 | Dices | Qué pasa |
 | --- | --- |
-| `pago IM Vercel el 15 de cada mes` (opcional `· $20 USD` al final) | fila + evento **recurrente** mensual (`RRULE:FREQ=MONTHLY;BYMONTHDAY=15`), título `💳 IM · Vercel · $20 USD`, con avisos 7 días antes, 3 días antes y ese mismo día a las 9:00 am (Cancún) |
-| `pagos de IM` / `pagos` | la lista numerada |
-| `quita el pago Vercel` | borra fila y evento |
-| `cambia el pago Vercel al 20` | actualiza ambos |
+| `pagos` / `pagos de IM` | la lista numerada con el próximo vencimiento de cada uno |
+| `qué pagos hay esta semana` / `qué pagos vencen esta semana de PD` | solo los que caen entre hoy y el domingo |
+
+Si le pides al bot crear, cambiar o quitar un pago, responde que eso se hace
+en Settings → Pagos recurrentes.
 
 Por qué el evento es de 9:00 a 9:30 am y no "todo el día": en la API de
 Google los avisos de un evento de todo el día cuentan hacia atrás desde la
@@ -1330,11 +1345,6 @@ medianoche, así que "ese mismo día a las 9" no se puede expresar. Con el
 evento a las 9:00, los avisos quedan exactos: 7 días (10080 min), 3 días
 (4320) y 0 (a las 9:00 de ese día). Día 31 en meses cortos: Google salta ese
 mes (regla de `BYMONTHDAY`).
-
-**Web**: /settings → sección **Pagos recurrentes**, una pestaña por empresa,
-tabla editable (nombre, día, monto), **📅 Agregar a Calendar** cuando la fila
-no tiene evento, Edit y Quitar. Pasa por `/api/pagos`, que actualiza Calendar
-en cada cambio.
 
 **Pendiente (fase 2 de los pagos, anotado):** que la alarma de las 8:00 diga
 `💳 Hoy vence: IM Vercel` leyendo `pagos_recurrentes`.
@@ -1404,13 +1414,16 @@ cuenta: cada cuenta se conecta desde Settings.
 4. `pon en calendar la de Juan` → pregunta la hora o crea directo si ya la
    tiene. Luego `llamar a pedro a las 4` → `✏️ … → a las 4:00 pm 📅` y el
    evento se movió; `listo pedro` → el evento desapareció.
-5. /tasks → edita una tarea con fecha → **📅 Agregar a Calendar** → aparece
-   `📅 En Calendar · quitar`.
-6. `pago IM Vercel el 15 de cada mes · $20 USD` → `💳 IM · Vercel · día 15 ·
-   $20 USD 📅 · cada mes · avisos …`. En Google: evento mensual el 15 a las
-   9:00 con 3 avisos. `pagos de IM` lo lista; `cambia el pago Vercel al 20`
-   mueve el evento; `quita el pago Vercel` lo borra. /settings → Pagos
-   recurrentes muestra la tabla de IM.
+5. /tasks → nueva tarea con fecha, **Hora** 15:00 y la casilla **📅
+   Calendar** → en Google aparece el evento. Edita otra tarea con fecha →
+   **📅 Agregar a Calendar** → `📅 En Calendar · quitar`. Cámbiale la hora y
+   guarda → el evento se movió. Márcala hecha desde /hoy → el evento
+   desapareció.
+6. /settings → Pagos recurrentes → pestaña IM → `Vercel`, día `15`, `$20
+   USD` → **Agregar** → la fila dice `📅 en Calendar` y en Google hay un
+   evento mensual el 15 a las 9:00 con 3 avisos. Edit → día 20 → el evento se
+   movió. En el bot: `pagos de IM` lo lista con `próximo …`; `qué pagos hay
+   esta semana` filtra. Quitar → fila y evento fuera.
 7. Settings → Conexiones → **Desconectar**. `pon en calendar la de …` →
    `⚠️ sin evento en Calendar: no hay cuenta de Google conectada`. Vuelve a
    **Conectar**.

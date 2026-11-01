@@ -49,7 +49,7 @@ import { responderQueSigue } from '@/lib/asistente/que-sigue'
 import { enviarLista } from '@/lib/asistente/alarmas'
 import { agregarACalendar, type ResultadoSync } from '@/lib/google/sync'
 import { buscarEnAbiertas } from '@/lib/asistente/interprete'
-import { buscarPago, cambiarPago, crearPago, quitarPago, textoListaPagos } from '@/lib/asistente/pagos'
+import { textoListaPagos } from '@/lib/asistente/pagos'
 import { createServerClient as dbCliente } from '@/lib/supabase-server'
 import { COLS_SIN_NOTAS, type TaskRow } from '@/lib/asistente/acciones'
 import type { Priority } from '@/types'
@@ -252,26 +252,12 @@ async function handleText(chatId: number, text: string, prefix: string | null) {
       await ponerEnCalendar(chatId, parsed.termino, prefix)
       return
     case 'pagos':
-      await reply(chatId, joinLines(prefix, await textoListaPagos(parsed.empresa?.id ?? null, parsed.empresa?.name.trim() ?? null)))
+      // Fase 5-C: read-only here; payments are managed in /settings.
+      await reply(chatId, joinLines(prefix, await textoListaPagos(parsed.empresa?.id ?? null, parsed.empresa?.name.trim() ?? null, { semana: parsed.semana })))
       return
-    case 'pago_quitar': {
-      const b = await buscarPago(parsed.termino)
-      await reply(chatId, joinLines(prefix, b.pago ? await quitarPago(b.pago.id) : b.error!))
+    case 'pagos_web':
+      await reply(chatId, joinLines(prefix, 'Los pagos recurrentes se agregan, cambian y quitan en GabbyHQ → Settings → Pagos recurrentes. Por aquí solo los consulto: "pagos de IM", "qué pagos hay esta semana".'))
       return
-    }
-    case 'pago_cambiar': {
-      const b = await buscarPago(parsed.termino)
-      await reply(chatId, joinLines(prefix, b.pago ? await cambiarPago(b.pago.id, { dia_del_mes: parsed.dia }) : b.error!))
-      return
-    }
-    case 'pago': {
-      if (!parsed.empresa) {
-        await reply(chatId, joinLines(prefix, '¿De qué empresa es el pago? Ejemplo: pago IM Vercel el 15 de cada mes'))
-        return
-      }
-      await reply(chatId, joinLines(prefix, await crearPago({ company_id: parsed.empresa.id, nombre: parsed.nombre, dia_del_mes: parsed.dia, monto_texto: parsed.monto })))
-      return
-    }
     case 'lista':
       // Fase 4c: the 8:00 / 6:00 pm message, now, recorded like the cron's.
       if (prefix) await reply(chatId, prefix)

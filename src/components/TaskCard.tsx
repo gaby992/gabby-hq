@@ -9,6 +9,7 @@ import ImportantBadge from './ImportantBadge'
 import ImportanteCheckbox from './ImportanteCheckbox'
 import { supabase } from '@/lib/supabase'
 import { formatShortEs, ymd } from '@/lib/dates'
+import { dropCalendarBeforeDelete, syncCalendar, toggleCalendar } from '@/lib/calendar-client'
 
 interface Props {
   task: Task
@@ -44,6 +45,8 @@ export default function TaskCard({ task, companies, onUpdate, today }: Props) {
   const [priority, setPriority] = useState<Priority>(task.priority)
   const [importante, setImportante] = useState(task.importante ?? false)
   const [dueDate, setDueDate] = useState(task.due_date ?? '')
+  // Fase 5-D: 'HH:MM' (Postgres `time` comes back as 'HH:MM:SS').
+  const [dueTime, setDueTime] = useState((task.due_time ?? '').slice(0, 5))
   const [notes, setNotes] = useState(task.notes ?? '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -54,21 +57,10 @@ export default function TaskCard({ task, companies, onUpdate, today }: Props) {
   async function calendar(quitar: boolean) {
     setCalBusy(true)
     setCalMsg(null)
-    try {
-      const res = await fetch('/api/calendar/tarea', {
-        method: quitar ? 'DELETE' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task_id: task.id, todo_el_dia: !task.due_time }),
-      })
-      const json = await res.json().catch(() => null)
-      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`)
-      setCalMsg(quitar ? 'Evento quitado de Calendar' : json?.confirmacion ?? '📅 En Calendar')
-      onUpdate()
-    } catch (err) {
-      setCalMsg(err instanceof Error ? err.message : String(err))
-    } finally {
-      setCalBusy(false)
-    }
+    const r = await toggleCalendar(task.id, quitar, !task.due_time)
+    setCalMsg(r.mensaje)
+    setCalBusy(false)
+    if (r.ok) onUpdate()
   }
 
   const subtasks = task.subtasks ?? []
@@ -82,6 +74,7 @@ export default function TaskCard({ task, companies, onUpdate, today }: Props) {
     setPriority(task.priority)
     setImportante(task.importante ?? false)
     setDueDate(task.due_date ?? '')
+    setDueTime((task.due_time ?? '').slice(0, 5))
     setNotes(task.notes ?? '')
     setError(null)
     setEditing(true)
@@ -110,6 +103,7 @@ export default function TaskCard({ task, companies, onUpdate, today }: Props) {
         priority,
         importante,
         due_date: dueDate || null, // empty input clears the date
+        due_time: dueDate && dueTime ? dueTime : null, // an hour without a date means nothing
         notes: nextNotes.trim() || null,
       })
       .eq('id', task.id)
@@ -118,16 +112,22 @@ export default function TaskCard({ task, companies, onUpdate, today }: Props) {
       setError(err.message)
       return
     }
+    // Fase 5-D: the event (if any) follows the new date/hour/title.
+    const aviso = await syncCalendar(task)
     setEditing(false)
+    if (aviso) setCalMsg(aviso)
     onUpdate()
   }
 
   async function toggleDone() {
     await supabase.from('tasks').update({ done: !task.done }).eq('id', task.id)
+    // Done → the event goes; reopened → nothing to restore (it was removed).
+    await syncCalendar(task)
     onUpdate()
   }
 
   async function deleteTask() {
+    await dropCalendarBeforeDelete(task)
     await supabase.from('tasks').delete().eq('id', task.id)
     onUpdate()
   }
@@ -265,8 +265,32 @@ export default function TaskCard({ task, companies, onUpdate, today }: Props) {
                     {dueDate && (
                       <button
                         type="button"
-                        onClick={() => setDueDate('')}
+                        onClick={() => { setDueDate(''); setDueTime('') }}
                         title="Quitar fecha"
+                        className="px-2 text-xs text-[#555555] hover:text-red-400 transition-colors"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <label className={labelClass}>Hora</label>
+                  <div className="flex gap-1">
+                    <input
+                      type="time"
+                      value={dueTime}
+                      onChange={(e) => setDueTime(e.target.value)}
+                      disabled={!dueDate}
+                      title={dueDate ? '' : 'Pon una fecha primero'}
+                      className={`${fieldClass} disabled:opacity-40`}
+                    />
+                    {dueTime && (
+                      <button
+                        type="button"
+                        onClick={() => setDueTime('')}
+                        title="Quitar hora"
                         className="px-2 text-xs text-[#555555] hover:text-red-400 transition-colors"
                       >
                         ×
