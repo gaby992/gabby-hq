@@ -1317,7 +1317,10 @@ hora. Queda para una fase 5b con una ruta de sincronización.
    nada (la app los pide al conectar) → **Save and continue**. En **Test
    users** → **Add users** → tu Gmail (la cuenta cuyo calendario quieres
    usar) → **Save and continue** → **Back to dashboard**. La app queda en
-   modo *Testing*: solo esos usuarios pueden conectar, y es suficiente.
+   modo *Testing*: solo esos usuarios pueden conectar. Ojo: en Testing el
+   token caduca a los **7 días** y toca Reconectar; cuando todo funcione,
+   **Publish app** (botón en la misma pantalla) lo quita sin pedir
+   verificación.
 4. **APIs & Services → Credentials → Create credentials → OAuth client ID**.
    Application type **Web application**, nombre `gabbyhq-web`. En
    **Authorized redirect URIs** → **Add URI** →
@@ -1373,7 +1376,7 @@ cuenta: cada cuenta se conecta desde Settings.
 | Google: `access_denied` / "app no verificada" sin botón Continue | Tu Gmail no está en Test users | Consent screen → Test users → agrégalo. |
 | "Google no devolvió refresh_token" | Ya habías autorizado antes sin `prompt=consent` | https://myaccount.google.com/permissions → quita GabbyHQ → Conectar otra vez. |
 | "APP_ENCRYPTION_KEY debe ser 32 bytes en hex" | La llave no tiene 64 caracteres hex | `openssl rand -hex 32`; pégala completa; Redeploy. Si cambias la llave, las cuentas ya conectadas dejan de descifrarse: Reconectar. |
-| `⚠️ sin evento en Calendar: invalid_grant` | Token revocado o caducado (modo Testing caduca a los 7 días si la app no está publicada… solo si usas scopes sensibles sin verificación) | Settings → Conexiones → Reconectar. Si pasa cada semana: OAuth consent screen → **Publish app**. |
+| `⚠️ sin evento en Calendar: invalid_grant` | Token revocado o caducado: con la app en modo *Testing*, Google caduca el refresh token a los 7 días | Settings → Conexiones → **Reconectar**. Para que no pase cada semana: OAuth consent screen → **Publish app** (sigue sin verificación; solo quita la caducidad de 7 días). |
 | El evento no aparece | La tarea no tiene hora, o la hora se fue al título | /tasks: ¿el chip dice `6 nov 3:00 pm`? Si no, `paypal mañana 3pm` para ponerla. Logs: `[calendar]`. |
 
 ---
