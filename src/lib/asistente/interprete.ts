@@ -1,0 +1,375 @@
+// Fase 4: the bot understands how Gabby actually writes. Any message that is
+// not an exact command goes through the LLM with a prompt that returns a JSON
+// list of actions ("1 terminado / 9 cancelar no se va hacer / 11 se llama
+// URo, pasar para mañana" → completar, cancelar, renombrar, posponer).
+//
+// The context carries the last alarm's numbers and the open tasks (title,
+// company, date) — NEVER `tasks.notes`. Every interpreted message is logged
+// in bot_preguntas (modelo "interprete:…") with the resulting actions, so the
+// prompt can be tuned from real traffic.
+
+import { createServerClient } from '@/lib/supabase-server'
+import type { Priority } from '@/types'
+import { COLS_SIN_NOTAS, normalizar, ultimaAlarma, type TaskRow } from './acciones'
+import { addDays, cancunHm, cancunYmd, formatDiaLargoEs } from './cancun'
+import { llmConfig, preguntarLlm } from './llm'
+
+export const MAX_TOKENS = 900
+export const TIMEOUT_MS = 20_000
+/** Open tasks sent to the model, at most. Alarm-numbered ones go first. */
+const MAX_TAREAS = 80
+
+export type NotaModoLlm = 'reemplazar' | 'agregar'
+
+/** What the model may answer. `ref` is "#3" (last alarm), "t12" (open task), "anterior" or title text. */
+export type AccionLlm =
+  | { tipo: 'completar'; ref: string }
+  | { tipo: 'cancelar'; ref: string; motivo?: string }
+  | { tipo: 'posponer'; ref: string; fecha: string }
+  | { tipo: 'renombrar'; ref: string; titulo: string }
+  | { tipo: 'cambiar'; ref: string; prioridad?: Priority; empresa?: string; fecha?: string }
+  | { tipo: 'crear'; titulo: string; empresa?: string; prioridad?: Priority; fecha?: string; importante?: boolean }
+  | { tipo: 'nota_empresa'; empresa: string; texto: string; modo: NotaModoLlm }
+  | { tipo: 'nota_tarea'; ref: string; texto: string }
+  | { tipo: 'alarma'; texto: string; fecha?: string; hora?: string; en_minutos?: number }
+  | { tipo: 'pregunta'; texto: string }
+  | { tipo: 'desconocido'; texto: string }
+
+export type TipoAccionLlm = AccionLlm['tipo']
+
+const TIPOS: TipoAccionLlm[] = [
+  'completar', 'cancelar', 'posponer', 'renombrar', 'cambiar', 'crear',
+  'nota_empresa', 'nota_tarea', 'alarma', 'pregunta', 'desconocido',
+]
+
+/** A task as the interpreter and the plan see it: no notes. */
+export type TareaLite = Pick<TaskRow, 'id' | 'text' | 'due_date' | 'priority' | 'importante' | 'company'>
+
+export interface ContextoInterprete {
+  text: string
+  /** "#3" / "t12" → task, for the resolver. */
+  porRef: Map<string, TareaLite>
+  abiertas: TareaLite[]
+  anterior: TareaLite | null
+}
+
+// ── Context ──────────────────────────────────────────────────────────────
+
+/** The task the last interpreted message of this chat touched (from the log). */
+async function ultimaMencionada(chatId: number): Promise<string | null> {
+  const { data, error } = await createServerClient()
+    .from('bot_preguntas')
+    .select('respuesta')
+    .eq('chat_id', chatId)
+    .like('modelo', 'interprete:%')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle<{ respuesta: string }>()
+  if (error || !data) return null
+  try {
+    const j = JSON.parse(data.respuesta)
+    return typeof j?.ultima_tarea_id === 'string' ? j.ultima_tarea_id : null
+  } catch {
+    return null
+  }
+}
+
+function fechaCorta(t: TareaLite, today: string): string {
+  if (!t.due_date) return 'sin fecha'
+  if (t.due_date < today) return `vencida (${t.due_date})`
+  if (t.due_date === today) return 'vence hoy'
+  return `vence ${t.due_date}`
+}
+
+export async function construirContextoInterprete(
+  chatId: number,
+  companies: { id: string; name: string }[],
+  now: Date = new Date()
+): Promise<ContextoInterprete> {
+  const today = cancunYmd(now)
+  const db = createServerClient()
+  const [openRes, alarma, anteriorId] = await Promise.all([
+    db.from('tasks').select(COLS_SIN_NOTAS).eq('done', false).order('created_at', { ascending: false }),
+    ultimaAlarma(),
+    ultimaMencionada(chatId),
+  ])
+  if (openRes.error) throw new Error(`Supabase tasks: ${openRes.error.message}`)
+  const abiertas = (openRes.data as unknown as TareaLite[]) ?? []
+  const byId = new Map(abiertas.map((t) => [t.id, t]))
+
+  const porRef = new Map<string, TareaLite>()
+  const lines: string[] = []
+  const usados = new Set<string>()
+
+  // 1. The last alarm, in its own numbering — "el 9" means this.
+  if (alarma) {
+    lines.push(`ÚLTIMA ALARMA (${alarma.tipo === 'manana' ? '8:00 am' : '6:00 pm'}, ${alarma.enviada_en.slice(0, 10)}) — sus números:`)
+    for (const it of alarma.items) {
+      const t = byId.get(it.task_id)
+      if (!t) {
+        lines.push(`[#${it.n}] (ya cerrada o borrada)`)
+        continue
+      }
+      porRef.set(`#${it.n}`, t)
+      usados.add(t.id)
+      lines.push(`[#${it.n}] ${t.text} · ${t.company?.name ?? 'sin empresa'} · ${fechaCorta(t, today)}`)
+    }
+    lines.push('')
+  } else {
+    lines.push('ÚLTIMA ALARMA: ninguna todavía (no uses refs "#n").', '')
+  }
+
+  // 2. The other open tasks: dated first (soonest), then the rest, newest first.
+  const resto = abiertas
+    .filter((t) => !usados.has(t.id))
+    .sort((a, b) => {
+      if (a.due_date && b.due_date && a.due_date !== b.due_date) return a.due_date < b.due_date ? -1 : 1
+      if (!!a.due_date !== !!b.due_date) return a.due_date ? -1 : 1
+      return 0
+    })
+  const cupo = Math.max(0, MAX_TAREAS - usados.size)
+  lines.push(`OTRAS TAREAS ABIERTAS (${resto.length}):`)
+  resto.slice(0, cupo).forEach((t, i) => {
+    const ref = `t${i + 1}`
+    porRef.set(ref, t)
+    lines.push(`[${ref}] ${t.text} · ${t.company?.name ?? 'sin empresa'} · ${fechaCorta(t, today)} · ${t.priority}${t.importante ? ' ★' : ''}`)
+  })
+  if (resto.length > cupo) lines.push(`(+${resto.length - cupo} más que no caben; si no ves la tarea, pon el título como ref)`)
+  lines.push('')
+
+  const anterior = anteriorId ? byId.get(anteriorId) ?? null : null
+  if (anterior) {
+    const ref = Array.from(porRef.entries()).find(([, t]) => t.id === anterior.id)?.[0]
+    lines.push(`ÚLTIMA TAREA MENCIONADA ("la anterior"): ${ref ? `[${ref}] ` : ''}${anterior.text}`, '')
+  }
+
+  lines.push(`EMPRESAS: ${companies.map((c) => c.name.trim()).join(', ')}`)
+  lines.push(`HOY: ${today} (${formatDiaLargoEs(today)}) · hora actual ${cancunHm(now)} (Cancún) · mañana = ${addDays(today, 1)}`)
+
+  return { text: lines.join('\n'), porRef, abiertas, anterior }
+}
+
+// ── Prompt ───────────────────────────────────────────────────────────────
+
+export function systemPrompt(today: string): string {
+  const manana = addDays(today, 1)
+  return [
+    'Eres el intérprete de órdenes del asistente de tareas de Gabby. Recibes un CONTEXTO (fecha y hora en Cancún, sus empresas, ' +
+      'sus tareas abiertas con un id entre corchetes y la última alarma numerada) y un MENSAJE escrito o dictado por voz. ' +
+      'Respondes SOLO con un JSON {"acciones":[...]} con lo que Gabby quiere hacer, en el orden en que lo dijo. Nada fuera del JSON.',
+    '',
+    'Tipos de acción (campos entre paréntesis son opcionales):',
+    '- {"tipo":"completar","ref":REF}  → terminado, terminada, hecho, listo, ya está, ya quedó, done',
+    '- {"tipo":"cancelar","ref":REF,("motivo":"…")}  → cancelar, no se va a hacer, ya no aplica, quítala. motivo = sus palabras',
+    '- {"tipo":"posponer","ref":REF,"fecha":"YYYY-MM-DD"}  → pasar/mover/dejar para otro día',
+    '- {"tipo":"renombrar","ref":REF,"titulo":"…"}  → "se llama X", "cámbiale el nombre". Si solo corrige una palabra, devuelve el título completo corregido',
+    '- {"tipo":"cambiar","ref":REF,("prioridad":"urgente|normal|cuando"),("empresa":"…"),("fecha":"YYYY-MM-DD")}  → solo lo que cambia',
+    '- {"tipo":"crear","titulo":"…",("empresa":"…"),("prioridad":"urgente|normal|cuando"),("fecha":"YYYY-MM-DD"),("importante":true)}  → tarea nueva',
+    '- {"tipo":"nota_empresa","empresa":"…","texto":"…","modo":"reemplazar|agregar"}  → "nota de IM: …", "apunta en PD que …" (agregar si dice agrega/suma/además)',
+    '- {"tipo":"nota_tarea","ref":REF,"texto":"…"}  → un comentario sobre una tarea existente',
+    '- {"tipo":"alarma","texto":"…",("fecha":"YYYY-MM-DD"),("hora":"HH:MM")}  → alarma, recuérdame, avísame, ponme un recordatorio. ' +
+      'Para "en 2 horas"/"en 30 minutos" usa "en_minutos":120 en vez de fecha/hora. Si no dijo hora, NO inventes una: omite "hora". ' +
+      'texto = qué recordar, sin la fecha ni la hora. Una alarma NO es una tarea (salvo que diga "y agrégala como tarea": entonces también crear)',
+    '- {"tipo":"pregunta","texto":"…"}  → pregunta sobre sus tareas (qué tengo hoy, qué cerré ayer, cómo voy con IM)',
+    '- {"tipo":"desconocido","texto":"…"}  → saludos, comentarios o algo que no es ninguna de las anteriores',
+    '',
+    'REF = a qué tarea se refiere: el id entre corchetes del contexto ("#3" = número de la última alarma, "t12" = otra tarea abierta), ' +
+      'o "anterior" (la última tarea mencionada), o un trozo del título si de verdad no la ves en la lista. ' +
+      'Un número suelto ("1 terminado", "el 9 cancelar", "pasa el 5") es el número de la última alarma → "#1", "#9", "#5". ' +
+      'Gabby escribe rápido y con errores de dedo ("terminaso" = terminado, "URo" puede ser "Puro"): elige la tarea más parecida. ' +
+      'Varias órdenes vienen separadas por "/", comas o saltos de línea: una acción por orden. ' +
+      'Una orden con dos cosas ("11 se llama URo, pasar para mañana") son DOS acciones sobre el mismo ref.',
+    '',
+    `FECHAS: hoy es ${today}; "mañana" = ${manana}; "pasado mañana" = ${addDays(today, 2)}. ` +
+      'Un día de la semana es el PRÓXIMO (si hoy es lunes, "el lunes" es dentro de 7 días). ' +
+      'Horas en 24 h: "3pm" → "15:00", "9" o "9am" → "09:00", "a las 10" → "10:00" (o "22:00" si dice "de la noche"). ' +
+      'Si la hora de una alarma ya pasó hoy y no dijo día, es mañana.',
+    'PRIORIDAD: "urgente" implica importante. EMPRESA: usa el nombre exacto de la lista EMPRESAS.',
+    'Una frase sin verbo de orden ni número ("llamar a Juan", "revisar pagos PD mañana", "urgente IM mandar propuesta") es "crear".',
+    '',
+    'Ejemplo. MENSAJE: "1 terminado / 9 cancelar no se va hacer / 11 se llama URo, pasar para mañana / alarma mañana 3pm revisar pagos de PD"',
+    `→ {"acciones":[{"tipo":"completar","ref":"#1"},{"tipo":"cancelar","ref":"#9","motivo":"no se va a hacer"},` +
+      `{"tipo":"renombrar","ref":"#11","titulo":"URo pendiente"},{"tipo":"posponer","ref":"#11","fecha":"${manana}"},` +
+      `{"tipo":"alarma","texto":"revisar pagos de PD","fecha":"${manana}","hora":"15:00"}]}`,
+  ].join('\n')
+}
+
+// ── JSON → actions ───────────────────────────────────────────────────────
+
+function str(v: unknown): string | undefined {
+  return typeof v === 'string' && v.trim() ? v.trim() : undefined
+}
+
+function prioridad(v: unknown): Priority | undefined {
+  const s = str(v)?.toLowerCase()
+  if (!s) return undefined
+  if (s.startsWith('urg')) return 'urgente'
+  if (s.startsWith('cuando')) return 'cuando'
+  if (s.startsWith('norm')) return 'normal'
+  return undefined
+}
+
+function fecha(v: unknown): string | undefined {
+  const s = str(v)
+  return s && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : undefined
+}
+
+function hora(v: unknown): string | undefined {
+  const s = str(v)
+  const m = s?.match(/^(\d{1,2}):(\d{2})$/)
+  if (!m) return undefined
+  const h = Number(m[1])
+  const mi = Number(m[2])
+  if (h > 23 || mi > 59) return undefined
+  return `${String(h).padStart(2, '0')}:${m[2]}`
+}
+
+/** Tolerates a fenced or chatty answer: takes the first {…} block. */
+function extraerJson(text: string): unknown {
+  const t = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '')
+  try {
+    return JSON.parse(t)
+  } catch {
+    const a = t.indexOf('{')
+    const b = t.lastIndexOf('}')
+    if (a < 0 || b <= a) throw new Error('la respuesta no trae JSON')
+    return JSON.parse(t.slice(a, b + 1))
+  }
+}
+
+/** Keeps only well-formed actions; a malformed one becomes "desconocido" so it is visible. */
+export function validarAcciones(raw: unknown): AccionLlm[] {
+  const lista = Array.isArray(raw)
+    ? raw
+    : Array.isArray((raw as { acciones?: unknown })?.acciones)
+      ? ((raw as { acciones: unknown[] }).acciones)
+      : null
+  if (!lista) throw new Error('JSON sin "acciones"')
+
+  const out: AccionLlm[] = []
+  for (const item of lista) {
+    const a = (item ?? {}) as Record<string, unknown>
+    const tipo = str(a.tipo)?.toLowerCase() as TipoAccionLlm | undefined
+    const ref = str(a.ref) ?? (typeof a.ref === 'number' ? `#${a.ref}` : undefined)
+    const texto = str(a.texto) ?? str(a.titulo) ?? ''
+    if (!tipo || !TIPOS.includes(tipo)) {
+      out.push({ tipo: 'desconocido', texto: texto || JSON.stringify(a) })
+      continue
+    }
+    switch (tipo) {
+      case 'completar':
+        if (ref) out.push({ tipo, ref })
+        break
+      case 'cancelar':
+        if (ref) out.push({ tipo, ref, motivo: str(a.motivo) })
+        break
+      case 'posponer': {
+        const f = fecha(a.fecha)
+        if (ref && f) out.push({ tipo, ref, fecha: f })
+        else if (ref) out.push({ tipo: 'cambiar', ref, fecha: f })
+        break
+      }
+      case 'renombrar': {
+        const titulo = str(a.titulo) ?? str(a.texto)
+        if (ref && titulo) out.push({ tipo, ref, titulo })
+        break
+      }
+      case 'cambiar':
+        if (ref) out.push({ tipo, ref, prioridad: prioridad(a.prioridad), empresa: str(a.empresa), fecha: fecha(a.fecha) })
+        break
+      case 'crear': {
+        const titulo = str(a.titulo) ?? str(a.texto)
+        if (titulo) {
+          const p = prioridad(a.prioridad)
+          out.push({ tipo, titulo, empresa: str(a.empresa), prioridad: p, fecha: fecha(a.fecha), importante: a.importante === true || p === 'urgente' })
+        }
+        break
+      }
+      case 'nota_empresa': {
+        const empresa = str(a.empresa)
+        const t = str(a.texto)
+        if (empresa && t) out.push({ tipo, empresa, texto: t, modo: str(a.modo)?.toLowerCase() === 'agregar' ? 'agregar' : 'reemplazar' })
+        break
+      }
+      case 'nota_tarea': {
+        const t = str(a.texto)
+        if (ref && t) out.push({ tipo, ref, texto: t })
+        break
+      }
+      case 'alarma': {
+        const t = str(a.texto)
+        const min = typeof a.en_minutos === 'number' && a.en_minutos > 0 ? Math.round(a.en_minutos) : undefined
+        if (t) out.push({ tipo, texto: t, fecha: fecha(a.fecha), hora: hora(a.hora), en_minutos: min })
+        break
+      }
+      case 'pregunta':
+      case 'desconocido':
+        out.push({ tipo, texto: texto || '…' })
+        break
+    }
+  }
+  return out
+}
+
+// ── Call + log ───────────────────────────────────────────────────────────
+
+export interface Interpretacion {
+  acciones: AccionLlm[]
+  contexto: ContextoInterprete
+  modelo: string
+  tokensIn: number
+  tokensOut: number
+  ms: number
+}
+
+/**
+ * Message → actions. Returns null when the model fails (timeout, key, bad
+ * JSON): the caller then falls back to the classic parser. `pista` is the
+ * hint from the [Tarea] [Orden] [Alarma] buttons when the first try was
+ * "desconocido".
+ */
+export async function interpretar(
+  chatId: number,
+  mensaje: string,
+  companies: { id: string; name: string }[],
+  pista?: string
+): Promise<Interpretacion | null> {
+  const t0 = Date.now()
+  let modelo = 'interprete:desconocido'
+  try {
+    const cfg = llmConfig()
+    modelo = `interprete:${cfg.provider}:${cfg.model}`
+    const contexto = await construirContextoInterprete(chatId, companies)
+    const user = `CONTEXTO:\n${contexto.text}\n\n${pista ? `PISTA: ${pista}\n\n` : ''}MENSAJE: ${mensaje}`
+    const r = await preguntarLlm(systemPrompt(cancunYmd()), user, { maxTokens: MAX_TOKENS, timeoutMs: TIMEOUT_MS, json: true })
+    const acciones = validarAcciones(extraerJson(r.text))
+    console.log(`[interprete] ok · ${modelo} · ${acciones.length} acciones · in ${r.tokensIn} · out ${r.tokensOut} · ${r.ms} ms`)
+    return { acciones, contexto, modelo, tokensIn: r.tokensIn, tokensOut: r.tokensOut, ms: r.ms }
+  } catch (err) {
+    const motivo = err instanceof Error ? err.message : String(err)
+    const ms = Date.now() - t0
+    console.error(`[interprete] error · ${modelo} · ${ms} ms · ${motivo}`)
+    await registrarInterpretacion({ chat_id: chatId, pregunta: mensaje, respuesta: `ERROR: ${motivo}`, modelo, tokens_in: 0, tokens_out: 0, ms })
+    return null
+  }
+}
+
+export async function registrarInterpretacion(row: {
+  chat_id: number
+  pregunta: string
+  respuesta: string
+  modelo: string
+  tokens_in: number
+  tokens_out: number
+  ms: number
+}): Promise<void> {
+  const { error } = await createServerClient().from('bot_preguntas').insert(row)
+  if (error) console.error(`[interprete] bot_preguntas insert: ${error.message}`)
+}
+
+/** Title search over the open tasks already loaded (accents and case out). */
+export function buscarEnAbiertas(abiertas: TareaLite[], termino: string): TareaLite[] {
+  const needle = normalizar(termino)
+  if (!needle) return []
+  return abiertas.filter((t) => normalizar(t.text).includes(needle))
+}

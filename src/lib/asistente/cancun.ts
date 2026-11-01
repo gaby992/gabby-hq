@@ -62,3 +62,31 @@ export function formatVenceEs(ymd: string): string {
   const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay()
   return `${DIAS_CORTOS_ES[dow]} ${d} ${MESES_ES[m - 1]}`
 }
+
+// ── Hours (fase 4: alarmas propias) ──────────────────────────────────────
+
+/** 'HH:MM' (24 h) of the current wall-clock time in Cancún. */
+export function cancunHm(now: Date = new Date()): string {
+  // en-GB gives "15:05"; some ICU builds render midnight as "24:00".
+  return new Intl.DateTimeFormat('en-GB', { timeZone: CANCUN_TZ, hour: '2-digit', minute: '2-digit', hour12: false })
+    .format(now)
+    .replace(/^24:/, '00:')
+}
+
+/** Cancún civil date + 'HH:MM' → the exact UTC instant, as ISO. */
+export function cancunInstant(ymd: string, hm: string): string {
+  return new Date(`${ymd}T${hm}:00${CANCUN_OFFSET}`).toISOString()
+}
+
+/** '15:00' → '3:00 pm' · '09:30' → '9:30 am'. */
+export function formatHoraEs(hm: string): string {
+  const [h, m] = hm.split(':').map(Number)
+  const h12 = h % 12 === 0 ? 12 : h % 12
+  return `${h12}:${String(m).padStart(2, '0')} ${h < 12 ? 'am' : 'pm'}`
+}
+
+/** An instant → 'sáb 1 nov 3:00 pm' in Cancún time. */
+export function formatFechaHoraEs(iso: string): string {
+  const d = new Date(iso)
+  return `${formatVenceEs(cancunYmd(d))} ${formatHoraEs(cancunHm(d))}`
+}

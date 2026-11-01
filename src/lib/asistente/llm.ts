@@ -35,6 +35,8 @@ export function llmConfig(): { provider: LlmProvider; model: string; fallback: s
 interface Opts {
   maxTokens: number
   timeoutMs: number
+  /** Ask for a JSON object (OpenAI json mode; Anthropic relies on the prompt). */
+  json?: boolean
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
@@ -66,6 +68,7 @@ async function openai(model: string, system: string, user: string, o: Opts) {
   // return an empty answer. Older models reject the field, so only add it
   // where it applies.
   if (/^(gpt-5|o\d)/i.test(model)) body.reasoning_effort = 'minimal'
+  if (o.json) body.response_format = { type: 'json_object' }
 
   const res = await fetchWithTimeout(
     'https://api.openai.com/v1/chat/completions',

@@ -3,15 +3,37 @@ import { createServerClient } from '@/lib/supabase-server'
 import {
   answerCallbackQuery,
   downloadTelegramFile,
+  inlineKeyboard,
   isAllowedChat,
   removeInlineKeyboard,
   sendTelegram,
 } from '@/lib/asistente/telegram'
-import { conIds, ejecutarAccion, manejarAccion, manejarPorTitulo, type AccionParams, type Respuesta } from '@/lib/asistente/acciones'
+import { botonesElegir, conIds, ejecutarAccion, manejarAccion, manejarPorTitulo, type AccionParams, type Respuesta } from '@/lib/asistente/acciones'
+import { interpretar, registrarInterpretacion, type Interpretacion } from '@/lib/asistente/interprete'
+import {
+  ejecutarPlan,
+  ejecutarUna,
+  necesitaConfirmacion,
+  renderPlan,
+  resolverAcciones,
+  resumenParaLog,
+  tareaParsedDe,
+  type AccionResuelta,
+} from '@/lib/asistente/plan'
+import {
+  HORAS_BOTONES,
+  confirmacionAlarma,
+  crearRecordatorio,
+  instanteDe,
+  listarRecordatorios,
+  quitarRecordatorio,
+  responderRecordatorio,
+  type RespuestaRecordatorio,
+} from '@/lib/asistente/recordatorios'
 import { ejecutarNota, USO_NOTA } from '@/lib/asistente/notas-bot'
 import { llmConfig } from '@/lib/asistente/llm'
-import { ayuda, faltantes, parseMensaje, type TareaParsed } from '@/lib/parser'
-import { cancunYmd } from '@/lib/asistente/cancun'
+import { ayuda, faltantes, parseMensaje, type Parsed, type TareaParsed } from '@/lib/parser'
+import { cancunYmd, formatHoraEs, formatVenceEs } from '@/lib/asistente/cancun'
 import { MAX_AUDIO_SECONDS, transcribirAudio } from '@/lib/asistente/whisper'
 import {
   actualizarBorrador,
@@ -26,9 +48,11 @@ import { responderPregunta } from '@/lib/asistente/pregunta'
 import type { Priority } from '@/types'
 
 // Telegram → here (webhook). Text, voice notes and inline-button taps all end
-// up in the same place: parseMensaje() → save, or ask for what is missing.
-// A voice note needs a round trip to Whisper, and a question one to the LLM
-// (20 s cap), so give the function some room.
+// up in the same place: parseMensaje() for the exact commands; everything
+// else (fase 4) goes through the LLM interpreter → plan → execute, falling
+// back to the classic parser when the model fails.
+// A voice note needs a round trip to Whisper, and the interpreter one to the
+// LLM (20 s cap), so give the function some room.
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -139,14 +163,6 @@ async function handleText(chatId: number, text: string, prefix: string | null) {
       await responderAccion(chatId, text, params, (nonce) => manejarPorTitulo(params, parsed.termino, nonce), prefix)
       return
     }
-    case 'edicion': {
-      // "paypal urgente": an edit if some open task matches «paypal»;
-      // otherwise it was a new task all along.
-      const params: AccionParams = { accion: 'editar', cambios: parsed.cambios }
-      const handled = await responderAccion(chatId, text, params, (nonce) => manejarPorTitulo(params, parsed.termino, nonce), prefix)
-      if (!handled) await guardarOPreguntar(chatId, text, parsed.fallback, prefix)
-      return
-    }
     case 'nota': {
       const n = parsed.nota
       if (n.modo !== 'borrar' && !n.texto) {
@@ -176,14 +192,165 @@ async function handleText(chatId: number, text: string, prefix: string | null) {
       await reply(chatId, joinLines(prefix, `✓ Radar: "${parsed.titulo}"`))
       return
     }
+    case 'alarmas':
+      await reply(chatId, joinLines(prefix, await listarRecordatorios(chatId)))
+      return
+    case 'quitar_alarma':
+      await reply(chatId, joinLines(prefix, await quitarRecordatorio(chatId, parsed.arg)))
+      return
+    case 'edicion':
+    case 'tarea':
+      // Free text: the interpreter first (fase 4); the classic result is the fallback.
+      await handleLibre(chatId, text, parsed, prefix)
+      return
+  }
+}
+
+// ── Classic fallback (what every free text did before fase 4) ────────────
+
+async function handleClasico(chatId: number, text: string, parsed: Parsed, prefix: string | null) {
+  switch (parsed.kind) {
+    case 'edicion': {
+      // "paypal urgente": an edit if some open task matches «paypal»;
+      // otherwise it was a new task all along.
+      const params: AccionParams = { accion: 'editar', cambios: parsed.cambios }
+      const handled = await responderAccion(chatId, text, params, (nonce) => manejarPorTitulo(params, parsed.termino, nonce), prefix)
+      if (!handled) await guardarOPreguntar(chatId, text, parsed.fallback, prefix)
+      return
+    }
     case 'tarea': {
       if (!parsed.tarea.text) {
         await reply(chatId, joinLines(prefix, 'Falta la tarea. Ejemplo: urgente IM llamar a Juan mañana'))
         return
       }
       await guardarOPreguntar(chatId, text, parsed.tarea, prefix)
+      return
     }
+    default:
+      await handleText(chatId, text, prefix)
   }
+}
+
+/** The classic parser found something explicit (a modifier, a company, a date): worth saving without asking. */
+function clasicoEstructurado(parsed: Parsed): boolean {
+  if (parsed.kind === 'edicion') return true
+  if (parsed.kind !== 'tarea') return true
+  const t = parsed.tarea
+  return !!t.text && (!!t.company_id || !!t.priority || !!t.due_date || t.importante)
+}
+
+const PISTA_ORDEN = 'Es una ORDEN sobre una tarea existente (completar, cancelar, posponer, renombrar, cambiar o nota). Busca la tarea más parecida.'
+const PISTA_ALARMA = 'Es una ALARMA (recordatorio): devuelve una acción "alarma" con texto, fecha y hora.'
+
+function botonesAclarar(nonce: string) {
+  return inlineKeyboard([[
+    { text: '➕ Tarea nueva', callback_data: `q:${nonce}:tarea` },
+    { text: '🔧 Orden', callback_data: `q:${nonce}:orden` },
+    { text: '⏰ Alarma', callback_data: `q:${nonce}:alarma` },
+  ]])
+}
+
+async function preguntarQueEs(chatId: number, text: string, prefix: string | null) {
+  const nonce = await borradorConNonce(chatId, text, { tipo: 'aclarar', texto: text })
+  await reply(chatId, joinLines(prefix, 'No te entendí. ¿Es una tarea nueva, una orden sobre una tarea, o una alarma?'), botonesAclarar(nonce))
+}
+
+// ── Fase 4: free text → interpreter → plan ───────────────────────────────
+
+/**
+ * Logs the interpreted message with what came out of it, so the prompt can
+ * be tuned later and "la anterior" knows which task was last mentioned.
+ */
+async function registrar(chatId: number, text: string, r: Interpretacion, acciones: AccionResuelta[]) {
+  await registrarInterpretacion({
+    chat_id: chatId,
+    pregunta: text,
+    respuesta: resumenParaLog(acciones),
+    modelo: r.modelo,
+    tokens_in: r.tokensIn,
+    tokens_out: r.tokensOut,
+    ms: r.ms,
+  })
+}
+
+function botonesPlan(nonce: string) {
+  return inlineKeyboard([[
+    { text: '✅ Hacer todo', callback_data: `k:${nonce}:1` },
+    { text: '✏️ No, corrijo', callback_data: `k:${nonce}:0` },
+  ]])
+}
+
+function botonesHora(nonce: string) {
+  return inlineKeyboard([HORAS_BOTONES.map((h) => ({ text: formatHoraEs(`${h}:00`), callback_data: `h:${nonce}:${h}` }))])
+}
+
+/**
+ * Everything that is not an exact command. `pista` comes from the
+ * [Orden] / [Alarma] buttons on a second try.
+ */
+async function handleLibre(chatId: number, text: string, parsed: Parsed, prefix: string | null, pista?: string) {
+  const companies = await cargarEmpresas()
+  const r = await interpretar(chatId, text, companies, pista)
+
+  if (!r) {
+    // The model is down or answered garbage: the bot keeps working as it did
+    // before fase 4, except for alarms, which the classic parser cannot read.
+    if (/^(?:alarma|recu[eé]rdame|av[ií]same|recordatorio)\b/i.test(text)) {
+      await reply(chatId, joinLines(prefix, 'No pude interpretar la alarma ahora (el modelo falló). Inténtalo otra vez en un momento.'))
+      return
+    }
+    await handleClasico(chatId, text, parsed, prefix)
+    return
+  }
+
+  const utiles = r.acciones.filter((a) => a.tipo !== 'desconocido')
+  if (utiles.length === 0) {
+    await registrar(chatId, text, r, resolverAcciones(r.acciones, r.contexto, companies))
+    if (pista) {
+      await reply(chatId, joinLines(prefix, 'Sigo sin entender. Dime por ejemplo "listo 3", "pasa el 3 al lunes" o "alarma mañana 9am revisar X".'))
+      return
+    }
+    if (clasicoEstructurado(parsed)) {
+      await handleClasico(chatId, text, parsed, prefix)
+      return
+    }
+    await preguntarQueEs(chatId, text, prefix)
+    return
+  }
+
+  const acciones = resolverAcciones(utiles, r.contexto, companies)
+  await registrar(chatId, text, r, acciones)
+
+  // ── Several actions, or anything that cancels: show the plan, ask OK ──
+  if (necesitaConfirmacion(acciones)) {
+    const nonce = await borradorConNonce(chatId, text, { tipo: 'plan', acciones })
+    await reply(chatId, joinLines(prefix, renderPlan(acciones)), botonesPlan(nonce))
+    return
+  }
+
+  // ── One action: run it now ──
+  const a = acciones[0]
+  if (a.candidatos && a.candidatos.length > 0) {
+    const nonce = await borradorConNonce(chatId, text, { tipo: 'elegir', accion: a, candidatos: a.candidatos.map((t) => t.id) })
+    await reply(chatId, joinLines(prefix, '¿Cuál?'), inlineKeyboard(botonesElegir(a.candidatos, nonce).map((b) => [b])))
+    return
+  }
+  if (a.error) {
+    await reply(chatId, joinLines(prefix, `⚠️ ${a.error.charAt(0).toUpperCase()}${a.error.slice(1)}.`))
+    return
+  }
+  if (a.tipo === 'crear') {
+    // Same flow as a typed task: ask company / urgency with buttons if missing.
+    await guardarOPreguntar(chatId, text, tareaParsedDe(a), prefix)
+    return
+  }
+  if (a.tipo === 'alarma' && !a.dispara_en) {
+    const nonce = await borradorConNonce(chatId, text, { tipo: 'alarma_hora', texto: a.texto, fecha: a.fecha ?? null })
+    const dia = a.fecha ? `el ${formatVenceEs(a.fecha)}` : 'hoy'
+    await reply(chatId, joinLines(prefix, `¿A qué hora te aviso «${a.texto}» ${dia}?`), botonesHora(nonce))
+    return
+  }
+  await reply(chatId, joinLines(prefix, await ejecutarUna(chatId, a)))
 }
 
 // ── Voice notes ──────────────────────────────────────────────────────────
@@ -230,8 +397,24 @@ async function handleCallback(cq: CallbackQuery) {
     return
   }
 
+  const data = String(cq.data ?? '')
+
+  // ── A sent reminder: [✅ Listo] [⏰ +1h] [📅 Mañana] — no draft involved ──
+  const rm = data.match(/^r:([0-9a-f-]{36}):(ok|1h|man)$/)
+  if (rm) {
+    try {
+      await removeInlineKeyboard(chatId, messageId)
+      await reply(chatId, await responderRecordatorio(chatId, rm[1], rm[2] as RespuestaRecordatorio))
+    } catch (err) {
+      console.error('[bot] callback recordatorio error:', err)
+      await reply(chatId, ERROR_GENERICO)
+    }
+    return
+  }
+
   // "e:<nonce>:<company_id>" | "p:<nonce>:<priority>" | "t:<nonce>:<task_id>" | "y:<nonce>:1|0"
-  const m = String(cq.data ?? '').match(/^([epty]):([0-9a-f]{8}):(.+)$/)
+  // fase 4: "k:<nonce>:1|0" (plan) | "h:<nonce>:09|12|15|18" (alarm hour) | "q:<nonce>:tarea|orden|alarma"
+  const m = data.match(/^([eptykhq]):([0-9a-f]{8}):(.+)$/)
   if (!m) return
   const [, kind, nonce, value] = m
 
@@ -271,6 +454,58 @@ async function handleCallback(cq: CallbackQuery) {
       return
     }
 
+    // ── Fase 4: [✅ Hacer todo] [✏️ No, corrijo] ──
+    if (parsed.tipo === 'plan') {
+      if (kind !== 'k') return
+      await borrarBorrador(borrador.id)
+      if (value !== '1') {
+        await reply(chatId, 'Ok, no hice nada. Dímelo otra vez como quieras.')
+        return
+      }
+      await reply(chatId, await ejecutarPlan(chatId, parsed.acciones))
+      return
+    }
+
+    // ── Fase 4: one interpreted action, several title matches ──
+    if (parsed.tipo === 'elegir') {
+      if (kind !== 't' || !parsed.candidatos.includes(value)) return
+      await borrarBorrador(borrador.id)
+      const elegida = parsed.accion.candidatos?.find((t) => t.id === value)
+      if (!elegida) return
+      const accion: AccionResuelta = { ...parsed.accion, tarea: elegida, candidatos: undefined, error: undefined }
+      await reply(chatId, await ejecutarUna(chatId, accion))
+      return
+    }
+
+    // ── Fase 4: "alarma …" without an hour ──
+    if (parsed.tipo === 'alarma_hora') {
+      if (kind !== 'h' || !(HORAS_BOTONES as readonly string[]).includes(value)) return
+      await borrarBorrador(borrador.id)
+      const cuando = instanteDe({ fecha: parsed.fecha, hora: `${value}:00` })!
+      const r = await crearRecordatorio(chatId, parsed.texto, cuando)
+      await reply(chatId, confirmacionAlarma(r))
+      return
+    }
+
+    // ── Fase 4: "No te entendí" → [Tarea nueva] [Orden] [Alarma] ──
+    if (parsed.tipo === 'aclarar') {
+      if (kind !== 'q') return
+      await borrarBorrador(borrador.id)
+      const texto = parsed.texto
+      const clasico = parseMensaje(texto, companies, cancunYmd())
+      if (value === 'tarea') {
+        const tarea = clasico.kind === 'edicion' ? clasico.fallback : clasico.kind === 'tarea' ? clasico.tarea : null
+        if (!tarea || !tarea.text) {
+          await reply(chatId, 'Mándame la tarea otra vez, por ejemplo: urgente IM llamar a Juan mañana')
+          return
+        }
+        await guardarOPreguntar(chatId, texto, tarea, null)
+        return
+      }
+      await handleLibre(chatId, texto, clasico, null, value === 'alarma' ? PISTA_ALARMA : PISTA_ORDEN)
+      return
+    }
+
     // ── "nota: …" without a company: the chosen company ──
     if (parsed.tipo === 'nota') {
       if (kind !== 'e') return
@@ -285,7 +520,7 @@ async function handleCallback(cq: CallbackQuery) {
     }
 
     // ── A task missing company and/or priority ──
-    if (kind === 't' || kind === 'y') return
+    if (kind !== 'e' && kind !== 'p') return
     const tarea: TareaParsed = { ...parsed }
     if (kind === 'e') {
       const c = companies.find((x) => x.id === value)

@@ -41,7 +41,7 @@ interface UltimaAlarma {
   items: AlarmaItem[]
 }
 
-interface TaskRow {
+export interface TaskRow {
   id: string
   text: string
   done: boolean
@@ -53,6 +53,8 @@ interface TaskRow {
 }
 
 const COLS = 'id, text, done, notes, due_date, priority, importante, company:companies(name)'
+/** Same without `notes`: what may travel to the LLM (fase 4 interpreter). */
+export const COLS_SIN_NOTAS = 'id, text, done, due_date, priority, importante, company:companies(name)'
 
 export interface Respuesta {
   text: string
@@ -70,7 +72,7 @@ export function normalizar(s: string): string {
   return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
 }
 
-async function ultimaAlarma(): Promise<UltimaAlarma | null> {
+export async function ultimaAlarma(): Promise<UltimaAlarma | null> {
   const { data, error } = await createServerClient()
     .from('bot_alarmas')
     .select('id, tipo, enviada_en, items')
@@ -131,15 +133,19 @@ const VERBO: Record<Accion, string> = {
   editar: 'cambio',
 }
 
-function etiqueta(t: TaskRow): string {
+export function etiqueta(t: Pick<TaskRow, 'text' | 'company'>): string {
   return `«${t.text}»${t.company ? ` · ${t.company.name}` : ''}`
 }
 
-function preguntaElegir(accion: Accion, hits: TaskRow[], nonce: string): Respuesta {
-  const buttons: InlineButton[] = hits.map((t) => ({
+export function botonesElegir(hits: Pick<TaskRow, 'id' | 'text' | 'company'>[], nonce: string): InlineButton[] {
+  return hits.map((t) => ({
     text: `${t.text.length > 40 ? t.text.slice(0, 39) + '…' : t.text}${t.company ? ` · ${t.company.name}` : ''}`,
     callback_data: `t:${nonce}:${t.id}`,
   }))
+}
+
+function preguntaElegir(accion: Accion, hits: TaskRow[], nonce: string): Respuesta {
+  const buttons = botonesElegir(hits, nonce)
   return {
     text: `¿Cuál ${VERBO[accion]}?`,
     replyMarkup: inlineKeyboard(buttons.map((b) => [b])),
@@ -232,6 +238,40 @@ export async function ejecutarAccion(params: AccionParams, ids: string[]): Promi
   const fecha = formatCortoEs(manana)
   if (rows.length === 1) return `📅 ${etiqueta(rows[0])} pasa a mañana (${fecha})${cola}`
   return `✅ ${rows.length} tareas pasan a mañana (${fecha}):\n` + rows.map((t) => `• ${etiqueta(t)}`).join('\n') + cola
+}
+
+/**
+ * Fase 4 "cancelar": done = true plus a dated line in notes — never deleted.
+ * "{fecha}: cancelada — {motivo}" so the reason survives in /tasks → Completadas.
+ */
+export async function cancelarTareas(ids: string[], motivo?: string | null): Promise<string> {
+  const db = createServerClient()
+  const { data, error } = await db.from('tasks').select(COLS).in('id', ids).eq('done', false)
+  if (error) throw new Error(`Supabase tasks: ${error.message}`)
+  const rows = (data as unknown as TaskRow[]) ?? []
+  if (rows.length === 0) return 'Esas tareas ya estaban cerradas.'
+  const linea = `${formatCortoEs(cancunYmd())}: cancelada${motivo?.trim() ? ` — ${motivo.trim()}` : ''}`
+  const out: string[] = []
+  for (const t of rows) {
+    const notes = t.notes?.trim() ? `${t.notes.trimEnd()}\n\n${linea}` : linea
+    const { error: e2 } = await db.from('tasks').update({ done: true, notes }).eq('id', t.id)
+    if (e2) throw new Error(`Supabase tasks: ${e2.message}`)
+    out.push(`🗑 Cancelada: ${etiqueta(t)}${motivo?.trim() ? ` (${motivo.trim()})` : ''}`)
+  }
+  return out.join('\n')
+}
+
+/** Fase 4 "renombrar": a new title for an open task. */
+export async function renombrarTarea(id: string, titulo: string): Promise<string> {
+  const nuevo = titulo.trim()
+  if (!nuevo) return 'Falta el título nuevo.'
+  const db = createServerClient()
+  const { data: before, error: e1 } = await db.from('tasks').select(COLS).eq('id', id).maybeSingle<TaskRow>()
+  if (e1) throw new Error(`Supabase tasks: ${e1.message}`)
+  if (!before) return 'Esa tarea ya no existe.'
+  const { error } = await db.from('tasks').update({ text: nuevo }).eq('id', id)
+  if (error) throw new Error(`Supabase tasks: ${error.message}`)
+  return `✏️ «${before.text}» → «${nuevo}»`
 }
 
 /** What happens once the task ids are known: run it, or (borra) ask first. */

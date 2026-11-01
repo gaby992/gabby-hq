@@ -15,7 +15,11 @@
 //   nota en paypal: texto                                   (append a dated line to that task's notes)
 //   paypal para el viernes / paypal urgente / paypal es de PD   (edit an existing task)
 //   /pregunta <…>  /  ? <pregunta>  /  ¿…?  /  pregunta <…>   (answered by the LLM)
+//   mis alarmas  /  quita alarma 2                           (fase 4 reminders)
 //   /ayuda / ayuda / help / formato / /start
+// Anything else ("1 terminado / 9 cancelar", "alarma mañana 3pm revisar X")
+// is free text: the webhook sends it to the LLM interpreter first and only
+// falls back to the `edicion` / `tarea` result below when the model fails.
 
 import type { Company, Priority } from '@/types'
 import { addDays } from '@/lib/asistente/cancun'
@@ -53,6 +57,8 @@ export interface Cambios {
 
 export type Parsed =
   | { kind: 'ayuda' }
+  | { kind: 'alarmas' }
+  | { kind: 'quitar_alarma'; arg: string }
   | { kind: 'pregunta'; texto: string }
   | { kind: 'radar'; titulo: string }
   | { kind: 'nota'; nota: NotaParsed }
@@ -255,6 +261,9 @@ export function parseMensaje(raw: string, companies: CompanyRef[], today: string
   if (notaTarea) return { kind: 'nota_tarea', termino: tidy(notaTarea[1]), texto: tidy(notaTarea[2]) }
   const nota = text.match(/^nota\b\s*([\s\S]*)$/i)
   if (nota) return { kind: 'nota', nota: parseNota(nota[1], companies) }
+  if (/^(?:mis\s+)?alarmas\s*[.!?]?$/i.test(text)) return { kind: 'alarmas' }
+  const quitar = text.match(/^(?:quita|quitar|borra|borrar|elimina|cancela)\s+(?:la\s+)?alarma\s+([\s\S]+)$/i)
+  if (quitar) return { kind: 'quitar_alarma', arg: tidy(quitar[1]) }
   const accion = text.match(/^(pasa|listo|borra)\b\s*([\s\S]*)$/i)
   if (accion) return { kind: 'accion', accion: accion[1].toLowerCase() as Accion, arg: tidy(accion[2]) }
 
@@ -287,9 +296,10 @@ export function faltantes(t: TareaParsed): Faltante[] {
   return out
 }
 
-/** /ayuda — four short sections, at most 14 lines. */
+/** /ayuda — five short sections, at most 16 lines. */
 export function ayuda(modelo: string): string {
   return [
+    '💬 HÁBLAME NORMAL: "el 3 ya está", "pasa el 5 al lunes", "9 cancelar, no se va a hacer", "alarma mañana 9am revisar X" · varias órdenes en un mensaje y te muestro el plan antes de hacerlo',
     '📥 AGREGAR',
     'urgente/normal/cuando [empresa] tarea [importante] [hoy · mañana · para el viernes] · o "para IM: tarea"',
     '🎤 Por voz igual (máx 2 min) · 💡 radar <idea> · si falta algo, te pregunto con botones',
@@ -301,6 +311,8 @@ export function ayuda(modelo: string): string {
     'nota en paypal: texto (la agrega al pie de esa tarea, con fecha)',
     '❓ PREGUNTAR',
     '/pregunta ¿qué tengo hoy? (o empieza con ? o ¿) · te contesto con tus tareas y notas',
+    '⏰ ALARMAS PROPIAS (no son tareas)',
+    'alarma mañana 3pm revisar pagos · recuérdame el viernes a las 10 llamar al contador · avísame en 2 horas X · mis alarmas · quita alarma 2',
     '⏰ Alarmas ☀️ 8:00 am y 🌙 6:00 pm, lun–sáb · 🏢 IM · DATAVIA · PD · Personal · Chelsea',
     `🤖 Modelo actual: ${modelo}`,
   ].join('\n')

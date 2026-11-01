@@ -6,18 +6,28 @@
 import { createServerClient } from '@/lib/supabase-server'
 import type { NotaParsed, TareaParsed } from '@/lib/parser'
 import type { AccionParams } from './acciones'
+import type { AccionResuelta } from './plan'
 
 /**
  * What waits in a draft. Tasks are stored flat (the phase 2 shape, no `tipo`);
  * notes and actions carry a discriminator.
  *   accion    → buttons to pick ONE of `candidatos`
  *   confirmar → [Sí, borrar] [No] over `ids`
+ * Fase 4 (the interpreter):
+ *   plan        → [✅ Hacer todo] [✏️ No, corrijo] over resolved actions
+ *   elegir      → one interpreted action whose ref matched 2–5 tasks
+ *   alarma_hora → "alarma …" without an hour: [9am] [12pm] [3pm] [6pm]
+ *   aclarar     → "No te entendí": [Tarea nueva] [Orden] [Alarma]
  */
 export type BorradorParsed =
   | (TareaParsed & { tipo?: 'tarea' })
   | { tipo: 'nota'; nota: NotaParsed }
   | { tipo: 'accion'; params: AccionParams; candidatos: string[] }
   | { tipo: 'confirmar'; params: AccionParams; ids: string[] }
+  | { tipo: 'plan'; acciones: AccionResuelta[] }
+  | { tipo: 'elegir'; accion: AccionResuelta; candidatos: string[] }
+  | { tipo: 'alarma_hora'; texto: string; fecha: string | null }
+  | { tipo: 'aclarar'; texto: string }
 
 export const BORRADOR_TTL_MS = 10 * 60 * 1000
 
