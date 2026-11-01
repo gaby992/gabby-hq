@@ -265,7 +265,7 @@ export async function ejecutarAccion(params: AccionParams, ids: string[]): Promi
   const cola = skipped > 0 ? `\n(${skipped} ya ${skipped === 1 ? 'estaba cerrada' : 'estaban cerradas'})` : ''
   // Done → its event goes; moved → its event moves (only tasks with an event or an hour).
   const avisos = await sincronizar(rows.filter((t) => t.gcal_event_id || t.due_time).map((t) => t.id))
-  if (params.accion === 'listo') return conAvisos(rows.map((t) => `✅ Hecha: ${etiqueta(t)}`).join('\n') + cola, avisos)
+  if (params.accion === 'listo') return conAvisos(rows.map((t) => `✅ Hecha 👏 ${etiqueta(t)}`).join('\n') + cola, avisos)
   const fecha = formatCortoEs(manana)
   if (rows.length === 1) return conAvisos(`📅 ${etiqueta(rows[0])} pasa a mañana (${fecha})${cola}`, avisos)
   return conAvisos(`✅ ${rows.length} tareas pasan a mañana (${fecha}):\n` + rows.map((t) => `• ${etiqueta(t)}`).join('\n') + cola, avisos)

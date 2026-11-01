@@ -61,7 +61,10 @@
         { "ejemplo": "1 terminado / 9 cancelar no se va hacer / 11 se llama URo, pasar para mañana / 12 pasar para mañana", "que": "te muestra el plan numerado y esperas [✅ Hacer todo] o [✏️ No, corrijo]; nada se ejecuta antes" },
         { "ejemplo": "el 3 ya está y pasa el 4 al lunes", "que": "dos órdenes en una frase, separadas por \"y\", comas o barras" },
         { "ejemplo": "alarma mañana 3pm revisar pagos y agrégala como tarea", "que": "una alarma y una tarea a la vez" },
-        { "ejemplo": "el 2 es urgente y es de IM", "que": "varios cambios a la misma tarea en una línea" }
+        { "ejemplo": "el 2 es urgente y es de IM", "que": "varios cambios a la misma tarea en una línea" },
+        { "ejemplo": "sí · la segunda · esa no, la otra · lo mismo para PD", "que": "el bot recuerda lo último que hablaron (30 min): respuestas cortas funcionan" },
+        { "ejemplo": "organízame", "que": "repasa tus pendientes uno por uno con botones (también \"no sé por dónde empezar\", \"estoy abrumada\"); \"para\" sale" },
+        { "ejemplo": "olvida lo anterior", "que": "limpia la conversación y empieza de cero" }
       ]
     },
     {

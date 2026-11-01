@@ -52,6 +52,9 @@ Es lo mismo que manda el bot con `/ayuda todo`. La guía técnica está en [asis
 - `el 3 ya está y pasa el 4 al lunes` — dos órdenes en una frase, separadas por "y", comas o barras
 - `alarma mañana 3pm revisar pagos y agrégala como tarea` — una alarma y una tarea a la vez
 - `el 2 es urgente y es de IM` — varios cambios a la misma tarea en una línea
+- `sí · la segunda · esa no, la otra · lo mismo para PD` — el bot recuerda lo último que hablaron (30 min): respuestas cortas funcionan
+- `organízame` — repasa tus pendientes uno por uno con botones (también "no sé por dónde empezar", "estoy abrumada"); "para" sale
+- `olvida lo anterior` — limpia la conversación y empieza de cero
 
 ## ℹ️ Otros
 

@@ -16,6 +16,8 @@ sección y **no se empieza una fase hasta validar la anterior**.
 | 4b | "¿Qué sigue?" (bot + web), notas con edad, rediseño de /hoy, limpieza del parser | ✅ Construida — pendiente de validar |
 | 4c | Lista completa a demanda, "qué sigue" siempre con 3 secciones, fechas en el intérprete | ✅ Construida — pendiente de validar |
 | 5 | Conexión de Google en Settings + Calendar (solo a pedido) + pagos recurrentes | ✅ Construida — pendiente de validar |
+| 6 | Gmail | ⏳ Pendiente |
+| 7 | De comandos a conversación: memoria, sugerencias, "organízame", personalidad | ✅ Construida — pendiente de validar |
 
 ---
 
@@ -105,6 +107,12 @@ Archivos del asistente dentro del repo:
 | `src/app/api/asistente/tarde/route.ts` | Alarma de las 6:00 pm |
 | `src/app/api/asistente/recordatorios/route.ts` | Cron cada 5 min: manda las alarmas propias vencidas (fase 4) |
 | `src/app/api/telegram/route.ts` | Webhook del bot: comandos exactos, texto libre → intérprete, audios, botones |
+| `src/lib/asistente/config.ts` | Fase 7: lo que se personaliza (nombre, bot, tono, sugerencias) y el **system prompt único** (`personaPrompt`) |
+| `src/lib/asistente/conversacion.ts` | Fase 7: el hilo (`bot_conversacion`): últimos 10 turnos / 30 min, "olvida lo anterior", sugerencias declinadas |
+| `src/lib/asistente/sugerencias.ts` | Fase 7: la única sugerencia por mensaje, con botones, y qué hace cada botón |
+| `src/lib/asistente/organizar.ts` | Fase 7: el modo "organízame" (cola, botones, resumen) |
+| `src/app/api/asistente/config/route.ts` | Fase 7: Settings → Asistente (config + costo del mes) |
+| `src/components/AsistenteConfigPanel.tsx` | Fase 7: el panel de Settings → Asistente |
 | `src/lib/asistente/comandos.json` | La guía de uso (fuente única): `docs/comandos.md` y `/ayuda todo` salen de aquí |
 | `src/lib/asistente/comandos.ts` | Renderiza esa guía para Telegram (2–3 mensajes HTML) |
 | `scripts/comandos-md.mjs` | `npm run comandos`: regenera `docs/comandos.md` desde el JSON |
@@ -149,6 +157,7 @@ Archivos del asistente dentro del repo:
 | `sql/2026-11-limpieza-notas-como-tareas.sql` | Limpieza única: tareas que eran notas "por dónde iba" (select primero; mover a `notas_historial` y borrar después) |
 | `sql/2026-11-asistente-fase5.sql` | Migración de la fase 5: `conexiones_google` + `tasks.due_time` + `tasks.gcal_event_id` |
 | `sql/2026-11-asistente-fase5c.sql` | Migración de la fase 5-C: `pagos_recurrentes` |
+| `sql/2026-11-asistente-fase7.sql` | Migración de la fase 7: `bot_conversacion` + `asistente_config` |
 | `src/lib/asistente/pagos.ts` | Fase 5-C: pagos recurrentes (fila + evento mensual en Calendar) |
 | `src/app/api/calendar/tarea/route.ts` | Fase 5-B: botón "📅 Agregar a Calendar" del panel de edición y casilla del formulario |
 | `src/app/api/calendar/sync/route.ts` | Fase 5-D: la web avisa después de escribir una tarea para que su evento siga a la fila |
@@ -1507,7 +1516,140 @@ _Pendiente. La cuenta ya queda autorizada con `gmail.readonly` + `gmail.modify` 
 
 ---
 
-## 7. Cómo replicarlo para otra persona
+## 7. Fase 7 — De comandos a conversación
+
+**La lección más importante del curso: tu asistente conversa.** Hablar con
+el bot tiene que sentirse como hablar con una asistente humana, no con un
+menú. La alumna "no sabe organizarse"; el asistente organiza **por** ella,
+conversando. Todo lo construido antes (listas, acciones, alarmas, Calendar)
+sigue igual por debajo: esta fase cambia la capa de arriba.
+
+### 7a. Qué hace
+
+**A) Memoria de conversación.** Cada mensaje de ida y vuelta queda en
+`bot_conversacion` (chat_id, rol `user`/`assistant`, texto, acciones,
+created_at): lo que ella escribe (o dicta), lo que el bot responde, y qué
+botón tocó. Al interpretar un mensaje, el modelo recibe los **últimos 10
+turnos o los de los últimos 30 minutos**, lo que sea menor, con las tareas
+que cada turno mencionó y su ref actual. Así funcionan "sí", "la segunda",
+"esa no, la otra", "lo mismo para PD", "¿y lo de ayer?", "cambia la hora a
+las 4". "La anterior" ahora sale del hilo (antes, del registro). `olvida lo
+anterior` / `empecemos de nuevo` corta el hilo: el bot deja una marca y no
+mira nada anterior.
+
+**B) El asistente propone.** Después de una acción o una respuesta puede
+agregar **una** sugerencia corta con botones (nunca más de una por mensaje;
+nunca si Settings dice "solo obedece"):
+
+| Cuándo | Sugerencia |
+| --- | --- |
+| Tarea nueva sin fecha | `¿Para cuándo?` [Hoy] [Mañana] [Esta semana] [Sin fecha] — "esta semana" = el viernes |
+| Tarea nueva sin empresa | los botones de empresa de siempre |
+| Tarea nueva importante/urgente con hora y sin calendar | `¿La pongo en calendar?` [📅 Sí] [No] |
+| Al completar una tarea (`listo 3`, "el 3 ya está") | `👏 Te quedan N de IM. ¿Seguimos con «…»?` [Sí] [Luego] |
+| Audio largo con 3+ órdenes | el plan de siempre, cerrando con `¿Algo que se me escapó?` |
+| Una pregunta cuya respuesta revela un problema (3+ vencidas de una empresa, o una nota de 20+ días) | `Ojo: 3 vencidas de AAMA; «website» lleva 46 días. ¿La pasamos a esta semana o la cancelamos?` [Esta semana] [Cancelar] [Déjala] · o `Ojo: la nota de IM tiene 20 días. ¿La archivo?` [Archivar] [Déjala] |
+
+Si dice **Luego** o **Déjala**, queda guardado en `bot_conversacion`
+(`acciones.declinado`) y el bot no insiste: "seguimos" no vuelve ese día; una
+vencida o una nota concretas, no vuelven en 30 días.
+
+**C) Modo "organízame".** Disparadores: `organízame`, `ayúdame con mis
+pendientes`, `no sé por dónde empezar`, `estoy abrumada`, `qué hago`,
+`ponme en orden`. El bot toma el control:
+
+```
+Tienes 11 pendientes, Gabby. Vamos a dejarlos en orden en 2 minutos.
+Empiezo por lo vencido: 1/8 · «AAMA website» · AAMA lleva 46 días vencida. ¿Qué hacemos?
+[Hoy] [Mañana] [Esta semana]
+[Cancelar] [Delegar] [Siguiente ›]
+```
+
+Recorre vencidas (más vieja primero) → sin fecha (urgentes y ★ primero) →
+urgentes con fecha, una por una. Cada botón ejecuta y pasa a la siguiente
+(**Delegar** la pasa a la empresa Chelsea si existe; si no, le deja una
+nota). **Siguiente** la salta. Máximo 8 por sesión: "Vamos con los 8 más
+viejos; el resto mañana". Se sale con `para` / `después` / `basta`. Al
+final: `Listo, Gabby 👏 Hoy: 3. Mañana: 4. Esta semana: 2. Cancelaste 2.` y
+`¿Te mando la lista?` [Sí] [No]. La sesión vive 30 minutos (los demás
+borradores, 10).
+
+**D) Tono y personalidad.** Un solo system prompt (`personaPrompt()` en
+`config.ts`) para el intérprete, `/pregunta` y la línea de la mañana:
+español neutro, cálido, breve, sin voseo; usa el nombre de la persona;
+celebra en una palabra (`✅ Hecha 👏 «…»`); si no entiende, pregunta una cosa
+concreta con botones (`No pillé eso, Gabby. ¿Es una tarea nueva, una orden o
+una alarma?`); nunca inventa. Configurable en **Settings → Asistente**:
+nombre de la persona, nombre del bot, tono (informal/formal) y si propone
+sugerencias o solo obedece (modo menú). Eso es lo que se personaliza por
+alumna; vive en `asistente_config` (una fila) y, mientras no exista la
+tabla, aplican los defaults (Gabby · Asistente · informal · propone).
+
+**E) Mensajes del día más humanos.** La alarma de las 8 abre con una línea
+generada por el modelo a partir de los números del día (cuántas vencen hoy,
+cuántas vencidas, cuáles tienen hora, la más importante): "Buenos días,
+Gabby. Hoy vencen 3 cosas y tienes una reunión a las 3. Lo más importante:
+«…»". Si el modelo tarda más de 8 s o falla, sale la versión fija con los
+mismos datos. El cierre abre con el balance: `Cerraste 4 de 11 👏. Quedan 2
+vencidas.` Si no cerró nada y hay abiertas, además llega `Día difícil.
+¿Pasamos todo a mañana y arrancamos limpio?` [Sí] [Elijo] (Sí = `pasa
+todo`).
+
+**F) Log y costo.** Cada turno que pasa por el modelo (intérprete,
+`/pregunta`, línea de la mañana) queda en `bot_preguntas` con sus tokens;
+timeout 20 s (8 s la línea de la mañana). **Settings → Asistente** muestra el
+costo del mes: turnos por tipo, tokens y el estimado en USD a precio de lista
+de gpt-5-mini. Las sugerencias y "organízame" no usan el modelo: son reglas,
+y no cuestan.
+
+### 7b. Lo que hay que hacer a mano
+
+1. Supabase → SQL Editor → `sql/2026-11-asistente-fase7.sql` en una query.
+   Abajo: las columnas de `bot_conversacion` y `asistente_config`, y la fila
+   de config con los defaults.
+2. Push → redeploy. Sin env vars nuevas.
+3. GabbyHQ → Settings → **Asistente**: pon tu nombre y el del bot, elige el
+   tono y si quieres sugerencias. Guardar.
+
+### 7c. Env vars que agrega esta fase
+
+Ninguna.
+
+### 7d. Cómo probar que funciona
+
+1. `IM llamar a Juan` → `✅ IM · … «llamar a Juan»` y debajo `¿Para cuándo?`
+   con 4 botones; toca **Mañana** → `✏️ … → vence …`. Luego `cambia la hora a
+   las 4` → le pone 4:00 pm a esa misma tarea (memoria).
+2. `listo 1` → `✅ Hecha 👏 …` y `👏 Te quedan N de IM. ¿Seguimos con «…»?`;
+   toca **Luego**. Cierra otra con `listo 2`: ya no pregunta.
+3. `¿qué tengo hoy?` con 3+ vencidas de una empresa → la respuesta y debajo
+   `Ojo: …` con [Esta semana] [Cancelar] [Déjala].
+4. `organízame` → la intro y el primer ítem con 6 botones; responde varios;
+   `para` → el resumen. Vuelve a entrar y termina → `¿Te mando la lista?`.
+5. `olvida lo anterior` → "Listo, empezamos de cero." Luego `sí` solo →
+   el bot pregunta qué es (no tiene a qué responder).
+6. Settings → Asistente → cambia tu nombre a "Gabriela" y el tono a formal
+   → `¿qué tengo hoy?` te trata de usted y te llama Gabriela. Pon
+   "Solo obedece" → `IM llamar a Pedro` ya no pregunta `¿Para cuándo?`.
+7. Prueba manual de la alarma de la mañana (§ 1d) → empieza con la línea
+   de saludo. La de la tarde un día sin cerrar nada → `Día difícil…` con
+   [Sí] [Elijo].
+8. Settings → Asistente muestra el costo del mes con los turnos de estas
+   pruebas.
+
+### 7e. Qué puede fallar y dónde verlo
+
+| Síntoma | Causa probable | Dónde verlo / qué hacer |
+| --- | --- | --- |
+| "sí" / "la segunda" no funcionan | La tabla `bot_conversacion` no existe (el bot sigue, sin memoria) | Logs: `[conversacion] insert: relation … does not exist`. Correr el SQL. |
+| No propone nada | Settings → Asistente en "Solo obedece", o ya dijo "Luego" hoy | Cambia el ajuste; `select * from bot_conversacion where acciones->'declinado' is not null`. |
+| Organízame se corta a la mitad | Pasaron 30 min, o llegó otro mensaje que creó un borrador | Vuelve a decir `organízame`; retoma desde los que faltan. |
+| La mañana no trae la línea de saludo | El modelo falló o tardó >8 s: sale la fija | Logs: `[alarma-manana] línea del día:`. Nada que hacer. |
+| El costo del mes dice "no disponible" | `bot_preguntas` no existe | SQL de la fase 3. |
+
+---
+
+## 8. Cómo replicarlo para otra persona
 
 Checklist completo para levantar el mismo asistente para alguien más (por
 ejemplo Chelsea), desde cero hasta la primera alarma. Lo que cambia es: el bot
@@ -1539,8 +1681,9 @@ El código es el mismo repo.
    `sql/` del repo, incluidos `sql/2026-10-asistente-fase1.sql`,
    `sql/2026-10-asistente-fase2.sql`, `sql/2026-10-asistente-fase3.sql` y
    `sql/2026-10-asistente-fase4.sql`, `sql/2026-11-asistente-fase4b.sql` y
-   `sql/2026-11-asistente-fase5.sql` y `sql/2026-11-asistente-fase5c.sql`
-   (y sus pruebas en queries aparte, ver 1b, 2b, 3b y 4b Paso 1).
+   `sql/2026-11-asistente-fase5.sql`, `sql/2026-11-asistente-fase5c.sql` y
+   `sql/2026-11-asistente-fase7.sql` (y sus pruebas en queries aparte, ver
+   1b, 2b, 3b y 4b Paso 1).
 4. En la app, en **Settings**, crea las empresas con los nombres que esa
    persona use. El orden fijo de la alarma (IM · DATAVIA · PD · Personal ·
    Chelsea) está en `EMPRESAS_ORDEN` dentro de `src/lib/asistente/alarmas.ts`;
@@ -1590,7 +1733,7 @@ verano; para una zona con DST hay que calcular el offset en vez de fijarlo).
 
 ---
 
-## 8. Costos estimados por mes
+## 9. Costos estimados por mes
 
 | Concepto | Fase | Costo | Nota |
 | --- | --- | --- | --- |
@@ -1601,6 +1744,7 @@ verano; para una zona con DST hay que calcular el offset en vez de fijarlo).
 | LLM para `/pregunta` (`gpt-5-mini`) | 3 | **$0.25 USD / 1M tokens de entrada · $2.00 / 1M de salida** (precio de lista a octubre 2026). Una pregunta ≈ 3000 tokens de entrada (el contexto) + 150 de salida ≈ **$0.0011 USD**. Ejemplo: 20 preguntas al día × 30 días = 600 preguntas ≈ **$0.65 USD/mes**. | Si el contexto es corto (pocas tareas), baja a la mitad. Con `gpt-5-nano` cuesta ~5× menos; con Anthropic (`claude-haiku-5-5`) algo más. La consulta de costo real del mes está al final de `sql/2026-10-asistente-fase3-pruebas.sql`. |
 | LLM para el intérprete (`gpt-5-mini`) | 4 | Un mensaje libre ≈ 1500 tokens de entrada (prompt + tareas) + 100 de salida ≈ **$0.0006 USD**. 30 mensajes al día × 30 = 900 ≈ **$0.55 USD/mes**. | Los comandos exactos (`listo 3`, `pasa 2,5`, `nota IM: …`) no pasan por el modelo. El cron de 5 min no cuesta: corre en Vercel Pro. |
 | Google Calendar API | 5 | $0 | Gratis dentro de las cuotas normales (1M llamadas/día; aquí son unas pocas por tarea). |
+| LLM para la conversación (fase 7) | 7 | El intérprete manda además el hilo reciente (≈ +300 tokens por mensaje) y la mañana una llamada corta (≈ 400 tokens). Con 30 mensajes al día: **≈ $0.65 USD/mes** en total para el intérprete; la mañana, centavos. | Sugerencias y "organízame" no usan el modelo. El costo real del mes se ve en Settings → Asistente. |
 
 **Fase 1 total: $0 adicionales** sobre lo que ya se paga.
 **Fase 2 total: ~$0.10 USD/mes** con uso normal (requiere saldo prepagado en OpenAI, mínimo $5).

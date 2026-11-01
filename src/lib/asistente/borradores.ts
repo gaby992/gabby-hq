@@ -7,6 +7,8 @@ import { createServerClient } from '@/lib/supabase-server'
 import type { NotaParsed, TareaParsed } from '@/lib/parser'
 import type { AccionParams } from './acciones'
 import type { AccionResuelta } from './plan'
+import type { SugerenciaDraft } from './sugerencias'
+import type { OrganizarDraft } from './organizar'
 
 /**
  * What waits in a draft. Tasks are stored flat (the phase 2 shape, no `tipo`);
@@ -30,8 +32,13 @@ export type BorradorParsed =
   | { tipo: 'aclarar'; texto: string }
   /** Fase 5-B: "ponla en calendar" on a task without an hour: [9am] [12pm] [3pm] [6pm] [todo el día]. */
   | { tipo: 'calendar_hora'; task_id: string; texto: string }
+  /** Fase 7: one suggestion with buttons, and the guided "organízame" session. */
+  | SugerenciaDraft
+  | OrganizarDraft
 
 export const BORRADOR_TTL_MS = 10 * 60 * 1000
+/** "organízame" takes longer than a button tap. */
+export const ORGANIZAR_TTL_MS = 30 * 60 * 1000
 
 export interface Borrador {
   id: string
@@ -71,7 +78,8 @@ export async function borradorVigente(chatId: number): Promise<Borrador | null> 
     .maybeSingle<Borrador>()
   if (error) throw new Error(`Supabase bot_borradores: ${error.message}`)
   if (!data) return null
-  if (Date.now() - new Date(data.created_at).getTime() > BORRADOR_TTL_MS) return null
+  const ttl = data.parsed && 'tipo' in data.parsed && data.parsed.tipo === 'organizar' ? ORGANIZAR_TTL_MS : BORRADOR_TTL_MS
+  if (Date.now() - new Date(data.created_at).getTime() > ttl) return null
   return data
 }
 

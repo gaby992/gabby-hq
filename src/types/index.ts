@@ -92,6 +92,14 @@ export interface PagoRecurrente {
   created_at: string
 }
 
+/** Settings → Asistente (fase 7): what is personalised per person. */
+export interface AsistenteConfigRow {
+  nombre_persona: string
+  nombre_bot: string
+  tono: 'informal' | 'formal'
+  sugerencias: boolean
+}
+
 export interface ApiKey {
   id: string
   label: string

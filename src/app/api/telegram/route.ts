@@ -48,6 +48,10 @@ import { responderPregunta } from '@/lib/asistente/pregunta'
 import { enviarQueSigue } from '@/lib/asistente/que-sigue'
 import { enviarLista } from '@/lib/asistente/alarmas'
 import { guiaTelegram } from '@/lib/asistente/comandos'
+import { cargarConfig, type AsistenteConfig } from '@/lib/asistente/config'
+import { guardarTurno, limpiarHilo } from '@/lib/asistente/conversacion'
+import { botonesDe, resolverSugerencia, trasCompletar, trasCrear, trasPregunta, trasOrganizar, type Sugerencia } from '@/lib/asistente/sugerencias'
+import { iniciarOrganizar, responderOrganizar, resumen as resumenOrganizar, tecladoOrganizar, type RespuestaOrganizar } from '@/lib/asistente/organizar'
 import { agregarACalendar, type ResultadoSync } from '@/lib/google/sync'
 import { buscarEnAbiertas } from '@/lib/asistente/interprete'
 import { textoListaPagos } from '@/lib/asistente/pagos'
@@ -75,6 +79,22 @@ async function reply(chatId: number, text: string, replyMarkup?: unknown, html =
   } catch {
     /* already logged by sendTelegram */
   }
+  // Fase 7: every answer is part of the thread the interpreter will read next.
+  await guardarTurno(chatId, 'assistant', text)
+}
+
+/**
+ * Fase 7-B: at most one suggestion after a message, as its own message with
+ * buttons on a fresh draft. Nothing when a question is already pending.
+ */
+async function sugerir(chatId: number, s: Sugerencia | null) {
+  if (!s) return
+  if (s.botones.length === 0) {
+    await reply(chatId, s.texto)
+    return
+  }
+  const nonce = await borradorConNonce(chatId, s.texto, s.draft)
+  await reply(chatId, s.texto, botonesDe(s, nonce))
 }
 
 function joinLines(...lines: (string | null | undefined)[]): string {
@@ -128,12 +148,14 @@ function botonesHoraCalendar(nonce: string) {
 async function guardarYConfirmar(chatId: number, tarea: TareaParsed, prefix: string | null) {
   const g = await guardarTarea(tarea)
   const linea = confirmacion(tarea, g.sync)
+  await guardarTurno(chatId, 'assistant', `[creada] ${tarea.text}`, { tareas: [{ id: g.id, text: tarea.text }] })
   if (g.faltaHora) {
     const nonce = await borradorConNonce(chatId, tarea.text, { tipo: 'calendar_hora', task_id: g.id, texto: tarea.text })
     await reply(chatId, joinLines(prefix, linea, '📅 ¿A qué hora la pongo en calendar?'), botonesHoraCalendar(nonce))
     return
   }
   await reply(chatId, joinLines(prefix, linea, g.sync?.confirmacion))
+  await sugerir(chatId, await trasCrear(await cargarConfig(), g.id, tarea))
 }
 
 /** "pon en calendar la de TOTT": the open task by title, then the event (or the hour question). */
@@ -174,12 +196,12 @@ async function responderAccion(
   params: AccionParams,
   resolver: (nonce: string) => Promise<Respuesta | null>,
   prefix: string | null
-): Promise<boolean> {
+): Promise<Respuesta | null> {
   const borrador = await crearBorrador(chatId, text, { tipo: 'accion', params, candidatos: [] })
   const r = await resolver(nonceDe(borrador.id))
   if (!r) {
     await borrarBorrador(borrador.id)
-    return false
+    return null
   }
   if (r.candidatos && r.candidatos.length > 0) {
     await actualizarBorrador(borrador.id, { tipo: 'accion', params, candidatos: r.candidatos })
@@ -189,6 +211,16 @@ async function responderAccion(
     await borrarBorrador(borrador.id)
   }
   await reply(chatId, joinLines(prefix, r.text), r.replyMarkup)
+  return r
+}
+
+/** "para" / "después" while organízame is running ends the session with its summary. */
+async function salidaOrganizar(chatId: number, text: string): Promise<boolean> {
+  if (!/^(?:para|basta|despu[eé]s|luego|stop|salir|ya|cancela|cancelar)\b/i.test(text.trim())) return false
+  const b = await borradorVigente(chatId)
+  if (!b || b.parsed.tipo !== 'organizar') return false
+  await borrarBorrador(b.id)
+  await reply(chatId, resumenOrganizar(b.parsed, await cargarConfig()))
   return true
 }
 
@@ -197,9 +229,27 @@ async function handleText(chatId: number, text: string, prefix: string | null) {
     await reply(chatId, joinLines(prefix, 'No entendí nada. ¿Me lo repites?'))
     return
   }
+  // Fase 7: the thread remembers what she said (the transcription, for a voice note).
+  await guardarTurno(chatId, 'user', text)
+  if (await salidaOrganizar(chatId, text)) return
   const companies = await cargarEmpresas()
   const parsed = parseMensaje(text, companies, cancunYmd())
   switch (parsed.kind) {
+    case 'olvidar':
+      await limpiarHilo(chatId)
+      await reply(chatId, joinLines(prefix, 'Listo, empezamos de cero.'))
+      return
+    case 'organizar': {
+      const cfg = await cargarConfig()
+      const o = await iniciarOrganizar(cfg)
+      if (!o) {
+        await reply(chatId, joinLines(prefix, `Nada que ordenar, ${cfg.nombre_persona}: no hay vencidas, ni sin fecha, ni urgentes 🎉`))
+        return
+      }
+      const nonce = await borradorConNonce(chatId, text, o.draft)
+      await reply(chatId, joinLines(prefix, o.texto), tecladoOrganizar(nonce))
+      return
+    }
     case 'ayuda':
       if (parsed.larga) {
         // The same guide as docs/comandos.md, in 2–3 HTML messages.
@@ -211,8 +261,13 @@ async function handleText(chatId: number, text: string, prefix: string | null) {
     case 'accion': {
       // "listo …" / "pasa …" / "borra …": by alarm number, "todo", or a word
       // of the title.
-      await responderAccion(chatId, text, { accion: parsed.accion }, (nonce) =>
+      const r = await responderAccion(chatId, text, { accion: parsed.accion }, (nonce) =>
         manejarAccion({ accion: parsed.accion }, parsed.arg, nonce), prefix)
+      // Fase 7-B: after closing ONE task directly, propose the next one.
+      if (parsed.accion === 'listo' && r && !r.candidatos?.length && !r.confirmar?.length && /^[\d\s,;]+$/.test(parsed.arg.trim()) && !parsed.arg.includes(',')) {
+        const id = r.text.startsWith('✅') ? await idDeNumero(parsed.arg.trim()) : null
+        if (id) await sugerir(chatId, await trasCompletar(chatId, await cargarConfig(), id))
+      }
       return
     }
     case 'nota_tarea': {
@@ -240,8 +295,9 @@ async function handleText(chatId: number, text: string, prefix: string | null) {
       return
     }
     case 'pregunta':
-      // Fase 3: context + LLM, ≤5 lines, logged in bot_preguntas.
+      // Fase 3: context + LLM, ≤5 lines, logged in bot_preguntas. Fase 7-B: one "ojo" if the data shows a problem.
       await reply(chatId, joinLines(prefix, await responderPregunta(chatId, parsed.texto)))
+      await sugerir(chatId, await trasPregunta(chatId, await cargarConfig()))
       return
     case 'radar': {
       if (!parsed.titulo) {
@@ -333,8 +389,15 @@ function botonesAclarar(nonce: string) {
 }
 
 async function preguntarQueEs(chatId: number, text: string, prefix: string | null) {
+  const cfg = await cargarConfig()
   const nonce = await borradorConNonce(chatId, text, { tipo: 'aclarar', texto: text })
-  await reply(chatId, joinLines(prefix, 'No te entendí. ¿Es una tarea nueva, una orden sobre una tarea, o una alarma?'), botonesAclarar(nonce))
+  await reply(chatId, joinLines(prefix, `No pillé eso, ${cfg.nombre_persona}. ¿Es una tarea nueva, una orden sobre una tarea, o una alarma?`), botonesAclarar(nonce))
+}
+
+/** The task id behind "listo 3": number 3 of the last numbered list. */
+async function idDeNumero(n: string): Promise<string | null> {
+  const { data } = await dbCliente().from('bot_alarmas').select('items').order('enviada_en', { ascending: false }).limit(1).maybeSingle<{ items: { n: number; task_id: string }[] }>()
+  return data?.items?.find((i) => i.n === Number(n))?.task_id ?? null
 }
 
 // ── Fase 4: free text → interpreter → plan ───────────────────────────────
@@ -406,7 +469,9 @@ async function handleLibre(chatId: number, text: string, parsed: Parsed, prefix:
   // ── Several actions, or anything that cancels: show the plan, ask OK ──
   if (necesitaConfirmacion(acciones)) {
     const nonce = await borradorConNonce(chatId, text, { tipo: 'plan', acciones })
-    await reply(chatId, joinLines(prefix, renderPlan(acciones)), botonesPlan(nonce))
+    // Fase 7-B: a long voice note closes with a door open for what was missed.
+    const cierre = prefix && acciones.length >= 3 ? '¿Algo que se me escapó?' : null
+    await reply(chatId, joinLines(prefix, renderPlan(acciones), cierre), botonesPlan(nonce))
     return
   }
 
@@ -443,6 +508,8 @@ async function handleLibre(chatId: number, text: string, parsed: Parsed, prefix:
     return
   }
   await reply(chatId, joinLines(prefix, await ejecutarUna(chatId, a)))
+  if (a.tarea) await guardarTurno(chatId, 'assistant', `[${a.tipo}] ${a.tarea.text}`, { tareas: [{ id: a.tarea.id, text: a.tarea.text }] })
+  if (a.tipo === 'completar' && a.tarea) await sugerir(chatId, await trasCompletar(chatId, await cargarConfig(), a.tarea.id))
 }
 
 // ── Voice notes ──────────────────────────────────────────────────────────
@@ -506,9 +573,11 @@ async function handleCallback(cq: CallbackQuery) {
 
   // "e:<nonce>:<company_id>" | "p:<nonce>:<priority>" | "t:<nonce>:<task_id>" | "y:<nonce>:1|0"
   // fase 4: "k:<nonce>:1|0" (plan) | "h:<nonce>:09|12|15|18" (alarm hour) | "q:<nonce>:tarea|orden|alarma"
-  const m = data.match(/^([eptykhq]):([0-9a-f]{8}):(.+)$/)
+  // fase 7: "s:<nonce>:<valor>" (suggestion) | "o:<nonce>:<valor>" (organízame)
+  const m = data.match(/^([eptykhqso]):([0-9a-f]{8}):(.+)$/)
   if (!m) return
   const [, kind, nonce, value] = m
+  await guardarTurno(chatId, 'user', `[botón: ${value}]`, { boton: value })
 
   try {
     await removeInlineKeyboard(chatId, messageId)
@@ -546,6 +615,34 @@ async function handleCallback(cq: CallbackQuery) {
       return
     }
 
+    // ── Fase 7-B: a suggestion's buttons ──
+    if (parsed.tipo === 'sugerencia') {
+      if (kind !== 's') return
+      const cfg: AsistenteConfig = await cargarConfig()
+      // The draft stays alive for "pasa todo" (it needs the nonce); the rest are done.
+      if (parsed.clase !== 'todo_manana') await borrarBorrador(borrador.id)
+      const texto = await resolverSugerencia(chatId, cfg, parsed, value, nonce)
+      if (parsed.clase === 'todo_manana') await borrarBorrador(borrador.id)
+      await reply(chatId, texto)
+      return
+    }
+
+    // ── Fase 7-C: organízame, one item at a time ──
+    if (parsed.tipo === 'organizar') {
+      if (kind !== 'o') return
+      const cfg = await cargarConfig()
+      const r = await responderOrganizar(parsed, value as RespuestaOrganizar, cfg)
+      if (r.terminado) {
+        await borrarBorrador(borrador.id)
+        await reply(chatId, joinLines(r.hecho, resumenOrganizar(r.draft, cfg)))
+        await sugerir(chatId, trasOrganizar())
+        return
+      }
+      await actualizarBorrador(borrador.id, r.draft)
+      await reply(chatId, joinLines(r.hecho, r.siguiente), tecladoOrganizar(nonce))
+      return
+    }
+
     // ── Fase 4: [✅ Hacer todo] [✏️ No, corrijo] ──
     if (parsed.tipo === 'plan') {
       if (kind !== 'k') return
@@ -555,6 +652,8 @@ async function handleCallback(cq: CallbackQuery) {
         return
       }
       await reply(chatId, await ejecutarPlan(chatId, parsed.acciones))
+      const tocadas = parsed.acciones.filter((a) => a.tarea && !a.error).map((a) => ({ id: a.tarea!.id, text: a.tarea!.text }))
+      if (tocadas.length > 0) await guardarTurno(chatId, 'assistant', `[plan] ${tocadas.length} tareas`, { tareas: tocadas })
       return
     }
 

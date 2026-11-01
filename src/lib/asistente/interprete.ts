@@ -14,6 +14,8 @@ import { COLS_SIN_NOTAS, normalizar, ultimaAlarma, type TaskRow } from './accion
 import { extraerCalendar, extraerFecha, extraerHora } from '@/lib/parser'
 import { addDays, cancunHm, cancunYmd, formatDiaLargoEs } from './cancun'
 import { llmConfig, preguntarLlm } from './llm'
+import { cargarConfig, personaPrompt, type AsistenteConfig } from './config'
+import { historial, renderHistorial, tareasRecientes } from './conversacion'
 
 export const MAX_TOKENS = 900
 export const TIMEOUT_MS = 20_000
@@ -96,11 +98,15 @@ export async function construirContextoInterprete(
 ): Promise<ContextoInterprete> {
   const today = cancunYmd(now)
   const db = createServerClient()
-  const [openRes, alarma, anteriorId] = await Promise.all([
+  const [openRes, alarma, anteriorLog, turnos, recientes] = await Promise.all([
     db.from('tasks').select(COLS_SIN_NOTAS).eq('done', false).order('created_at', { ascending: false }),
     ultimaAlarma(),
     ultimaMencionada(chatId),
+    historial(chatId, now),
+    tareasRecientes(chatId),
   ])
+  // Fase 7: "la anterior" is the last task the thread talked about; the old log is the fallback.
+  const anteriorId = recientes[0]?.id ?? anteriorLog
   if (openRes.error) throw new Error(`Supabase tasks: ${openRes.error.message}`)
   const abiertas = (openRes.data as unknown as TareaLite[]) ?? []
   const byId = new Map(abiertas.map((t) => [t.id, t]))
@@ -155,15 +161,22 @@ export async function construirContextoInterprete(
   lines.push(`EMPRESAS: ${companies.map((c) => c.name.trim()).join(', ')}`)
   lines.push(`HOY: ${today} (${formatDiaLargoEs(today)}) · hora actual ${cancunHm(now)} (Cancún) · mañana = ${addDays(today, 1)}`)
 
+  // Fase 7: the recent thread, with each mentioned task's current ref.
+  const refPorId = new Map(Array.from(porRef.entries()).map(([ref, t]) => [t.id, ref]))
+  const hilo = renderHistorial(turnos, (id) => (refPorId.has(id) ? `[${refPorId.get(id)}]` : null))
+  if (hilo) lines.push('', hilo)
+
   return { text: lines.join('\n'), porRef, abiertas, anterior }
 }
 
 // ── Prompt ───────────────────────────────────────────────────────────────
 
-export function systemPrompt(today: string): string {
+export function systemPrompt(today: string, cfg: AsistenteConfig = { nombre_persona: 'Gabby', nombre_bot: 'Asistente', tono: 'informal', sugerencias: true }): string {
   const manana = addDays(today, 1)
   return [
-    'Eres el intérprete de órdenes del asistente de tareas de Gabby. Recibes un CONTEXTO (fecha y hora en Cancún, sus empresas, ' +
+    personaPrompt(cfg),
+    '',
+    `Aquí actúas como INTÉRPRETE de órdenes de ${cfg.nombre_persona}. Recibes un CONTEXTO (fecha y hora en Cancún, sus empresas, ` +
       'sus tareas abiertas con un id entre corchetes y la última alarma numerada) y un MENSAJE escrito o dictado por voz. ' +
       'Respondes SOLO con un JSON {"acciones":[...]} con lo que Gabby quiere hacer, en el orden en que lo dijo. Nada fuera del JSON.',
     '',
@@ -200,6 +213,10 @@ export function systemPrompt(today: string): string {
       'Gabby escribe rápido y con errores de dedo ("terminaso" = terminado, "URo" puede ser "Puro"): elige la tarea más parecida. ' +
       'Varias órdenes vienen separadas por "/", comas o saltos de línea: una acción por orden. ' +
       'Una orden con dos cosas ("11 se llama URo, pasar para mañana") son DOS acciones sobre el mismo ref.',
+    'CONVERSACIÓN: si el mensaje es una respuesta corta a tu último turno ("sí", "dale", "la segunda", "esa no, la otra", "lo mismo para PD", "¿y lo de ayer?", "cambia la hora a las 4"), ' +
+      'resuélvelo con la CONVERSACIÓN RECIENTE del contexto: "la segunda" = la 2ª tarea mencionada en tu último mensaje (ahí viene su ref); "esa no, la otra" = la otra tarea mencionada; ' +
+      '"lo mismo para PD" = repite la última acción que ella pidió, con empresa PD; "cambia la hora a las 4" = cambiar hora de la última tarea creada o mencionada. ' +
+      'Si tu último turno fue una pregunta y ella contesta "sí"/"no", ejecuta lo que preguntaste. Si no hay conversación reciente, trátalo como un mensaje nuevo.',
     '',
     `FECHAS: hoy es ${today}; "mañana" = ${manana}; "pasado mañana" = ${addDays(today, 2)}. ` +
       'Un día de la semana es el PRÓXIMO (si hoy es lunes, "el lunes" es dentro de 7 días). ' +
@@ -440,9 +457,9 @@ export async function interpretar(
   try {
     const cfg = llmConfig()
     modelo = `interprete:${cfg.provider}:${cfg.model}`
-    const contexto = await construirContextoInterprete(chatId, companies)
+    const [contexto, persona] = await Promise.all([construirContextoInterprete(chatId, companies), cargarConfig()])
     const user = `CONTEXTO:\n${contexto.text}\n\n${pista ? `PISTA: ${pista}\n\n` : ''}MENSAJE: ${mensaje}`
-    const r = await preguntarLlm(systemPrompt(cancunYmd()), user, { maxTokens: MAX_TOKENS, timeoutMs: TIMEOUT_MS, json: true })
+    const r = await preguntarLlm(systemPrompt(cancunYmd(), persona), user, { maxTokens: MAX_TOKENS, timeoutMs: TIMEOUT_MS, json: true })
     const acciones = validarAcciones(extraerJson(r.text))
     console.log(`[interprete] ok · ${modelo} · ${acciones.length} acciones · in ${r.tokensIn} · out ${r.tokensOut} · ${r.ms} ms`)
     return { acciones, contexto, modelo, tokensIn: r.tokensIn, tokensOut: r.tokensOut, ms: r.ms }

@@ -4,14 +4,18 @@
 import { createServerClient } from '@/lib/supabase-server'
 import { construirContexto } from './contexto'
 import { llmConfig, preguntarLlm } from './llm'
+import { cargarConfig, personaPrompt, type AsistenteConfig } from './config'
+
+/** The persona (fase 7) + the answer rules. */
+export function systemPromptPregunta(cfg: AsistenteConfig): string {
+  return personaPrompt(cfg) + '\n\n' + SYSTEM_PROMPT
+}
 
 export const SYSTEM_PROMPT =
-  'Eres el asistente personal de Gabby. Respondes en español, informal, en MÁXIMO 5 líneas. ' +
+  'Respondes en MÁXIMO 5 líneas. ' +
   'Solo usas el contexto dado; si algo no está ahí, dices que no lo tienes. ' +
   'Nunca inventas tareas ni fechas. Si pregunta qué hacer primero, priorizas: ' +
   'vencidas > vence hoy > urgente★ > urgente > ★.\n' +
-  'Español neutro, como se habla en Venezuela: tuteo ("tienes", "quieres", "puedes"). ' +
-  'NUNCA uses voseo ("tenés", "querés", "podés", "vos").\n' +
   'Formato: si la pregunta pide una lista (qué tengo, qué hay, qué cerré, qué se me olvidó), ' +
   'responde solo con la lista: MÁXIMO 8 ítems, uno por línea, compactos, así: "- título · empresa · fecha" ' +
   '(usa "sin fecha" si no tiene). Para tareas cerradas, la fecha es la de cierre, p. ej. "- título · IM · cerrada jue 29 oct". ' +
@@ -68,9 +72,9 @@ export async function responderPregunta(chatId: number, pregunta: string): Promi
   try {
     const cfg = llmConfig()
     modelo = `${cfg.provider}:${cfg.model}`
-    const ctx = await construirContexto()
+    const [ctx, cfgPersona] = await Promise.all([construirContexto(), cargarConfig()])
     const user = `CONTEXTO:\n${ctx.text}\n\nPREGUNTA: ${q}`
-    const r = await preguntarLlm(SYSTEM_PROMPT, user, { maxTokens: MAX_TOKENS, timeoutMs: TIMEOUT_MS })
+    const r = await preguntarLlm(systemPromptPregunta(cfgPersona), user, { maxTokens: MAX_TOKENS, timeoutMs: TIMEOUT_MS })
     const respuesta = r.text ? acotar(r.text) : RESPUESTA_TRABADA
     console.log(`[pregunta] ok · ${modelo} · ctx ${ctx.chars} chars · in ${r.tokensIn} · out ${r.tokensOut} · ${r.ms} ms`)
     await registrar({ chat_id: chatId, pregunta: q, respuesta, modelo, tokens_in: r.tokensIn, tokens_out: r.tokensOut, ms: r.ms })
