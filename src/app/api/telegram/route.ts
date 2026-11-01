@@ -19,6 +19,7 @@ import {
   renderPlanSemana,
   resolverAcciones,
   resumenParaLog,
+  soloLasNombradas,
   sugerenciaPlanSemana,
   tareaParsedDe,
   type AccionResuelta,
@@ -498,7 +499,9 @@ async function handleLibre(chatId: number, text: string, parsed: Parsed, prefix:
     return
   }
 
-  const acciones = resolverAcciones(utiles, r.contexto, companies)
+  let acciones = resolverAcciones(utiles, r.contexto, companies)
+  // Fase 7-G: a plan by days only touches what the message named.
+  if (esPlanSemana(acciones)) acciones = soloLasNombradas(acciones, text)
   await registrar(chatId, text, r, acciones)
 
   // ── Several actions, or anything that cancels: show the plan, ask OK ──

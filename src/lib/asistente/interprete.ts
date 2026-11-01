@@ -220,6 +220,8 @@ export function systemPrompt(today: string, cfg: AsistenteConfig = { nombre_pers
     'SEMANA: si el mensaje describe VARIOS días ("hoy…, mañana…, el miércoles…, el jueves…"), separa cada cosa mencionada en su propia acción "crear" con la fecha de ESE día ' +
       '(en orden). "prioridad", "lo importante", "lo más importante", "me voy a concentrar en" → esa tarea con prioridad "urgente" e "importante":true. ' +
       'Si una cosa mencionada es claramente una tarea que ya está en la lista (mismo tema: "lo de marketing", "Jobescape"), usa "posponer" o "cambiar" con su ref en vez de crear. ' +
+      'REGLA ESTRICTA: en un plan por días SOLO se crean o mueven las tareas que el mensaje NOMBRA. Las demás tareas abiertas NO se tocan aunque tengan fecha de esos días o estén vencidas: ' +
+      'que diga "mañana" no significa mover nada a mañana. Solo si pide explícitamente "acomoda el resto" / "reacomoda lo demás" puedes proponer posponer las no nombradas. ' +
       'Un verbo dentro de la frase ("cancelar Jobescape") que describe la TAREA a hacer ese día sigue siendo crear ("Cancelar Jobescape"), salvo que esa tarea ya exista en la lista.',
     'CONVERSACIÓN: si el mensaje es una respuesta corta a tu último turno ("sí", "dale", "la segunda", "esa no, la otra", "lo mismo para PD", "¿y lo de ayer?", "cambia la hora a las 4"), ' +
       'resuélvelo con la CONVERSACIÓN RECIENTE del contexto: "la segunda" = la 2ª tarea mencionada en tu último mensaje (ahí viene su ref); "esa no, la otra" = la otra tarea mencionada; ' +

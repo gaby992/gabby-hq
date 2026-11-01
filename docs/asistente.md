@@ -1634,6 +1634,15 @@ Jueves (5):
 [ ✅ Así queda ]  [ ✏️ Corrijo ]
 ```
 
+**Solo lo que se nombró.** En un plan por días el bot crea o mueve
+únicamente las tareas que el mensaje nombra; las demás no se tocan aunque
+estén vencidas o tengan fecha de esos días ("mañana" no significa mover
+nada a mañana). Está en el prompt y, por si el modelo se pasa, en código:
+`soloLasNombradas()` descarta un `posponer`/`cambiar` sobre una tarea que
+el mensaje no menciona (ni por título, ni por palabra clave, ni por
+número) y lo muestra como `⚠️ … no la nombraste, no la toco`. Si quiere
+que el bot reacomode lo existente, lo pide: "acomoda el resto".
+
 Debajo va **una** sugerencia (qué le falta: empresa u hora), sin botones
 (los botones son los del plan). Al aprobar, las tareas creadas quedan en el
 hilo, así que "la de marketing a las 10", "lo de WSH ponlo en calendar" o
@@ -1693,6 +1702,9 @@ Ninguna.
    plan por día con [Así queda] [Corrijo]; después `la de marketing a las
    10` → le pone la hora a esa tarea; `lo de WSH ponlo en calendar` → el
    evento. En /tasks no hay duplicados.
+9b. Con «revisar propuesta de TOTT» abierta y vencida, el mismo audio de la
+    semana: TOTT **no** aparece en el plan ni cambia de fecha en /tasks.
+    Luego `acomoda el resto` → ahí sí propone moverla.
 10. `me da flojera armar el equipo de marketing` → 3–5 pasos y "Empieza
     por: …"; en /tasks la tarea tiene esas subtareas. `siguiente paso` →
     marca el primero y dice el segundo.

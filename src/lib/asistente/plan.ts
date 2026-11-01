@@ -21,7 +21,8 @@ import { confirmacion, guardarTarea } from './tareas'
 import { agregarACalendar, cuandoDe } from '@/lib/google/sync'
 import { textoListaPagos } from './pagos'
 import { dividirTarea, siguientePaso } from './pasos'
-import { buscarParecida } from './similitud'
+import { buscarParecida, palabrasClave } from './similitud'
+import { normalizar } from './acciones'
 import { SIMBOLO } from './alarmas'
 
 export interface TareaRef {
@@ -258,6 +259,36 @@ export function renderPlanSemana(acciones: AccionResuelta[], today: string = can
   const dias = Array.from(porDia.keys()).sort((x, y) => (x === '' ? 1 : y === '' ? -1 : x.localeCompare(y)))
   const bloques = dias.map((f) => `${f ? cabeceraDia(f, today) : 'Sin fecha'}:\n${porDia.get(f)!.map((l) => `  ${l}`).join('\n')}`)
   return ['Así queda tu semana:', ...bloques, ...(otros.length > 0 ? ['También:', ...otros.map((o) => `  ${o}`)] : [])].join('\n')
+}
+
+const PIDE_ACOMODAR = /\b(?:acomoda|reacomoda|reorganiza|reordena|mueve)\s+(?:el\s+resto|lo\s+dem[aá]s|las\s+dem[aá]s|todo\s+lo\s+dem[aá]s)\b|\bacomoda\s+el\s+resto\b/i
+
+/** Was this task named in the message (a keyword of its title, its title itself, or its number)? */
+function nombrada(a: AccionResuelta, mensaje: string): boolean {
+  if (!a.tarea) return true
+  const msg = normalizar(mensaje)
+  if ('ref' in a && a.ref) {
+    const num = a.ref.match(/^#?\s*(\d+)$/)
+    if (num && new RegExp(`(^|[^0-9])${num[1]}([^0-9]|$)`).test(msg)) return true
+  }
+  if (msg.includes(normalizar(a.tarea.text))) return true
+  const tokens = new Set(msg.replace(/[^a-z0-9ñ]+/g, ' ').split(' '))
+  return palabrasClave(a.tarea.text).some((k) => tokens.has(k))
+}
+
+/**
+ * Fase 7-G rule: in a plan by days, ONLY tasks the message names are created
+ * or moved. A posponer/cambiar on a task the message never mentioned is
+ * dropped (shown as "no la nombraste"), unless she asked "acomoda el resto".
+ */
+export function soloLasNombradas(acciones: AccionResuelta[], mensaje: string): AccionResuelta[] {
+  if (PIDE_ACOMODAR.test(mensaje)) return acciones
+  return acciones.map((a) => {
+    if ((a.tipo === 'posponer' || a.tipo === 'cambiar') && a.tarea && !a.error && !nombrada(a, mensaje)) {
+      return { ...a, error: 'no la nombraste, no la toco (di "acomoda el resto" si quieres que la mueva)' }
+    }
+    return a
+  })
 }
 
 /** The ONE line under a week plan: what is missing, if anything. */
