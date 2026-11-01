@@ -401,7 +401,12 @@ function parsePagos(text: string, companies: CompanyRef[]): Parsed | null {
   const n = sinAcentos(text.replace(/^[¿?¡!\s]+|[?!.\s]+$/g, '').trim())
   // Creating, changing or deleting a payment is web-only: say so instead of
   // letting "pago IM Vercel el 15" become a task.
-  if (/^(?:(?:agrega|agregar|crea|crear|nuevo|pon|ponme)\s+(?:el\s+|un\s+)?pago\b|pago\s+\S|(?:quita|quitar|borra|borrar|elimina|cancela|cambia|cambiar|mueve|pasa)\s+(?:el\s+)?pago\b)/.test(n)) {
+  const empresas = companies.map((c) => escapeRe(sinAcentos(c.name.trim()))).join('|')
+  const pagoDeEmpresa = empresas && new RegExp(`^pago\\s+(?:de\\s+)?(?:${empresas})\\b`).test(n)
+  if (
+    /^(?:(?:agrega|agregar|crea|crear|nuevo|pon|ponme)\s+(?:el\s+|un\s+)?pago\b|(?:quita|quitar|borra|borrar|elimina|cancela|cambia|cambiar|mueve|pasa)\s+(?:el\s+)?pago\b)/.test(n) ||
+    (/^pago\s+/.test(n) && (pagoDeEmpresa || /\b(?:cada\s+mes|mensual|de\s+cada\s+mes|recurrente)\b/.test(n)))
+  ) {
     return { kind: 'pagos_web' }
   }
   let m = n.match(/^(?:que|cuales)\s+pagos\s+(?:hay|tengo|vencen|tocan|caen|se\s+vencen)(?:\s+(?:esta|en\s+la)\s+semana)?(?:\s+de\s+(.+?))?(?:\s+(?:esta|en\s+la)\s+semana)?$/)
