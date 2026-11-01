@@ -15,7 +15,7 @@ import { addDays, cancunYmd, formatFechaHoraEs, formatHoraEs, formatVenceEs } fr
 import { buscarEnAbiertas, type AccionLlm, type ContextoInterprete, type TareaLite } from './interprete'
 import { ejecutarNota } from './notas-bot'
 import { responderPregunta } from './pregunta'
-import { responderQueSigue } from './que-sigue'
+import { enviarQueSigue } from './que-sigue'
 import { confirmacionAlarma, crearRecordatorio, instanteDe } from './recordatorios'
 import { confirmacion, guardarTarea } from './tareas'
 import { agregarACalendar, cuandoDe } from '@/lib/google/sync'
@@ -299,7 +299,9 @@ export async function ejecutarUna(chatId: number, a: AccionResuelta): Promise<st
     case 'pregunta':
       return responderPregunta(chatId, a.texto)
     case 'que_sigue':
-      return responderQueSigue(chatId, { empresa: a.empresa, solo_urgentes: a.solo_urgentes, solo_vencer: a.solo_vencer })
+      // Sent as its own HTML message, like the lists.
+      await enviarQueSigue(chatId, { empresa: a.empresa, solo_urgentes: a.solo_urgentes, solo_vencer: a.solo_vencer })
+      return '🎯 (enviado arriba)'
     case 'lista':
       // Sent as its own HTML message (same builder as the cron); nothing to add here.
       await enviarLista(chatId, a.lista)

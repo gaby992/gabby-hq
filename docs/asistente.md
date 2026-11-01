@@ -105,7 +105,7 @@ Archivos del asistente dentro del repo:
 | `src/lib/asistente/interprete.ts` | Fase 4: contexto + prompt → JSON de acciones; registro en `bot_preguntas` |
 | `src/lib/asistente/plan.ts` | Fase 4: resuelve refs (#3, t12, "la anterior", título), pinta "Entendí: …" y ejecuta |
 | `src/lib/asistente/recordatorios.ts` | Fase 4: alarmas propias (`bot_recordatorios`): crear, listar, quitar, mandar, +1h/mañana |
-| `src/lib/asistente/que-sigue.ts` | Fase 4b: "¿qué sigue?" — orden determinista en código, el LLM solo redacta; numeración en `bot_alarmas` |
+| `src/lib/asistente/que-sigue.ts` | Fase 4b: "¿qué sigue?" — orden determinista en código, HTML como la lista; numeración en `bot_alarmas` |
 | `src/app/api/asistente/que-sigue/route.ts` | Fase 4b: el botón "¿Qué sigue?" de /hoy (sesión de la app, no cron) |
 | `src/lib/notas.ts` | Notas "por dónde iba": guardar (archiva la anterior en `notas_historial`), borrar, archivar, edad |
 | `src/lib/google/crypto.ts` | Fase 5: cifra/descifra el refresh token (AES-256-GCM, `APP_ENCRYPTION_KEY`) |
@@ -165,9 +165,12 @@ cada empresa:
 1. 📝 Tu nota "por dónde iba" completa, si la tienes escrita.
 2. Las tareas que importan hoy, **numeradas de corrido** a lo largo de todo el
    mensaje (1, 2, 3… sin reiniciar por empresa), para poder referirte a ellas:
-   - 🔴 vencidas, con "hace N días"
-   - 🟡 vencen hoy
-   - ⭐ urgentes o ★ importantes sin fecha o con fecha futura
+   - ● vencidas, con "hace N días"
+   - ○ vencen hoy
+   - ★ urgentes o importantes sin fecha o con fecha futura
+   (símbolos de texto, no emojis: Telegram no puede achicar un emoji y
+   estos se ven la mitad de grandes; misma regla en el cierre y en "¿qué
+   sigue?")
 
 Una empresa sin nota y sin tareas en esas categorías no aparece. En el bloque
 de Chelsea también va cuántos correos tiene pendientes en inbox-IM, con link a
@@ -184,15 +187,15 @@ Ejemplo:
 
 IM
 📝 Pendiente la propuesta de X; retomar por la sección de precios.
-🔴 1. Mandar factura de septiembre · hace 3 días
-🟡 2. Llamar a Y
-⭐ 3. Revisar contrato · 5 nov
+● 1. Mandar factura de septiembre · hace 3 días
+○ 2. Llamar a Y
+★ 3. Revisar contrato · 5 nov
 
 PD
-⭐ 4. Armar deck para inversionistas
+★ 4. Armar deck para inversionistas
 
 Chelsea
-⭐ 5. Cotizar proveedor nuevo
+★ 5. Cotizar proveedor nuevo
 📬 3 correos pendientes → /inbox
 
 Total: 5 tareas · abrir GabbyHQ
@@ -406,7 +409,7 @@ Para ver las corridas del Cron: **Settings → Cron Jobs**; cada job muestra la
 - La alarma de la tarde **recalcula** la lista pendiente (misma regla que la
   mañana) y la numera de nuevo desde 1. Los números de `pasa` siempre son los
   del último mensaje que recibiste.
-- `pasa N` sobre una tarea sin fecha (⭐) le pone fecha de mañana.
+- `pasa N` sobre una tarea sin fecha (★) le pone fecha de mañana.
 - Las tareas cerradas **antes** de correr el SQL no tienen `completed_at`, así
   que nunca saldrán en "Hecho hoy". Las que cierres después, sí.
 - Si Telegram falla a mitad de un mensaje de varias partes, el reintento vuelve
@@ -1091,25 +1094,38 @@ completa (eso es la alarma de las 8): es una respuesta corta y ordenada con
 formato fijo:
 
 ```
-🎯 Ahora: 1. «paypal statements» · IM · vencida hace 3 días
-📌 Después:
-2. «…» · PD · vence hoy
-3. «…» · IM · urgente ★
-4. «…» · DATAVIA · urgente
-⏳ Por vencer esta semana:
-5. «…» · IM · jue 6 nov
-6. «…» · PD · vie 7 nov
-📝 Por dónde ibas:
-IM: … (solo notas de los últimos 3 días, una línea cada una)
+🎯 Qué sigue · dom 1 nov
+
+Ahora
+● 1. paypal statements · IM · hace 3 días
+
+Después
+○ 2. … · PD · hoy
+★ 3. … · IM · urgente ★
+★ 4. … · DATAVIA · urgente
+
+Por vencer esta semana
+◇ 5. … · IM · jue 6 nov
+◇ 6. … · PD · vie 7 nov 3:00 pm
+
+Por dónde ibas
+📝 IM: … (solo notas de los últimos 3 días, una línea cada una)
 ```
 
-El orden lo decide el **código**, determinista, antes de llamar al modelo:
-vencidas (más vieja primero) > vence hoy > urgente★ > urgente > ★ con fecha
-esta semana > ★ sin fecha. "Por vencer" son las que vencen entre mañana y el
-domingo y no salieron arriba, por fecha. El LLM **solo redacta**
-(`SYSTEM_PROMPT` en `que-sigue.ts`, 15 s, 400 tokens); si cambia la
-numeración o falla, sale el texto fijo tal cual. Las tareas de Chelsea no
-entran (son delegadas) salvo que pidas `qué sigue de Chelsea`.
+Mismo estilo que la lista de la mañana: encabezado con la fecha, cada
+sección con su título en negrita en su propia línea, línea en blanco entre
+secciones, y cada ítem como en la lista: símbolo (● vencida · ○ hoy · ★
+urgente/importante · ◇ vence esta semana) + número + título + empresa +
+fecha o edad. Sección vacía: `— nada vence esta semana` / `— sin notas de
+los últimos 3 días`.
+
+El orden lo decide el **código**, determinista: vencidas (más vieja primero)
+> vence hoy > urgente★ > urgente > ★ con fecha esta semana > ★ sin fecha.
+"Por vencer" son las que vencen entre mañana y el domingo y no salieron
+arriba, por fecha. **No pasa por el LLM**: con el formato de ítem fijo no
+queda nada que redactar, así que es instantáneo y no cuesta tokens. Las
+tareas de Chelsea no entran (son delegadas) salvo que pidas `qué sigue de
+Chelsea`.
 
 | Variante | Qué cambia |
 | --- | --- |
@@ -1218,11 +1234,10 @@ El intérprete también lo entiende dicho de otra forma ("mándame la lista",
 `/ayuda` (📋).
 
 **B) "Qué sigue" siempre con 3 secciones.** Si no hay nada por vencer:
-`⏳ Nada vence esta semana`. Si no hay notas recientes: `📝 Sin notas de los
-últimos 3 días`. La respuesta tiene siempre la misma forma; el modelo debe
-copiar esas dos líneas tal cual y, si omite una sección, se usa el texto
-fijo. (`solo urgentes` sigue sin ⏳ y `qué vence esta semana` sigue solo con
-⏳, porque eso se pidió así.)
+`— nada vence esta semana`. Si no hay notas recientes: `— sin notas de los
+últimos 3 días`. La respuesta tiene siempre la misma forma. (`solo urgentes`
+sigue sin "Por vencer" y `qué vence esta semana` sigue solo con esa sección,
+porque eso se pidió así.)
 
 **C) Bug: fecha dentro del título al crear por intérprete.** "normal IM
 revisar propuesta de TOTT para el viernes" creaba «revisar propuesta de TOTT
@@ -1249,8 +1264,8 @@ no voy"). Probado con las 8 formas en `revisar propuesta de TOTT …` → títul
 
 1. `/hoy` → llega el mismo mensaje de las 8:00; `listo 1` cierra la primera.
    `cierre` → el de las 6:00 pm. Por voz: "dame la lista".
-2. `¿qué sigue?` sin nada esta semana ni notas → trae `⏳ Nada vence esta
-   semana` y `📝 Sin notas de los últimos 3 días`.
+2. `¿qué sigue?` sin nada esta semana ni notas → trae `— nada vence esta
+   semana` y `— sin notas de los últimos 3 días`.
 3. `normal IM revisar propuesta de TOTT para el viernes` → `✅ IM · Normal ·
    «revisar propuesta de TOTT» · vence vie …`. Repite con las otras 7 formas.
 

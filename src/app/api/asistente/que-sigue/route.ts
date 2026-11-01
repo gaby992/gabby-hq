@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { isValidSession } from '@/lib/session'
-import { responderQueSigue } from '@/lib/asistente/que-sigue'
+import { textoQueSigue } from '@/lib/asistente/que-sigue'
 
 // The "¿Qué sigue?" button in /hoy. Same computation and wording as the bot
 // command; guarded by the app session cookie (the middleware lets /api/*
@@ -16,7 +16,7 @@ export async function GET(request: Request) {
   }
   const empresa = new URL(request.url).searchParams.get('empresa')
   try {
-    const text = await responderQueSigue(null, { empresa: empresa || null })
+    const text = await textoQueSigue({ empresa: empresa || null })
     return NextResponse.json({ text })
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err)

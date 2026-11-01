@@ -45,7 +45,7 @@ import {
 } from '@/lib/asistente/borradores'
 import { cargarEmpresas, confirmacion, guardarTarea, pregunta } from '@/lib/asistente/tareas'
 import { responderPregunta } from '@/lib/asistente/pregunta'
-import { responderQueSigue } from '@/lib/asistente/que-sigue'
+import { enviarQueSigue } from '@/lib/asistente/que-sigue'
 import { enviarLista } from '@/lib/asistente/alarmas'
 import { agregarACalendar, type ResultadoSync } from '@/lib/google/sync'
 import { buscarEnAbiertas } from '@/lib/asistente/interprete'
@@ -264,8 +264,9 @@ async function handleText(chatId: number, text: string, prefix: string | null) {
       await enviarLista(chatId, parsed.tipo)
       return
     case 'que_sigue':
-      // Fase 4b: ordered in code, worded by the LLM, numbered like an alarm.
-      await reply(chatId, joinLines(prefix, await responderQueSigue(chatId, parsed.opts)))
+      // Fase 4b: ordered in code, same HTML style as the 8:00 list, numbered like an alarm.
+      if (prefix) await reply(chatId, prefix)
+      await enviarQueSigue(chatId, parsed.opts)
       return
     case 'alarmas':
       await reply(chatId, joinLines(prefix, await listarRecordatorios(chatId)))

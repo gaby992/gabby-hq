@@ -2,8 +2,10 @@
 // short, ORDERED answer: one task to do now, up to three after it, up to
 // three due this week, and the notes of the last 3 days.
 //
-// The order is decided HERE, deterministically; the LLM only words it. If
-// the model fails, the same sections go out in the fixed format anyway.
+// The order is decided HERE, deterministically, and the message is rendered
+// in the same HTML style as the 8:00 list (bold section titles, one item per
+// line, text symbols). No LLM: with a fixed item format there is nothing left
+// to word, and this way it is instant and free.
 //   vencidas (más vieja primero) > vence hoy > urgente★ > urgente >
 //   ★ con fecha esta semana > ★ sin fecha
 // The task lines are numbered and recorded in bot_alarmas (tipo 'que_sigue')
@@ -14,9 +16,9 @@ import type { Company, NotaEmpresa, Priority } from '@/types'
 import { CHELSEA_COMPANY_NAME } from '@/lib/chelsea'
 import { NOTA_FRESCA_DIAS } from '@/lib/notas'
 import { daysSince } from '@/lib/dates'
-import { guardarAlarma, type AlarmaItem } from './alarmas'
+import { SIMBOLO, guardarAlarma, type AlarmaItem } from './alarmas'
 import { addDays, cancunYmd, daysBetween, formatHoraEs, formatVenceEs } from './cancun'
-import { llmConfig, preguntarLlm } from './llm'
+import { escapeHtml, sendTelegram } from './telegram'
 
 export interface QueSigueOpts {
   /** "qué sigue de IM" */
@@ -43,6 +45,7 @@ interface Rankeada {
   /** Lower first. */
   rank: number
   porque: string
+  simbolo: string
 }
 
 export interface QueSigue {
@@ -52,33 +55,33 @@ export interface QueSigue {
   notas: { empresa: string; texto: string; dias: number }[]
   /** The numbering, in message order. */
   items: AlarmaItem[]
-  /** Deterministic rendering (also the fallback). */
-  textoFijo: string
+  /** Telegram HTML, same style as the 8:00 list. */
+  html: string
+  /** The same message without tags, for the web card. */
+  textoPlano: string
 }
 
 const MAX_DESPUES = 3
 const MAX_VENCER = 3
 const MAX_NOTA_CHARS = 140
-export const MAX_TOKENS = 400
-export const TIMEOUT_MS = 15_000
 
 function corto(s: string, max: number): string {
   const una = s.replace(/\s+/g, ' ').trim()
   return una.length > max ? una.slice(0, max - 1) + '…' : una
 }
 
-/** rank + the "por qué" shown next to the task. null → not a candidate for Ahora/Después. */
-function rankear(t: TaskLite, today: string, domingo: string): { rank: number; porque: string } | null {
+/** rank + symbol + the "por qué" tail. null → not a candidate for Ahora/Después. */
+function rankear(t: TaskLite, today: string, domingo: string): { rank: number; porque: string; simbolo: string } | null {
   if (t.due_date && t.due_date < today) {
     const d = daysBetween(t.due_date, today)
     // 0..9999: oldest first inside the bucket.
-    return { rank: 10_000 - Math.min(d, 9_999), porque: `vencida hace ${d} ${d === 1 ? 'día' : 'días'}` }
+    return { rank: 10_000 - Math.min(d, 9_999), porque: `hace ${d} ${d === 1 ? 'día' : 'días'}`, simbolo: SIMBOLO.vencida }
   }
-  if (t.due_date === today) return { rank: 20_000, porque: 'vence hoy' }
-  if (t.priority === 'urgente' && t.importante) return { rank: 30_000, porque: 'urgente ★' }
-  if (t.priority === 'urgente') return { rank: 40_000, porque: 'urgente' }
-  if (t.importante && t.due_date && t.due_date <= domingo) return { rank: 50_000, porque: `★ vence ${formatVenceEs(t.due_date)}` }
-  if (t.importante) return { rank: 60_000, porque: '★ sin fecha' }
+  if (t.due_date === today) return { rank: 20_000, porque: `hoy${t.due_time ? ` ${formatHoraEs(t.due_time.slice(0, 5))}` : ''}`, simbolo: SIMBOLO.hoy }
+  if (t.priority === 'urgente' && t.importante) return { rank: 30_000, porque: 'urgente ★', simbolo: SIMBOLO.estrella }
+  if (t.priority === 'urgente') return { rank: 40_000, porque: 'urgente', simbolo: SIMBOLO.estrella }
+  if (t.importante && t.due_date && t.due_date <= domingo) return { rank: 50_000, porque: `★ ${formatVenceEs(t.due_date)}`, simbolo: SIMBOLO.estrella }
+  if (t.importante) return { rank: 60_000, porque: '★ sin fecha', simbolo: SIMBOLO.estrella }
   return null
 }
 
@@ -113,8 +116,8 @@ export async function calcularQueSigue(opts: QueSigueOpts = {}, now: Date = new 
 
   const ranked = tasks
     .map((task) => ({ task, r: rankear(task, today, domingo) }))
-    .filter((x): x is { task: TaskLite; r: { rank: number; porque: string } } => x.r !== null)
-    .map((x) => ({ task: x.task, rank: x.r.rank, porque: x.r.porque }))
+    .filter((x): x is { task: TaskLite; r: { rank: number; porque: string; simbolo: string } } => x.r !== null)
+    .map((x) => ({ task: x.task, rank: x.r.rank, porque: x.r.porque, simbolo: x.r.simbolo }))
     .sort((a, b) => a.rank - b.rank || (a.task.due_date ?? '9999').localeCompare(b.task.due_date ?? '9999'))
 
   const ahora = opts.solo_vencer ? null : ranked[0] ?? null
@@ -137,83 +140,65 @@ export async function calcularQueSigue(opts: QueSigueOpts = {}, now: Date = new 
           dias: daysSince(n.updated_at, now),
         }))
 
+  // ── Rendering: same shape as the 8:00 list ──
   const items: AlarmaItem[] = []
-  const lineas: string[] = []
-  const emp = (t: TaskLite) => t.company?.name ?? 'sin empresa'
+  const bloques: string[] = []
+  const emp = (t: TaskLite) => escapeHtml(t.company?.name ?? 'sin empresa')
   const num = (t: TaskLite) => {
     items.push({ n: items.length + 1, task_id: t.id })
     return items.length
   }
+  const item = (simbolo: string, t: TaskLite, cola: string) => `${simbolo} ${num(t)}. ${escapeHtml(t.text)} · ${emp(t)} · ${cola}`
+
+  const de = opts.empresa ? ` · ${escapeHtml(opts.empresa)}` : ''
+  bloques.push(`🎯 <b>Qué sigue${de} · ${formatVenceEs(today)}</b>`)
 
   if (!opts.solo_vencer) {
-    if (ahora) lineas.push(`🎯 Ahora: ${num(ahora.task)}. «${ahora.task.text}» · ${emp(ahora.task)} · ${ahora.porque}`)
-    else lineas.push('🎯 Ahora: nada vencido ni urgente' + (opts.empresa ? ` de ${opts.empresa}` : '') + ' 🎉')
+    bloques.push(['<b>Ahora</b>', ahora ? item(ahora.simbolo, ahora.task, ahora.porque) : '— nada vencido ni urgente 🎉'].join('\n'))
     if (despues.length > 0) {
-      lineas.push('📌 Después:')
-      for (const d of despues) lineas.push(`${num(d.task)}. «${d.task.text}» · ${emp(d.task)} · ${d.porque}`)
+      bloques.push(['<b>Después</b>', ...despues.map((d) => item(d.simbolo, d.task, d.porque))].join('\n'))
     }
   }
-  // Fase 4c: the answer always has the same shape — empty sections say so.
   if (!opts.solo_urgentes) {
-    if (porVencer.length > 0) {
-      lineas.push('⏳ Por vencer esta semana:')
-      for (const t of porVencer) lineas.push(`${num(t)}. «${t.text}» · ${emp(t)} · ${formatVenceEs(t.due_date!)}${t.due_time ? ` ${formatHoraEs(t.due_time.slice(0, 5))}` : ''}`)
-    } else {
-      lineas.push('⏳ Nada vence esta semana' + (opts.empresa ? ` de ${opts.empresa}` : ''))
-    }
+    bloques.push([
+      '<b>Por vencer esta semana</b>',
+      ...(porVencer.length > 0
+        ? porVencer.map((t) => item(SIMBOLO.proxima, t, `${formatVenceEs(t.due_date!)}${t.due_time ? ` ${formatHoraEs(t.due_time.slice(0, 5))}` : ''}`))
+        : ['— nada vence esta semana']),
+    ].join('\n'))
   }
   if (!opts.solo_vencer) {
-    if (notasFrescas.length > 0) {
-      lineas.push('📝 Por dónde ibas:')
-      for (const n of notasFrescas) lineas.push(`${n.empresa}: ${n.texto}`)
-    } else {
-      lineas.push('📝 Sin notas de los últimos 3 días')
-    }
+    bloques.push([
+      '<b>Por dónde ibas</b>',
+      ...(notasFrescas.length > 0
+        ? notasFrescas.map((n) => `📝 ${escapeHtml(n.empresa)}: ${escapeHtml(n.texto)}`)
+        : ['— sin notas de los últimos 3 días']),
+    ].join('\n'))
   }
 
-  return { ahora, despues, porVencer, notas: notasFrescas, items, textoFijo: lineas.join('\n') }
+  const html = bloques.join('\n\n')
+  const textoPlano = html.replace(/<\/?b>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
+  return { ahora, despues, porVencer, notas: notasFrescas, items, html, textoPlano }
 }
 
-const SYSTEM_PROMPT =
-  'Eres el asistente personal de Gabby. Te doy una lista YA ORDENADA de sus tareas y tu único trabajo es redactarla ' +
-  'en español neutro (tuteo, nunca voseo), corta y clara, con EXACTAMENTE este formato y en este orden:\n' +
-  '🎯 Ahora: N. «título» · empresa · por qué\n' +
-  '📌 Después:\nN. «título» · empresa · por qué   (hasta 3 líneas)\n' +
-  '⏳ Por vencer esta semana:\nN. «título» · empresa · fecha   (hasta 3 líneas)\n' +
-  '📝 Por dónde ibas:\nEmpresa: una línea por nota\n' +
-  'Reglas: conserva los números, los títulos entre «» y el orden tal cual; no agregues ni quites tareas; ' +
-  'las líneas "⏳ Nada vence esta semana" y "📝 Sin notas de los últimos 3 días" se copian tal cual cuando vienen; ' +
-  'el "por qué" puede ir en tus palabras pero con el mismo dato ' +
-  '("vencida hace 3 días", "vence hoy", "urgente ★"). Puedes resumir una nota larga a una línea. ' +
-  'Sin saludos, sin encabezados, sin comentarios: solo las secciones.'
-
 /**
- * Computes, words with the LLM (or not), records the numbering for the chat.
- * `chatId` null (the web) skips the recording.
+ * Sends the HTML message to the chat and records the numbering, so
+ * "listo 1" / "pasa el segundo" work on it. Returns the number of items.
  */
-export async function responderQueSigue(chatId: number | null, opts: QueSigueOpts = {}): Promise<string> {
+export async function enviarQueSigue(chatId: number, opts: QueSigueOpts = {}): Promise<number> {
   const q = await calcularQueSigue(opts)
-  let texto = q.textoFijo
-  if (q.items.length > 0 || q.notas.length > 0) {
-    try {
-      const cfg = llmConfig()
-      const r = await preguntarLlm(SYSTEM_PROMPT, `LISTA ORDENADA:\n${q.textoFijo}`, { maxTokens: MAX_TOKENS, timeoutMs: TIMEOUT_MS })
-      // Keep the model's text only if it kept every number (the refs rely on
-      // them) and every section header (the fixed shape).
-      const cabeceras = ['🎯', '📌', '⏳', '📝'].filter((c) => q.textoFijo.includes(c))
-      const ok = r.text && q.items.every((it) => new RegExp(`(^|\\s)${it.n}\\.\\s`).test(r.text)) && cabeceras.every((c) => r.text.includes(c))
-      if (ok) texto = r.text.trim()
-      else console.warn(`[que-sigue] el modelo (${cfg.model}) cambió la numeración; uso el texto fijo`)
-    } catch (err) {
-      console.error(`[que-sigue] LLM falló: ${err instanceof Error ? err.message : String(err)} — texto fijo`)
-    }
-  }
-  if (chatId !== null && q.items.length > 0) {
+  await sendTelegram(chatId, q.html, { html: true, tag: 'que-sigue' })
+  if (q.items.length > 0) {
     try {
       await guardarAlarma('que_sigue', q.items)
     } catch (err) {
       console.error(`[que-sigue] bot_alarmas: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
-  return texto
+  return q.items.length
+}
+
+/** The same message without tags: the "¿Qué sigue?" card in /hoy. */
+export async function textoQueSigue(opts: QueSigueOpts = {}): Promise<string> {
+  return (await calcularQueSigue(opts)).textoPlano
 }

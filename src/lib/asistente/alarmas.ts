@@ -29,6 +29,13 @@ const SIN_EMPRESA = 'Sin empresa'
 const RETRY_DELAY_MS = 30_000
 
 type Bucket = 'vencida' | 'hoy' | 'estrella'
+
+/**
+ * Text symbols instead of emoji: Telegram cannot shrink an emoji, and these
+ * render at half the size. Shared by the lists and "¿qué sigue?".
+ *   ● vencida · ○ vence hoy · ★ urgente/importante · ◇ vence esta semana
+ */
+export const SIMBOLO = { vencida: '●', hoy: '○', estrella: '★', proxima: '◇' } as const
 const BUCKET_ORDER: Bucket[] = ['vencida', 'hoy', 'estrella']
 const PRIORITY_RANK = { urgente: 0, normal: 1, cuando: 2 } as const
 
@@ -207,12 +214,12 @@ function lineFor(item: Numbered, today: string): string {
   switch (item.bucket) {
     case 'vencida': {
       const d = daysBetween(item.task.due_date!, today)
-      return `🔴 ${item.n}. ${text} · hace ${d} ${d === 1 ? 'día' : 'días'}`
+      return `${SIMBOLO.vencida} ${item.n}. ${text} · hace ${d} ${d === 1 ? 'día' : 'días'}`
     }
     case 'hoy':
-      return `🟡 ${item.n}. ${text}${hora}`
+      return `${SIMBOLO.hoy} ${item.n}. ${text}${hora}`
     case 'estrella':
-      return `⭐ ${item.n}. ${text}${item.task.due_date ? ` · ${formatCortoEs(item.task.due_date)}` : ''}${hora}`
+      return `${SIMBOLO.estrella} ${item.n}. ${text}${item.task.due_date ? ` · ${formatCortoEs(item.task.due_date)}` : ''}${hora}`
   }
 }
 
