@@ -78,7 +78,8 @@ export interface QueSigueOpts {
 }
 
 export type Parsed =
-  | { kind: 'ayuda' }
+  /** `larga`: "/ayuda todo" — the full guide (docs/comandos.md) in 2–3 messages. */
+  | { kind: 'ayuda'; larga: boolean }
   | { kind: 'que_sigue'; opts: QueSigueOpts }
   /** Fase 4c: the 8:00 / 6:00 pm list, on demand; fase 4d: 'pendientes' + empresa = one company's full list. */
   | { kind: 'lista'; tipo: ListaTipo; empresa?: CompanyRef | null }
@@ -484,7 +485,8 @@ export function parseMensaje(raw: string, companies: CompanyRef[], today: string
   const text = raw.trim()
   const lower = text.toLowerCase()
 
-  if (/^(?:\/start|\/help|\/ayuda|ayuda|help|formato)\b/i.test(lower)) return { kind: 'ayuda' }
+  if (/^\/?comandos\b|^\/?(?:ayuda|help)\s+(?:todo|toda|larga|completa|full)\b/i.test(lower)) return { kind: 'ayuda', larga: true }
+  if (/^(?:\/start|\/help|\/ayuda|ayuda|help|formato)\b/i.test(lower)) return { kind: 'ayuda', larga: false }
   const lista = parseLista(text, companies)
   if (lista) return { kind: 'lista', tipo: lista.tipo, empresa: lista.empresa ?? null }
   const pagos = parsePagos(text, companies)
@@ -577,6 +579,6 @@ export function ayuda(modelo: string): string {
     '⏰ ALARMAS PROPIAS (no son tareas)',
     'alarma mañana 3pm revisar pagos · recuérdame el viernes a las 10 llamar al contador · avísame en 2 horas X · mis alarmas · quita alarma 2',
     '⏰ Alarmas ☀️ 8:00 am y 🌙 6:00 pm, lun–sáb · 🏢 IM · DATAVIA · PD · Personal · Chelsea',
-    `🤖 Modelo actual: ${modelo}`,
+    `📖 /ayuda todo → la guía completa con ejemplos · 🤖 Modelo actual: ${modelo}`,
   ].join('\n')
 }

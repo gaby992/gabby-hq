@@ -47,6 +47,7 @@ import { cargarEmpresas, confirmacion, guardarTarea, pregunta } from '@/lib/asis
 import { responderPregunta } from '@/lib/asistente/pregunta'
 import { enviarQueSigue } from '@/lib/asistente/que-sigue'
 import { enviarLista } from '@/lib/asistente/alarmas'
+import { guiaTelegram } from '@/lib/asistente/comandos'
 import { agregarACalendar, type ResultadoSync } from '@/lib/google/sync'
 import { buscarEnAbiertas } from '@/lib/asistente/interprete'
 import { textoListaPagos } from '@/lib/asistente/pagos'
@@ -68,9 +69,9 @@ const ERROR_GENERICO = 'Error al procesar. Intenta de nuevo.'
 
 // Plain-text reply. The shared helper throws on a Telegram error (the alarms
 // need that to retry); here a failed reply is only worth a log line.
-async function reply(chatId: number, text: string, replyMarkup?: unknown) {
+async function reply(chatId: number, text: string, replyMarkup?: unknown, html = false) {
   try {
-    await sendTelegram(chatId, text, { tag: 'bot', replyMarkup })
+    await sendTelegram(chatId, text, { tag: 'bot', replyMarkup, html })
   } catch {
     /* already logged by sendTelegram */
   }
@@ -200,6 +201,11 @@ async function handleText(chatId: number, text: string, prefix: string | null) {
   const parsed = parseMensaje(text, companies, cancunYmd())
   switch (parsed.kind) {
     case 'ayuda':
+      if (parsed.larga) {
+        // The same guide as docs/comandos.md, in 2–3 HTML messages.
+        for (const parte of guiaTelegram()) await reply(chatId, parte, undefined, true)
+        return
+      }
       await reply(chatId, ayuda(modeloActual()))
       return
     case 'accion': {

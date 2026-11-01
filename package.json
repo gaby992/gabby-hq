@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "comandos": "node scripts/comandos-md.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.104.0",

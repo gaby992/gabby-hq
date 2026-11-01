@@ -1,0 +1,80 @@
+{
+  "intro": "Todo se le dice al bot en texto o por voz, como hablas. Los números son los de la última lista que te mandó; también vale una palabra del título.",
+  "secciones": [
+    {
+      "id": "ver",
+      "emoji": "👀",
+      "titulo": "Ver",
+      "lineas": [
+        { "ejemplo": "/hoy", "que": "la lista completa de hoy, por empresa (la misma de las 8:00)" },
+        { "ejemplo": "cierre", "que": "el cierre del día (el mismo de las 6:00 pm)" },
+        { "ejemplo": "¿qué sigue?", "que": "una tarea para ahora, tres después, tres por vencer y tus notas recientes" },
+        { "ejemplo": "solo urgentes", "que": "lo mismo, sin la parte de \"por vencer\"" },
+        { "ejemplo": "qué vence esta semana", "que": "solo lo que vence de aquí al domingo" },
+        { "ejemplo": "qué sigue de IM", "que": "lo mismo, pero solo de esa empresa" },
+        { "ejemplo": "/pendientes IM", "que": "todo lo abierto de IM, numerado" },
+        { "ejemplo": "¿qué cerré ayer?", "que": "pregunta libre: te contesta con tus tareas y notas (también \"? qué tengo hoy\")" },
+        { "ejemplo": "mis alarmas", "que": "tus alarmas pendientes, numeradas" },
+        { "ejemplo": "pagos de IM", "que": "los pagos recurrentes de esa empresa; \"qué pagos hay esta semana\" filtra" }
+      ]
+    },
+    {
+      "id": "agregar",
+      "emoji": "➕",
+      "titulo": "Agregar",
+      "lineas": [
+        { "ejemplo": "urgente IM llamar a Juan mañana 3pm", "que": "tarea con urgencia, empresa, fecha y hora, en el orden que quieras" },
+        { "ejemplo": "para PD: mandar propuesta el viernes", "que": "otra forma de decir la empresa" },
+        { "ejemplo": "revisar contrato el 15 de noviembre", "que": "si falta empresa o urgencia, te pregunta con botones" },
+        { "ejemplo": "IM revisar propuesta el viernes y ponla en calendar", "que": "además crea el evento en Google Calendar (sin hora, te pregunta a qué hora)" },
+        { "ejemplo": "alarma mañana 9am revisar pagos", "que": "alarma propia: te llega un ⏰ a esa hora (no es una tarea)" },
+        { "ejemplo": "recuérdame el viernes a las 10 llamar al contador", "que": "lo mismo, dicho de otra forma; \"avísame en 2 horas …\" también" },
+        { "ejemplo": "nota IM: vamos por la propuesta 2", "que": "la nota \"por dónde iba\" de IM (reemplaza la que había)" },
+        { "ejemplo": "nota IM + ya respondió el cliente", "que": "agrega una línea a esa nota; \"nota IM:\" sola la borra" },
+        { "ejemplo": "nota en paypal: ya mandé el de marzo", "que": "comentario con fecha al pie de esa tarea" },
+        { "ejemplo": "radar probar Notion para clientes", "que": "una idea para el Radar, no una tarea" },
+        { "ejemplo": "🎤 audio", "que": "todo lo de arriba dictado (máximo 2 minutos); te repite lo que entendió" }
+      ]
+    },
+    {
+      "id": "actuar",
+      "emoji": "✅",
+      "titulo": "Actuar sobre tareas",
+      "lineas": [
+        { "ejemplo": "listo 3", "que": "la cierra (también \"el 3 ya está\", \"listo paypal\")" },
+        { "ejemplo": "pasa 2,5", "que": "las pasa a mañana; \"pasa todo\" mueve toda la lista" },
+        { "ejemplo": "pasa el 5 al lunes", "que": "a otro día: mañana, el viernes, en 3 días, el 15 de noviembre…" },
+        { "ejemplo": "9 cancelar, no se va a hacer", "que": "queda cerrada con la nota \"cancelada — no se va a hacer\"; no se borra" },
+        { "ejemplo": "borra 3", "que": "la elimina de verdad, siempre con botón de confirmación (también \"bórrala\")" },
+        { "ejemplo": "11 se llama URo pendiente", "que": "le cambia el título" },
+        { "ejemplo": "paypal urgente", "que": "cambia la urgencia; \"paypal para el viernes\" la fecha; \"paypal es de PD\" la empresa; \"paypal mañana 3pm\" fecha y hora" },
+        { "ejemplo": "pon en calendar la de TOTT", "que": "crea el evento de una tarea que ya existe" },
+        { "ejemplo": "la anterior es urgente", "que": "\"la anterior\" = la última tarea de la que hablaste" },
+        { "ejemplo": "quita alarma 2", "que": "borra una alarma propia (número de \"mis alarmas\")" }
+      ]
+    },
+    {
+      "id": "varias",
+      "emoji": "🧾",
+      "titulo": "Varias de una vez",
+      "lineas": [
+        { "ejemplo": "1 terminado / 9 cancelar no se va hacer / 11 se llama URo, pasar para mañana / 12 pasar para mañana", "que": "te muestra el plan numerado y esperas [✅ Hacer todo] o [✏️ No, corrijo]; nada se ejecuta antes" },
+        { "ejemplo": "el 3 ya está y pasa el 4 al lunes", "que": "dos órdenes en una frase, separadas por \"y\", comas o barras" },
+        { "ejemplo": "alarma mañana 3pm revisar pagos y agrégala como tarea", "que": "una alarma y una tarea a la vez" },
+        { "ejemplo": "el 2 es urgente y es de IM", "que": "varios cambios a la misma tarea en una línea" }
+      ]
+    },
+    {
+      "id": "otros",
+      "emoji": "ℹ️",
+      "titulo": "Otros",
+      "lineas": [
+        { "ejemplo": "/ayuda", "que": "el resumen corto; \"/ayuda todo\" manda esta guía completa" },
+        { "ejemplo": "botones", "que": "aparecen cuando falta empresa o urgencia, cuando varias tareas coinciden, antes de borrar, y en cada ⏰ (Listo · +1h · Mañana)" },
+        { "ejemplo": "\"No te entendí\"", "que": "si no capta la frase, te pregunta si es una tarea nueva, una orden o una alarma" },
+        { "ejemplo": "hora de Cancún", "que": "\"hoy\", \"mañana\" y las horas van en hora de Cancún; \"el viernes\" siempre es el próximo viernes" },
+        { "ejemplo": "en la web", "que": "/hoy (tablero y ¿Qué sigue?), /tasks (tareas y notas), /settings (empresas, Conexiones de Google, Pagos recurrentes)" }
+      ]
+    }
+  ]
+}

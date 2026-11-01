@@ -25,6 +25,10 @@ GabbyHQ es una app web (Next.js) desplegada en **Vercel**, con los datos en
 **Supabase** (Postgres). El bot de Telegram no es un programa aparte: es una
 ruta más de esa misma app. Nada vive en n8n ni en otro servidor.
 
+**Chuleta para usarlo** (no técnica, un ejemplo por línea): [comandos.md](comandos.md).
+Es lo mismo que el bot manda con `/ayuda todo`; sale de
+`src/lib/asistente/comandos.json` y se regenera con `npm run comandos`.
+
 **Principio: el bot es la puerta principal.** Cualquier acción que exista en
 la app debe poder decirse al bot, en texto o por voz: crear, completar, mover,
 borrar y editar tareas, escribir notas, preguntar. La web (`/hoy`, `/tasks`,
@@ -101,6 +105,9 @@ Archivos del asistente dentro del repo:
 | `src/app/api/asistente/tarde/route.ts` | Alarma de las 6:00 pm |
 | `src/app/api/asistente/recordatorios/route.ts` | Cron cada 5 min: manda las alarmas propias vencidas (fase 4) |
 | `src/app/api/telegram/route.ts` | Webhook del bot: comandos exactos, texto libre → intérprete, audios, botones |
+| `src/lib/asistente/comandos.json` | La guía de uso (fuente única): `docs/comandos.md` y `/ayuda todo` salen de aquí |
+| `src/lib/asistente/comandos.ts` | Renderiza esa guía para Telegram (2–3 mensajes HTML) |
+| `scripts/comandos-md.mjs` | `npm run comandos`: regenera `docs/comandos.md` desde el JSON |
 | `src/lib/parser.ts` | Parser de los comandos exactos (texto y voz): empresa, urgencia, ★, fecha; también el fallback del intérprete |
 | `src/lib/asistente/interprete.ts` | Fase 4: contexto + prompt → JSON de acciones; registro en `bot_preguntas` |
 | `src/lib/asistente/plan.ts` | Fase 4: resuelve refs (#3, t12, "la anterior", título), pinta "Entendí: …" y ejecuta |
