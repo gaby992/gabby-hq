@@ -16,7 +16,7 @@ sección y **no se empieza una fase hasta validar la anterior**.
 | 4b | "¿Qué sigue?" (bot + web), notas con edad, rediseño de /hoy, limpieza del parser | ✅ Construida — pendiente de validar |
 | 4c | Lista completa a demanda, "qué sigue" siempre con 3 secciones, fechas en el intérprete | ✅ Construida — pendiente de validar |
 | 5 | Conexión de Google en Settings + Calendar (solo a pedido) + pagos recurrentes | ✅ Construida — pendiente de validar |
-| 6 | Gmail | ⏳ Pendiente |
+| 6 | Correo dentro de GabbyHQ: Gmail, clasificador, alertas, evaluación de modelos (reemplaza n8n) | ✅ Construida — pendiente de validar |
 | 7 | De comandos a conversación: memoria, sugerencias, "organízame", personalidad | ✅ Construida — pendiente de validar |
 
 ---
@@ -161,6 +161,7 @@ Archivos del asistente dentro del repo:
 | `sql/2026-11-limpieza-notas-como-tareas.sql` | Limpieza única: tareas que eran notas "por dónde iba" (select primero; mover a `notas_historial` y borrar después) |
 | `sql/2026-11-asistente-fase5.sql` | Migración de la fase 5: `conexiones_google` + `tasks.due_time` + `tasks.gcal_event_id` |
 | `sql/2026-11-asistente-fase5c.sql` | Migración de la fase 5-C: `pagos_recurrentes` |
+| `sql/2026-11-asistente-fase6-correo.sql` | Migración de la fase 6: roles por cuenta en `conexiones_google` + `cuentas_correo`, `correos`, `correo_evaluaciones`, `correo_veredictos` |
 | `sql/2026-11-asistente-fase7.sql` | Migración de la fase 7: `bot_conversacion` + `asistente_config` |
 | `src/lib/asistente/pagos.ts` | Fase 5-C: pagos recurrentes (fila + evento mensual en Calendar) |
 | `src/app/api/calendar/tarea/route.ts` | Fase 5-B: botón "📅 Agregar a Calendar" del panel de edición y casilla del formulario |
@@ -2029,9 +2030,12 @@ El código es el mismo repo.
    `sql/` del repo, incluidos `sql/2026-10-asistente-fase1.sql`,
    `sql/2026-10-asistente-fase2.sql`, `sql/2026-10-asistente-fase3.sql` y
    `sql/2026-10-asistente-fase4.sql`, `sql/2026-11-asistente-fase4b.sql` y
-   `sql/2026-11-asistente-fase5.sql`, `sql/2026-11-asistente-fase5c.sql` y
+   `sql/2026-11-asistente-fase5.sql`, `sql/2026-11-asistente-fase5c.sql`,
+   `sql/2026-11-asistente-fase6-correo.sql` y
    `sql/2026-11-asistente-fase7.sql` (y sus pruebas en queries aparte, ver
-   1b, 2b, 3b y 4b Paso 1).
+   1b, 2b, 3b y 4b Paso 1). El SQL de la fase 6 precarga las cuentas de
+   correo de Gabby y Chelsea: cambia esos emails y listas por los de la
+   persona (o bórralas y créalas en Settings → Correo).
 4. En la app, en **Settings**, crea las empresas con los nombres que esa
    persona use. El orden fijo de la alarma (IM · DATAVIA · PD · Personal ·
    Chelsea) está en `EMPRESAS_ORDEN` dentro de `src/lib/asistente/alarmas.ts`;
@@ -2049,7 +2053,11 @@ El código es el mismo repo.
    gasto, ver 2b), `LLM_PROVIDER` y `LLM_MODEL` (ver 3c),
    `NEXT_PUBLIC_SUPABASE_URL`,
    `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`,
-   `ADMIN_PASSWORD` y `API_SECRET_SEED` (login de la app), y si usa inbox-IM,
+   `ADMIN_PASSWORD` y `API_SECRET_SEED` (login de la app), `GOOGLE_CLIENT_ID`,
+   `GOOGLE_CLIENT_SECRET` y `APP_ENCRYPTION_KEY` (Calendar y Gmail, ver 5c; el
+   OAuth client de Google debe tener la redirect URI de esta URL), y si
+   quiere otro modelo para el correo, `LLM_PROVIDER_CORREO` / `LLM_MODEL_CORREO`
+   (ver 6c; sin ellas usa el de `/pregunta`). Si todavía usa inbox-IM,
    `SUPABASE_INBOXIM_URL` y `SUPABASE_INBOXIM_SERVICE_KEY` (si no, el bloque
    de Chelsea dirá "no se pudo consultar inbox-IM" y todo lo demás funciona).
 3. Click **Deploy**. Al terminar, el plan debe ser **Pro** para que el Cron
@@ -2069,7 +2077,8 @@ Debe responder `{"ok":true,"result":true,"description":"Webhook was set"}`.
 
 **E. Primera alarma**
 
-1. Vercel → **Settings → Cron Jobs**: deben verse los tres jobs.
+1. Vercel → **Settings → Cron Jobs**: deben verse los cuatro jobs (mañana,
+   tarde, recordatorios cada 5 min, ingesta de correo cada 15 min).
 2. Corre la Prueba 1 de la sección 1d con el `CRON_SECRET` de ese proyecto.
 3. Si llega "☀️ Hoy, …" a su chat, está listo. La primera alarma automática
    llega a las 8:00 (hora de Cancún) del siguiente lunes–sábado.
@@ -2092,9 +2101,12 @@ verano; para una zona con DST hay que calcular el offset en vez de fijarlo).
 | LLM para `/pregunta` (`gpt-5-mini`) | 3 | **$0.25 USD / 1M tokens de entrada · $2.00 / 1M de salida** (precio de lista a octubre 2026). Una pregunta ≈ 3000 tokens de entrada (el contexto) + 150 de salida ≈ **$0.0011 USD**. Ejemplo: 20 preguntas al día × 30 días = 600 preguntas ≈ **$0.65 USD/mes**. | Si el contexto es corto (pocas tareas), baja a la mitad. Con `gpt-5-nano` cuesta ~5× menos; con Anthropic (`claude-haiku-5-5`) algo más. La consulta de costo real del mes está al final de `sql/2026-10-asistente-fase3-pruebas.sql`. |
 | LLM para el intérprete (`gpt-5-mini`) | 4 | Un mensaje libre ≈ 1500 tokens de entrada (prompt + tareas) + 100 de salida ≈ **$0.0006 USD**. 30 mensajes al día × 30 = 900 ≈ **$0.55 USD/mes**. | Los comandos exactos (`listo 3`, `pasa 2,5`, `nota IM: …`) no pasan por el modelo. El cron de 5 min no cuesta: corre en Vercel Pro. |
 | Google Calendar API | 5 | $0 | Gratis dentro de las cuotas normales (1M llamadas/día; aquí son unas pocas por tarea). |
+| Gmail API | 6 | $0 | Gratis dentro de la cuota (aquí: una lectura de historial cada 15 min y un `get` por correo nuevo). |
+| LLM para clasificar correo (`gpt-5-mini` o el de `LLM_MODEL_CORREO`) | 6 | Un correo que llega al modelo ≈ 1200 tokens de entrada (prompt + cuerpo recortado a 3000 caracteres + resúmenes previos del hilo) + 100 de salida ≈ **$0.0005 USD**. Con 30 correos al día que pasan por el modelo × 30 días = 900 ≈ **$0.45 USD/mes**. | El ruido (listas y reglas) no pasa por el modelo; los VIP sí (tipo y resumen). Cada evaluación en `/correo/evaluar` reclasifica la ventana entera: 100 correos ≈ $0.05 por modelo. Se ve en Settings → Asistente como `correo:…`. |
 | LLM para la conversación (fase 7) | 7 | El intérprete manda además el hilo reciente (≈ +300 tokens por mensaje) y la mañana una llamada corta (≈ 400 tokens). Con 30 mensajes al día: **≈ $0.65 USD/mes** en total para el intérprete; la mañana, centavos. | Sugerencias y "organízame" no usan el modelo. El costo real del mes se ve en Settings → Asistente. |
 
 **Fase 1 total: $0 adicionales** sobre lo que ya se paga.
 **Fase 2 total: ~$0.10 USD/mes** con uso normal (requiere saldo prepagado en OpenAI, mínimo $5).
 **Fase 3 total: ~$0.65 USD/mes** con 20 preguntas al día. Sale del mismo saldo y del mismo tope de $5 de OpenAI.
 **Fase 4 total: ~$0.55 USD/mes** con 30 mensajes libres al día. Mismo saldo, mismo tope.
+**Fase 6 total: ~$0.45 USD/mes** con 30 correos al día clasificados por el modelo (más lo que se gaste evaluando). Si el ganador es JEV u otro endpoint compatible, el costo es el de ese proveedor.
