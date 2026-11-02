@@ -1,17 +1,39 @@
 // Fase 7-G: "never duplicate". Before creating a task from a sentence, look
-// for an open task that is really the same thing: title similarity ≥ 0.6
-// (Dice over character bigrams, accents and case out) or a shared keyword
-// ("marketing", "Jobescape", "Chelsea": a distinctive word of 5+ letters).
+// for an open task that is really the same thing: title similarity ≥ 0.75
+// (Dice over character bigrams, accents and case out) or a shared SPECIFIC
+// keyword ("marketing", "Jobescape", "Chelsea": a word of 5+ letters that is
+// not generic — "asistente", "equipo", "curso" match nothing).
+//
+// Ajuste 7-G (2 nov): one open task pairs with ONE line of a plan, the most
+// similar one; the other lines create new tasks. The same keywords decide
+// whether a message "named" a task, tolerating how Whisper splits or
+// misspells a name ("Job Escape", "Jobscape" still name «Jobescape»).
 
 import { normalizar } from './acciones'
 
-const STOP = new Set([
+/**
+ * Words that never identify a task on their own: function words, days,
+ * verbs of ordering, and the generic nouns Gabby uses for everything. Kept
+ * in code on purpose — add here when a false match shows up in the log.
+ */
+export const GENERICAS = new Set([
+  // function words / pronouns
   'para', 'con', 'sin', 'sobre', 'desde', 'hasta', 'entre', 'como', 'cuando', 'donde', 'porque', 'pero', 'aunque',
-  'este', 'esta', 'esto', 'estos', 'estas', 'ese', 'esa', 'eso', 'esos', 'esas', 'aquel', 'aquella',
-  'tarea', 'tareas', 'cosa', 'cosas', 'hacer', 'tengo', 'tiene', 'tienen', 'quiero', 'todo', 'todos', 'todas',
+  'este', 'esta', 'esto', 'estos', 'estas', 'ese', 'esa', 'eso', 'esos', 'esas', 'aquel', 'aquella', 'mismo', 'misma',
+  'otros', 'otras', 'otro', 'otra', 'algo', 'alguien', 'nadie', 'nunca', 'siempre', 'ahora', 'luego', 'despues', 'antes',
+  'tambien', 'todavia', 'entonces', 'mucho', 'mucha', 'poco', 'poca', 'cada', 'todo', 'todos', 'todas', 'junto', 'hacia',
+  'nuestro', 'nuestra', 'ellos', 'ellas', 'ustedes', 'nosotros', 'mios', 'mias',
+  // verbs that describe the order, not the thing
+  'hacer', 'tengo', 'tiene', 'tienen', 'quiero', 'quiere', 'puede', 'pueden', 'necesito', 'empezar', 'seguir', 'probar',
   'mandar', 'enviar', 'llamar', 'revisar', 'pasar', 'armar', 'cancelar', 'pagar', 'hablar', 'escribir', 'terminar',
-  'manana', 'semana', 'viernes', 'lunes', 'martes', 'miercoles', 'jueves', 'sabado', 'domingo', 'pendiente', 'pendientes',
-  'correo', 'correos', 'reunion', 'propuesta', 'cliente', 'clientes', 'proyecto', 'equipo', 'nuevo', 'nueva',
+  'preparar', 'buscar', 'ver', 'checar', 'avisar', 'agendar', 'organizar', 'contestar', 'responder', 'subir', 'bajar',
+  // time words
+  'manana', 'semana', 'viernes', 'lunes', 'martes', 'miercoles', 'jueves', 'sabado', 'domingo', 'tarde', 'noche',
+  // generic nouns
+  'tarea', 'tareas', 'cosa', 'cosas', 'pendiente', 'pendientes', 'asistente', 'equipo', 'curso', 'cursos',
+  'correo', 'correos', 'reunion', 'propuesta', 'cliente', 'clientes', 'proyecto', 'nuevo', 'nueva', 'mensaje', 'mensajes',
+  'llamada', 'junta', 'cita', 'pago', 'pagos', 'factura', 'facturas', 'documento', 'documentos', 'archivo', 'archivos',
+  'suscripcion', 'cuenta', 'cuentas', 'persona', 'personas', 'gente', 'lista', 'nota', 'notas', 'plan', 'planes',
 ])
 
 function bigramas(s: string): Map<string, number> {
@@ -42,41 +64,115 @@ export function similitud(a: string, b: string): number {
   return na + nb === 0 ? 0 : (2 * inter) / (na + nb)
 }
 
-/** Distinctive words of a title: 5+ letters, not a stopword, not a plain verb. */
-export function palabrasClave(s: string): string[] {
-  return Array.from(new Set(normalizar(s).replace(/[^a-z0-9ñ]+/g, ' ').split(' ').filter((w) => w.length >= 5 && !STOP.has(w))))
+function tokens(s: string): string[] {
+  return normalizar(s).replace(/[^a-z0-9ñ]+/g, ' ').split(' ').filter(Boolean)
 }
 
-export const UMBRAL_SIMILITUD = 0.6
+/** Specific words of a title: 5+ letters and not generic. */
+export function palabrasClave(s: string): string[] {
+  return Array.from(new Set(tokens(s).filter((w) => w.length >= 5 && !GENERICAS.has(w))))
+}
+
+/** How alike two single words must be to count as the same name ("jobscape" ~ "jobescape"). */
+export const UMBRAL_PALABRA = 0.75
+
+/**
+ * Is the keyword in this text? Exact token, a token that is almost it
+ * (typo), or the text with its spaces removed containing it ("Job Escape").
+ */
+export function claveEn(clave: string, texto: string): boolean {
+  const ts = tokens(texto)
+  if (ts.includes(clave)) return true
+  if (ts.some((w) => w.length >= 5 && similitud(w, clave) >= UMBRAL_PALABRA)) return true
+  return ts.join('').includes(clave)
+}
+
+/** The first keyword of `a` that `b` also carries, or null. */
+export function claveComun(a: string, b: string): string | null {
+  return palabrasClave(a).find((k) => claveEn(k, b)) ?? palabrasClave(b).find((k) => claveEn(k, a)) ?? null
+}
+
+export const UMBRAL_SIMILITUD = 0.75
 
 export interface Parecida<T> {
   tarea: T
   score: number
-  /** Why: "similar 0.72" or "palabra clave «jobescape»". */
+  /** Why: "similar 0.82" or "palabra clave «jobescape»". */
   motivo: string
 }
 
 /**
- * The open task that is "the same" as `titulo`, or null. A shared keyword
- * wins when it points to exactly one task, or to the most similar one if it
- * is at least loosely similar (≥ 0.3).
+ * Every open task that could be "the same" as `titulo`, best first: similar
+ * titles (≥ 0.75), then tasks sharing a specific keyword (only when that
+ * keyword points to a single task, or to the most similar of them, ≥ 0.3).
  */
-export function buscarParecida<T extends { text: string }>(titulo: string, abiertas: T[]): Parecida<T> | null {
-  const claves = palabrasClave(titulo)
-  let mejor: Parecida<T> | null = null
+export function candidatasParecidas<T extends { text: string }>(titulo: string, abiertas: T[]): Parecida<T>[] {
+  const similares: Parecida<T>[] = []
   const porClave: Parecida<T>[] = []
   for (const t of abiertas) {
     const s = similitud(titulo, t.text)
-    if (s >= UMBRAL_SIMILITUD && (!mejor || s > mejor.score)) mejor = { tarea: t, score: s, motivo: `similar ${s.toFixed(2)}` }
-    const suyas = palabrasClave(t.text)
-    const comun = claves.find((k) => suyas.includes(k))
+    if (s >= UMBRAL_SIMILITUD) {
+      similares.push({ tarea: t, score: s, motivo: `similar ${s.toFixed(2)}` })
+      continue
+    }
+    const comun = claveComun(titulo, t.text)
     if (comun) porClave.push({ tarea: t, score: s, motivo: `palabra clave «${comun}»` })
   }
-  if (mejor) return mejor
-  if (porClave.length === 1) return porClave[0]
+  similares.sort((a, b) => b.score - a.score)
+  if (porClave.length === 1) return [...similares, porClave[0]]
   if (porClave.length > 1) {
-    const top = porClave.sort((a, b) => b.score - a.score)[0]
-    if (top.score >= 0.3) return top
+    porClave.sort((a, b) => b.score - a.score)
+    return [...similares, ...porClave.filter((p) => p.score >= 0.3)]
   }
-  return null
+  return similares
+}
+
+/** The open task that is "the same" as `titulo`, or null. */
+export function buscarParecida<T extends { text: string }>(titulo: string, abiertas: T[]): Parecida<T> | null {
+  return candidatasParecidas(titulo, abiertas)[0] ?? null
+}
+
+/**
+ * Several new titles against the open tasks, one task per title at most:
+ * the pair with the highest similarity is taken first, then the next among
+ * what is left. Returns the match for each title index (missing = new task).
+ * `ocupadas` are tasks the plan already touches by ref: never matched.
+ */
+export function emparejarParecidas<T extends { id: string; text: string }>(
+  titulos: string[],
+  abiertas: T[],
+  ocupadas: Set<string> = new Set()
+): Map<number, Parecida<T>> {
+  const libres = abiertas.filter((t) => !ocupadas.has(t.id))
+  const pares: { i: number; p: Parecida<T>; peso: number }[] = []
+  titulos.forEach((titulo, i) => {
+    const claves = palabrasClave(titulo)
+    for (const p of candidatasParecidas(titulo, libres)) {
+      // A similar title beats a keyword match. Among keyword matches, the
+      // line whose specific words are all in the task wins ("armar el
+      // equipo de marketing" → «Marketing Team» before "zip de marketing y
+      // ventas"); a tie goes to the line said first.
+      const porClave = claves.length > 0 ? claves.filter((k) => claveEn(k, p.tarea.text)).length / claves.length : 0
+      pares.push({ i, p, peso: p.motivo.startsWith('similar') ? 10 + p.score : porClave })
+    }
+  })
+  pares.sort((a, b) => b.peso - a.peso || a.i - b.i)
+  const out = new Map<number, Parecida<T>>()
+  const usadas = new Set<string>()
+  for (const { i, p } of pares) {
+    if (out.has(i) || usadas.has(p.tarea.id)) continue
+    out.set(i, p)
+    usadas.add(p.tarea.id)
+  }
+  return out
+}
+
+/**
+ * Did the message name this task? Its whole title, or one of its specific
+ * keywords (tolerating a split or misspelled name), or nothing to go on.
+ */
+export function nombradaEn(titulo: string, mensaje: string): boolean {
+  const msg = normalizar(mensaje)
+  if (msg.includes(normalizar(titulo))) return true
+  return palabrasClave(titulo).some((k) => claveEn(k, mensaje))
 }

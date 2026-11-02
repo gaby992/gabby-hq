@@ -11,7 +11,7 @@ import { PRIORITY_LABELS } from '@/types'
 import type { Cambios, TareaParsed } from '@/lib/parser'
 import { cancelarTareas, ejecutarAccion, renombrarTarea } from './acciones'
 import { enviarLista } from './alarmas'
-import { addDays, cancunYmd, formatFechaHoraEs, formatHoraEs, formatVenceEs } from './cancun'
+import { addDays, cancunHm, cancunYmd, formatFechaHoraEs, formatHoraEs, formatVenceEs } from './cancun'
 import { buscarEnAbiertas, type AccionLlm, type ContextoInterprete, type TareaLite } from './interprete'
 import { ejecutarNota } from './notas-bot'
 import { responderPregunta } from './pregunta'
@@ -21,8 +21,7 @@ import { confirmacion, guardarTarea } from './tareas'
 import { agregarACalendar, cuandoDe } from '@/lib/google/sync'
 import { textoListaPagos } from './pagos'
 import { dividirTarea, siguientePaso } from './pasos'
-import { buscarParecida, palabrasClave } from './similitud'
-import { normalizar } from './acciones'
+import { buscarParecida, claveComun, emparejarParecidas, nombradaEn, similitud } from './similitud'
 import { SIMBOLO } from './alarmas'
 
 export interface TareaRef {
@@ -97,6 +96,12 @@ export function resolverEmpresa(nombre: string, companies: EmpresaRef[]): Empres
  * Resolves every action against the context the model saw. "anterior" starts
  * as the last task mentioned in a previous message and then follows along:
  * in "1 terminado y a la anterior ponle nota" the note goes to #1.
+ *
+ * Never duplicate (7-G): a "crear" whose title is really an open task becomes
+ * an update of that task. One open task pairs with ONE line at most — the
+ * most similar one; the other lines create new tasks. A "crear" that names a
+ * task another action of the same message already moves by ref is the same
+ * order said twice: it is dropped.
  */
 export function resolverAcciones(acciones: AccionLlm[], ctx: ContextoInterprete, companies: EmpresaRef[]): AccionResuelta[] {
   let anterior: TareaRef | null = ctx.anterior ? lite(ctx.anterior) : null
@@ -126,22 +131,34 @@ export function resolverAcciones(acciones: AccionLlm[], ctx: ContextoInterprete,
       const cuando = instanteDe(a)
       if (cuando) r.dispara_en = cuando
     }
-    if (a.tipo === 'crear') {
-      // Never duplicate: a similar open task becomes an update of that task.
-      const p = buscarParecida(a.titulo, ctx.abiertas)
-      if (p) {
-        r.existente = { ...lite(p.tarea), motivo: p.motivo }
-        r.tarea = lite(p.tarea)
-        anterior = r.tarea
-      }
-    }
     if (a.tipo === 'siguiente_paso' && !a.ref) {
       if (anterior) r.tarea = anterior
       else r.error = 'no sé de qué tarea: dime "siguiente paso de X"'
     }
     out.push(r)
   }
-  return out
+  return emparejarCrear(out, ctx)
+}
+
+/** Second pass over the resolved actions: which "crear" is really an open task. */
+function emparejarCrear(acciones: AccionResuelta[], ctx: ContextoInterprete): AccionResuelta[] {
+  const ocupadas = new Set(acciones.filter((a) => a.tipo !== 'crear' && a.tarea && !a.error).map((a) => a.tarea!.id))
+  const crear = acciones.map((a, i) => (a.tipo === 'crear' ? i : -1)).filter((i) => i >= 0)
+  const pares = emparejarParecidas(crear.map((i) => (acciones[i] as Extract<AccionResuelta, { tipo: 'crear' }>).titulo), ctx.abiertas, ocupadas)
+  const fuera = new Set<number>()
+  crear.forEach((i, k) => {
+    const a = acciones[i] as Extract<AccionResuelta, { tipo: 'crear' }>
+    const p = pares.get(k)
+    if (p) {
+      a.existente = { ...lite(p.tarea), motivo: p.motivo }
+      a.tarea = lite(p.tarea)
+      return
+    }
+    // The same task is already moved by ref in this message → said twice.
+    const repetida = buscarParecida(a.titulo, ctx.abiertas.filter((t) => ocupadas.has(t.id)))
+    if (repetida) fuera.add(i)
+  })
+  return acciones.filter((_, i) => !fuera.has(i))
 }
 
 // ── Rendering ───────────────────────────────────────────────────────────
@@ -237,25 +254,117 @@ function simboloPlan(a: AccionResuelta): string {
   return SIMBOLO.normal
 }
 
+/** The task title a plan line is about (for matching corrections and alarms against it). */
+export function tituloDe(a: AccionResuelta): string {
+  if (a.tipo === 'crear') return a.existente ? a.existente.text : a.titulo
+  if (a.tipo === 'alarma') return a.texto
+  return a.tarea?.text ?? ('ref' in a && a.ref ? a.ref : '')
+}
+
+/** Every name a line answers to: the open task's title and, for a "crear", what she actually said. */
+export function nombresDe(a: AccionResuelta): string[] {
+  const out = [tituloDe(a)]
+  if (a.tipo === 'crear' && a.existente) out.push(a.titulo)
+  return out.filter(Boolean)
+}
+
+/** How much a phrase is about a plan line: the best of its names. */
+export function afinidad(frase: string, a: AccionResuelta): number {
+  return Math.max(0, ...nombresDe(a).map((n) => similitud(frase, n)))
+}
+
+/** The Cancún date an alarm fires on (null when it has none yet). */
+function fechaDeAlarma(a: Extract<AccionResuelta, { tipo: 'alarma' }>): string | null {
+  if (a.dispara_en) return cancunYmd(new Date(a.dispara_en))
+  return a.fecha ?? null
+}
+
+/** "10:00" of an alarm, from its instant or the hour she said. */
+function horaDeAlarma(a: Extract<AccionResuelta, { tipo: 'alarma' }>): string | null {
+  if (a.dispara_en) return cancunHm(new Date(a.dispara_en))
+  return a.hora ?? null
+}
+
+/**
+ * An alarm about one of the plan's tasks ("el miércoles a las 10 lo de
+ * marketing y recuérdamelo") belongs on that task's line: ⏰ 10:00 am there,
+ * nothing repeated below. Returns alarm index → task-line index.
+ */
+export function emparejarAlarmas(acciones: AccionResuelta[]): Map<number, number> {
+  const out = new Map<number, number>()
+  const tomadas = new Set<number>()
+  acciones.forEach((a, i) => {
+    if (a.tipo !== 'alarma' || a.error) return
+    const dia = fechaDeAlarma(a)
+    let mejor: { j: number; s: number } | null = null
+    acciones.forEach((b, j) => {
+      if (tomadas.has(j) || b.error || (b.tipo !== 'crear' && b.tipo !== 'posponer' && b.tipo !== 'cambiar')) return
+      const fb = fechaDeAccion(b)
+      if (dia && fb && fb !== dia) return
+      const s = afinidad(a.texto, b)
+      if (s < 0.6 && !nombresDe(b).some((n) => claveComun(a.texto, n))) return
+      if (!mejor || s > mejor.s) mejor = { j, s }
+    })
+    if (mejor) {
+      out.set(i, (mejor as { j: number }).j)
+      tomadas.add((mejor as { j: number }).j)
+    }
+  })
+  return out
+}
+
+export interface OpcionesLinea {
+  /** Put "· mié 4" in the line (a flat list without day headers). */
+  conFecha?: boolean
+  /** The alarm paired with this line, if any: its hour goes here as ⏰. */
+  alarma?: Extract<AccionResuelta, { tipo: 'alarma' }> | null
+  today?: string
+}
+
+/** 'mié 4' for a line inside a flat list. */
+function diaCorto(ymd: string, today: string): string {
+  if (ymd === today) return 'hoy'
+  if (ymd === addDays(today, 1)) return 'mañana'
+  return formatVenceEs(ymd).replace(/ \w+$/, '')
+}
+
+/**
+ * One task line of a plan by days:
+ *   ▫️ Marketing Team · DATAVIA · ⏰ 10:00 am (ya existía, la muevo)
+ * With `conFecha`: "… · mié 4 · ⏰ 10:00 am".
+ */
+export function lineaSemana(a: AccionResuelta, opts: OpcionesLinea = {}): string {
+  const today = opts.today ?? cancunYmd()
+  const titulo = tituloDe(a) || '?'
+  const empresa = a.tipo === 'crear' ? (a.existente?.company?.name ?? a.empresa_ref?.name.trim() ?? (a.empresa ? `${a.empresa}?` : 'sin empresa')) : a.tarea?.company?.name ?? 'sin empresa'
+  const f = fechaDeAccion(a)
+  const fecha = opts.conFecha ? (f ? ` · ${diaCorto(f, today)}` : ' · sin fecha') : ''
+  const propia = (a.tipo === 'crear' || a.tipo === 'cambiar') && a.hora ? a.hora : null
+  const alarma = opts.alarma ? horaDeAlarma(opts.alarma) : null
+  const horas = [propia && propia !== alarma ? formatHoraEs(propia) : null, alarma ? `⏰ ${formatHoraEs(alarma)}` : null].filter(Boolean)
+  const hora = horas.length > 0 ? ` · ${horas.join(' · ')}` : ''
+  const nota = a.error ? ` ⚠️ ${a.error}` : a.tipo === 'crear' && a.existente ? ' (ya existía, la muevo)' : a.tipo === 'posponer' || a.tipo === 'cambiar' ? ' (la muevo)' : ''
+  return `${simboloPlan(a)} ${corto(titulo, 50)} · ${empresa}${fecha}${hora}${nota}`
+}
+
 /**
  * The week, grouped by day instead of by action:
  *   Mañana (lun 2): ✴️ Correos de Chelsea · IM
- *   Miércoles (4):  ▫️ Armar equipo de marketing · DATAVIA
- * An item that matched an existing task says so ("ya existía").
+ *   Miércoles (4):  ▫️ Armar equipo de marketing · DATAVIA · ⏰ 10:00 am
+ * An item that matched an existing task says so ("ya existía"). An alarm
+ * about one of these tasks shows as ⏰ on its line, not under "También".
  */
 export function renderPlanSemana(acciones: AccionResuelta[], today: string = cancunYmd()): string {
   const porDia = new Map<string, string[]>()
   const otros: string[] = []
-  for (const a of acciones) {
+  const alarmas = emparejarAlarmas(acciones)
+  const alarmaDe = new Map(Array.from(alarmas.entries()).map(([i, j]) => [j, acciones[i] as Extract<AccionResuelta, { tipo: 'alarma' }>]))
+  acciones.forEach((a, i) => {
+    if (alarmas.has(i)) return
     const f = fechaDeAccion(a)
-    const titulo = a.tipo === 'crear' ? (a.existente ? a.existente.text : a.titulo) : a.tarea?.text ?? '?'
-    const empresa = a.tipo === 'crear' ? (a.existente?.company?.name ?? a.empresa_ref?.name.trim() ?? (a.empresa ? `${a.empresa}?` : 'sin empresa')) : a.tarea?.company?.name ?? 'sin empresa'
-    const hora = (a.tipo === 'crear' || a.tipo === 'cambiar') && a.hora ? ` · ${formatHoraEs(a.hora)}` : ''
-    const nota = a.error ? ` ⚠️ ${a.error}` : a.tipo === 'crear' && a.existente ? ' (ya existía, la muevo)' : a.tipo === 'posponer' || a.tipo === 'cambiar' ? ' (la muevo)' : ''
-    const linea = `${simboloPlan(a)} ${corto(titulo, 50)} · ${empresa}${hora}${nota}`
     if (f === undefined) otros.push(`${ICONO[a.tipo]} ${frase(a, today, true)}`)
-    else porDia.set(f ?? '', [...(porDia.get(f ?? '') ?? []), linea])
-  }
+    else porDia.set(f ?? '', [...(porDia.get(f ?? '') ?? []), lineaSemana(a, { alarma: alarmaDe.get(i) ?? null, today })])
+  })
   const dias = Array.from(porDia.keys()).sort((x, y) => (x === '' ? 1 : y === '' ? -1 : x.localeCompare(y)))
   const bloques = dias.map((f) => `${f ? cabeceraDia(f, today) : 'Sin fecha'}:\n${porDia.get(f)!.map((l) => `  ${l}`).join('\n')}`)
   return ['Así queda tu semana:', ...bloques, ...(otros.length > 0 ? ['También:', ...otros.map((o) => `  ${o}`)] : [])].join('\n')
@@ -263,17 +372,14 @@ export function renderPlanSemana(acciones: AccionResuelta[], today: string = can
 
 const PIDE_ACOMODAR = /\b(?:acomoda|reacomoda|reorganiza|reordena|mueve)\s+(?:el\s+resto|lo\s+dem[aá]s|las\s+dem[aá]s|todo\s+lo\s+dem[aá]s)\b|\bacomoda\s+el\s+resto\b/i
 
-/** Was this task named in the message (a keyword of its title, its title itself, or its number)? */
+/** Was this task named in the message (its title, a specific keyword of it — even misspelled — or its number)? */
 function nombrada(a: AccionResuelta, mensaje: string): boolean {
   if (!a.tarea) return true
-  const msg = normalizar(mensaje)
   if ('ref' in a && a.ref) {
     const num = a.ref.match(/^#?\s*(\d+)$/)
-    if (num && new RegExp(`(^|[^0-9])${num[1]}([^0-9]|$)`).test(msg)) return true
+    if (num && new RegExp(`(^|[^0-9])${num[1]}([^0-9]|$)`).test(mensaje)) return true
   }
-  if (msg.includes(normalizar(a.tarea.text))) return true
-  const tokens = new Set(msg.replace(/[^a-z0-9ñ]+/g, ' ').split(' '))
-  return palabrasClave(a.tarea.text).some((k) => tokens.has(k))
+  return nombradaEn(a.tarea.text, mensaje)
 }
 
 /**
@@ -306,15 +412,25 @@ export function sugerenciaPlanSemana(acciones: AccionResuelta[]): string | null 
  */
 export function renderPlan(acciones: AccionResuelta[], today: string = cancunYmd()): string {
   const lines: string[] = []
+  // An alarm about a task of the plan rides on that task's line as ⏰.
+  const alarmas = emparejarAlarmas(acciones)
+  const alarmaDe = new Map(Array.from(alarmas.entries()).map(([i, j]) => [j, acciones[i] as Extract<AccionResuelta, { tipo: 'alarma' }>]))
   let i = 0
   while (i < acciones.length) {
     const a = acciones[i]
+    if (alarmas.has(i)) {
+      i += 1
+      continue
+    }
     if (a.error) {
       lines.push(`⚠️ ${frase(a, today, false)}: ${a.error} (no se hará)`)
       i += 1
       continue
     }
     let line = `${ICONO[a.tipo]} ${frase(a, today, true)}`
+    const alarma = alarmaDe.get(i)
+    const hora = alarma ? horaDeAlarma(alarma) : null
+    if (hora) line += ` · ⏰ ${formatHoraEs(hora)}`
     let j = i + 1
     while (j < acciones.length && enlazable(a) && enlazable(acciones[j]) && acciones[j].tarea!.id === a.tarea!.id) {
       const f = frase(acciones[j], today, false)
@@ -325,6 +441,14 @@ export function renderPlan(acciones: AccionResuelta[], today: string = cancunYmd
     i = j
   }
   return ['Entendí:', ...lines.map((l, n) => `${n + 1}. ${l}`)].join('\n')
+}
+
+/** A line of a plan as the corrected view shows it: by-days style with the date, or the numbered style. */
+export function lineaCorreccion(a: AccionResuelta, semana: boolean, alarma: Extract<AccionResuelta, { tipo: 'alarma' }> | null, today: string = cancunYmd()): string {
+  if (semana && fechaDeAccion(a) !== undefined) return lineaSemana(a, { conFecha: true, alarma, today })
+  if (a.error) return `⚠️ ${frase(a, today, false)}: ${a.error} (no se hará)`
+  const hora = alarma ? horaDeAlarma(alarma) : null
+  return `${ICONO[a.tipo]} ${frase(a, today, true)}${hora ? ` · ⏰ ${formatHoraEs(hora)}` : ''}`
 }
 
 // ── Execution ───────────────────────────────────────────────────────────

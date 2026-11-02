@@ -111,7 +111,8 @@ Archivos del asistente dentro del repo:
 | `src/lib/asistente/conversacion.ts` | Fase 7: el hilo (`bot_conversacion`): últimos 10 turnos / 30 min, "olvida lo anterior", sugerencias declinadas |
 | `src/lib/asistente/sugerencias.ts` | Fase 7: la única sugerencia por mensaje, con botones, y qué hace cada botón |
 | `src/lib/asistente/organizar.ts` | Fase 7: el modo "organízame" (cola, botones, resumen) |
-| `src/lib/asistente/similitud.ts` | Fase 7-G: "nunca duplicar" — similitud de títulos y palabras clave |
+| `src/lib/asistente/similitud.ts` | Fase 7-G: "nunca duplicar" — similitud de títulos (≥ 0.75), palabras clave específicas (lista `GENERICAS`), una tarea por línea |
+| `src/lib/asistente/correcciones.ts` | Ajuste 7-G: corregir el plan pendiente ("quita X repetido", "déjala donde estaba", "olvídalo", fusionar lo que diga el modelo) sin borrar ni completar nada |
 | `src/lib/asistente/pasos.ts` | Fase 7-H: dividir una tarea en 3–5 subtareas y "siguiente paso" |
 | `src/app/api/asistente/config/route.ts` | Fase 7: Settings → Asistente (config + costo del mes) |
 | `src/components/AsistenteConfigPanel.tsx` | Fase 7: el panel de Settings → Asistente |
@@ -976,7 +977,10 @@ Dos acciones seguidas sobre la misma tarea van en una línea ("… y pasar a
 mañana"). Una ref que no se encuentra sale como `⚠️ … (no se hará)` y el resto
 sigue. Con **Hacer todo** ejecuta en orden y responde una línea por acción (las
 mismas confirmaciones de siempre: `✅ Hecha: …`, `🗑 Cancelada: …`, `✏️ «…» →
-«…»`, `📅 … pasa a mañana`). Con **No, corrijo**: "Ok, no hice nada."
+«…»`, `📅 … pasa a mañana`). Con **No, corrijo** el plan sigue esperando y
+el siguiente mensaje lo corrige ("quita X", "la de X a las 4", "olvídalo";
+ver § 7 G, "Corregir el plan antes de aprobarlo"); nada se ejecuta hasta
+**Hacer todo**.
 
 Una sola acción simple (completar, posponer, renombrar, cambiar, nota, alarma
 con hora, pregunta) se ejecuta directo y confirma en una línea, como hoy. Una
@@ -1064,8 +1068,9 @@ Ninguna.
    manda: `1 terminado / 2 cancelar no se va hacer / 3 terminaso / 4 se llama
    Prueba, pasar para mañana / 5 pasar para mañana`. Debe responder "Entendí:"
    con 5 líneas (la 4 con "Renombrar … y pasar a mañana") y los dos botones.
-   Toca **No, corrijo** → "Ok, no hice nada." y nada cambió en /tasks. Repite
-   y toca **Hacer todo** → una línea por acción. En /tasks → Completadas, la
+   Toca **No, corrijo** → "Dime qué corrijo: …" y nada cambió en /tasks;
+   `olvídalo` → "descarté el plan". Repite y toca **Hacer todo** → una línea
+   por acción. En /tasks → Completadas, la
    tarea 2 trae en notas `1 nov: cancelada — no se va a hacer`.
 2. **Una orden sola.** `el 3 ya está` → `✅ Hecha: …` directo, sin plan.
    `pasa el 4 al lunes` → `✏️ … → vence lun …`. `la anterior es urgente` →
@@ -1613,20 +1618,29 @@ y no cuestan.
 
 **G) Planificar la semana hablando.** Cuando el mensaje describe varios días
 ("hoy…, mañana…, el miércoles…, el jueves…"), el intérprete separa cada cosa
-en su propia tarea con la fecha de ese día. Antes de crear, `buscarParecida()`
-(`similitud.ts`) busca una tarea abierta que sea lo mismo: similitud de título
-≥ 0.6 (Dice sobre bigramas, sin acentos) o una **palabra clave** compartida
-("marketing", "Jobescape", "Chelsea": palabras de 5+ letras que no sean
-genéricas). Si existe, no se duplica: se actualiza (fecha, prioridad, hora) y
-el plan lo dice. "prioridad", "lo importante", "me voy a concentrar en" →
-urgente ★ ese día. El plan se muestra **por día**, no por acción:
+en su propia tarea con la fecha de ese día. Antes de crear, `similitud.ts`
+busca una tarea abierta que sea lo mismo: similitud de título **≥ 0.75**
+(Dice sobre bigramas, sin acentos) o una **palabra clave específica**
+compartida ("marketing", "Jobescape", "Chelsea": palabras de 5+ letras que
+no estén en la lista `GENERICAS` del código — "asistente", "equipo", "curso",
+"correo", "tarea", "pendiente"… no identifican nada). La palabra clave
+tolera cómo la transcribe Whisper: "Job Escape" y "Jobscape" siguen siendo
+«Jobescape». Si existe, no se duplica: se actualiza (fecha, prioridad, hora)
+y el plan lo dice. **Una tarea abierta se empareja con UNA sola línea** del
+mensaje (`emparejarParecidas()`: la de título más parecido; entre dos por
+palabra clave, la que comparte más claves y, en empate, la dicha primero);
+las demás líneas crean tareas nuevas. Una línea que repite una tarea que
+el mismo mensaje ya mueve por ref ("posponer t3" + "crear lo de marketing")
+se descarta: es la misma orden dicha dos veces. "prioridad", "lo
+importante", "me voy a concentrar en" → urgente ★ ese día. El plan se
+muestra **por día**, no por acción:
 
 ```
 Así queda tu semana:
 Mañana (lun 2 nov):
   ✴️ Correos de Chelsea pendientes · IM (ya existía, la muevo)
 Miércoles (4):
-  ▫️ Marketing Team · DATAVIA (ya existía, la muevo)
+  ▫️ Marketing Team · DATAVIA · ⏰ 10:00 am (ya existía, la muevo)
   ▫️ Cancelar Jobescape · Personal
 Jueves (5):
   ▫️ Pasar $500 de IM a WSH · IM
@@ -1634,19 +1648,52 @@ Jueves (5):
 [ ✅ Así queda ]  [ ✏️ Corrijo ]
 ```
 
+Una alarma sobre una tarea del plan ("…a las 10 y recuérdamelo") va como
+`⏰ 10:00 am` en la línea de esa tarea, no repetida abajo en "También"
+(`emparejarAlarmas()`; al ejecutar se crean las dos cosas igual).
+
 **Solo lo que se nombró.** En un plan por días el bot crea o mueve
 únicamente las tareas que el mensaje nombra; las demás no se tocan aunque
 estén vencidas o tengan fecha de esos días ("mañana" no significa mover
 nada a mañana). Está en el prompt y, por si el modelo se pasa, en código:
 `soloLasNombradas()` descarta un `posponer`/`cambiar` sobre una tarea que
-el mensaje no menciona (ni por título, ni por palabra clave, ni por
-número) y lo muestra como `⚠️ … no la nombraste, no la toco`. Si quiere
-que el bot reacomode lo existente, lo pide: "acomoda el resto".
+el mensaje no menciona (ni por título, ni por palabra clave — las mismas
+que usa la similitud, tolerando la transcripción —, ni por número) y lo
+muestra como `⚠️ … no la nombraste, no la toco`. Si quiere que el bot
+reacomode lo existente, lo pide: "acomoda el resto".
 
 Debajo va **una** sugerencia (qué le falta: empresa u hora), sin botones
 (los botones son los del plan). Al aprobar, las tareas creadas quedan en el
 hilo, así que "la de marketing a las 10", "lo de WSH ponlo en calendar" o
 "sí" aplican sobre ese plan con la memoria de conversación.
+
+**Corregir el plan antes de aprobarlo** (`correcciones.ts`). Mientras el
+plan espera su OK (o después de tocar **Corrijo**, que ya no lo descarta),
+el siguiente mensaje lo corrige. Una corrección **nunca borra ni completa
+una tarea**: solo cambia el plan.
+
+| Dice | Qué pasa |
+| --- | --- |
+| `quita el marketing repetido`, `marketing sale dos veces` | Se queda una línea de marketing (la que mueve la tarea existente); la otra se va. Con una sola línea, esa línea era el duplicado de una tarea que ya existía: se va (no se crea nada). |
+| `quita X`, `sin X`, `saca X` | La línea de X sale del plan; la tarea no se toca. Si X está en 2+ líneas, pregunta con botones [Solo la repetida] [Las N] [Dejar como está]. |
+| `borra X`, `elimina X` (con el plan pendiente) | Pregunta: [Solo quitarla del plan] [Borrar la tarea de verdad] [Dejar como está]. Nunca borra sin ese botón. |
+| `déjala donde estaba`, `no la muevas`, `X se queda` | La línea que movía esa tarea existente sale del plan. Sin nombre y con varias movidas, pregunta cuál con botones. |
+| `olvida lo anterior`, `olvídalo`, `no`, `nada` | Descarta el plan pendiente entero ("olvida" además limpia el hilo). |
+| `la de marketing a las 10`, `lo de WSH el viernes`, `la de Chelsea es de IM`, `y el viernes llamar a Juan` | Va al intérprete; lo que devuelve se **fusiona** en el plan (`fusionarCorreccion()`): la línea que nombra cambia (y su alarma se mueve con ella), lo que no nombra se agrega, lo demás queda igual. Si el modelo devolviera `borrar`/`cancelar`/`completar`, el bot pregunta con botones en vez de hacerlo. Una pregunta o una orden sobre otra tarea no es corrección: se atiende normal y el plan sigue esperando. |
+
+El plan corregido muestra **solo lo que cambia** y vuelve a pedir el OK:
+
+```
+Corregido:
+  ✂️ Quito «Zip del equipo de marketing» (no la creo)
+  ▫️ Marketing Team · DATAVIA · mié 4 · ⏰ 11:00 am (ya existía, la muevo)
+Lo demás (6 líneas) queda igual.
+[ ✅ Así queda ]  [ ✏️ Corrijo ]
+```
+
+Las alarmas y líneas que no se corrigieron no se repiten. Si el plan se
+queda vacío, "No hago nada". Los botones de una duda viajan como
+`c:<nonce>:<n>` sobre el borrador `plan_duda`.
 
 **H) Un paso a la vez** (regla 4 del prompt maestro). `me da flojera «X»`,
 `no sé por dónde empezar con «X»`, `divide «X»`, `paso a paso «X»` → busca la
@@ -1705,6 +1752,15 @@ Ninguna.
 9b. Con «revisar propuesta de TOTT» abierta y vencida, el mismo audio de la
     semana: TOTT **no** aparece en el plan ni cambia de fecha en /tasks.
     Luego `acomoda el resto` → ahí sí propone moverla.
+9c. **Correcciones** (ajuste 7-G, con el plan de 9 esperando): `quita el
+    marketing repetido` → "Corregido: ✂️ Quito «…»" y "Lo demás queda
+    igual" con los botones otra vez; en /tasks nada cambió. `la de marketing
+    a las 10` → solo esa línea con `⏰ 10:00 am`. `déjala donde estaba` →
+    pregunta cuál si hay varias movidas. `borra lo de Jobescape` → tres
+    botones, nunca borra directo. `olvídalo` → "descarté el plan". Un
+    mensaje con "cancelar la suscripción de Job Escape" (como lo
+    transcribe Whisper) no marca «Cancelar Jobescape» como "no la
+    nombraste".
 10. `me da flojera armar el equipo de marketing` → 3–5 pasos y "Empieza
     por: …"; en /tasks la tarea tiene esas subtareas. `siguiente paso` →
     marca el primero y dice el segundo.

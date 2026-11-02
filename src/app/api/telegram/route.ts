@@ -25,6 +25,7 @@ import {
   type AccionResuelta,
 } from '@/lib/asistente/plan'
 import { dividirTarea, siguientePaso } from '@/lib/asistente/pasos'
+import { aplicarCorreccion, fusionarCorreccion, leerCorreccion, renderCorreccion, type Resultado } from '@/lib/asistente/correcciones'
 import { tareasRecientes } from '@/lib/asistente/conversacion'
 import {
   HORAS_BOTONES,
@@ -238,6 +239,16 @@ async function handleText(chatId: number, text: string, prefix: string | null) {
   // Fase 7: the thread remembers what she said (the transcription, for a voice note).
   await guardarTurno(chatId, 'user', text)
   if (await salidaOrganizar(chatId, text)) return
+  // Ajuste 7-G: while a plan waits for its OK, "quita X", "déjala donde
+  // estaba" or "olvídalo" correct THAT plan; nothing is deleted or completed.
+  const pendiente = await planPendiente(chatId)
+  if (pendiente) {
+    const c = leerCorreccion(text)
+    if (c) {
+      await responderCorreccion(chatId, pendiente, aplicarCorreccion(pendiente.acciones, c), prefix)
+      return
+    }
+  }
   const companies = await cargarEmpresas()
   const parsed = parseMensaje(text, companies, cancunYmd())
   switch (parsed.kind) {
@@ -465,6 +476,54 @@ function botonesHora(nonce: string) {
   return inlineKeyboard([HORAS_BOTONES.map((h) => ({ text: formatHoraEs(`${h}:00`), callback_data: `h:${nonce}:${h}` }))])
 }
 
+// ── Ajuste 7-G: correcting the plan that waits ───────────────────────────
+
+const COMO_CORREGIR = 'Dime qué corrijo: «la de marketing a las 10», «lo de WSH el viernes», «quita X», «déjala donde estaba»… o «olvídalo» para no hacer nada.'
+
+interface PlanPendiente {
+  id: string
+  nonce: string
+  acciones: AccionResuelta[]
+}
+
+/** The plan (or the question about it) that waits for her OK, if any. */
+async function planPendiente(chatId: number): Promise<PlanPendiente | null> {
+  const b = await borradorVigente(chatId)
+  if (!b || !('tipo' in b.parsed) || (b.parsed.tipo !== 'plan' && b.parsed.tipo !== 'plan_duda')) return null
+  return { id: b.id, nonce: nonceDe(b.id), acciones: b.parsed.acciones }
+}
+
+/**
+ * Applies a correction's outcome: the corrected plan (only what changed,
+ * with the plan's buttons again), a question with buttons, "nothing to
+ * change", or the plan discarded.
+ */
+async function responderCorreccion(chatId: number, plan: PlanPendiente, r: Resultado, prefix: string | null) {
+  if (r.tipo === 'descartar') {
+    await borrarBorrador(plan.id)
+    if (r.limpiarHilo) await limpiarHilo(chatId)
+    await reply(chatId, joinLines(prefix, r.limpiarHilo ? 'Ok, descarté el plan y empezamos de cero. No hice nada.' : 'Ok, descarté el plan. No hice nada.'))
+    return
+  }
+  if (r.tipo === 'igual') {
+    await actualizarBorrador(plan.id, { tipo: 'plan', acciones: plan.acciones })
+    await reply(chatId, joinLines(prefix, r.texto), botonesPlan(plan.nonce, esPlanSemana(plan.acciones)))
+    return
+  }
+  if (r.tipo === 'duda') {
+    await actualizarBorrador(plan.id, { tipo: 'plan_duda', acciones: plan.acciones, opciones: r.opciones })
+    await reply(chatId, joinLines(prefix, r.pregunta), inlineKeyboard(r.opciones.map((o, i) => [{ text: o.texto, callback_data: `c:${plan.nonce}:${i}` }])))
+    return
+  }
+  if (r.acciones.length === 0) {
+    await borrarBorrador(plan.id)
+    await reply(chatId, joinLines(prefix, renderCorreccion(r), 'No hago nada.'))
+    return
+  }
+  await actualizarBorrador(plan.id, { tipo: 'plan', acciones: r.acciones })
+  await reply(chatId, joinLines(prefix, renderCorreccion(r)), botonesPlan(plan.nonce, esPlanSemana(r.acciones)))
+}
+
 /**
  * Everything that is not an exact command. `pista` comes from the
  * [Orden] / [Alarma] buttons on a second try.
@@ -503,6 +562,17 @@ async function handleLibre(chatId: number, text: string, parsed: Parsed, prefix:
   // Fase 7-G: a plan by days only touches what the message named.
   if (esPlanSemana(acciones)) acciones = soloLasNombradas(acciones, text)
   await registrar(chatId, text, r, acciones)
+
+  // Ajuste 7-G: a plan is waiting → this is a correction of it ("la de
+  // marketing a las 10"): the line it names changes, the rest stays.
+  const pendiente = await planPendiente(chatId)
+  if (pendiente) {
+    const fusion = fusionarCorreccion(pendiente.acciones, acciones)
+    if (fusion.tipo !== 'ajena') {
+      await responderCorreccion(chatId, pendiente, fusion, prefix)
+      return
+    }
+  }
 
   // ── Several actions, or anything that cancels: show the plan, ask OK ──
   if (necesitaConfirmacion(acciones)) {
@@ -616,7 +686,8 @@ async function handleCallback(cq: CallbackQuery) {
   // "e:<nonce>:<company_id>" | "p:<nonce>:<priority>" | "t:<nonce>:<task_id>" | "y:<nonce>:1|0"
   // fase 4: "k:<nonce>:1|0" (plan) | "h:<nonce>:09|12|15|18" (alarm hour) | "q:<nonce>:tarea|orden|alarma"
   // fase 7: "s:<nonce>:<valor>" (suggestion) | "o:<nonce>:<valor>" (organízame)
-  const m = data.match(/^([eptykhqso]):([0-9a-f]{8}):(.+)$/)
+  // ajuste 7-G: "c:<nonce>:<n>" (an ambiguous correction of the plan)
+  const m = data.match(/^([eptykhqsoc]):([0-9a-f]{8}):(.+)$/)
   if (!m) return
   const [, kind, nonce, value] = m
   await guardarTurno(chatId, 'user', `[botón: ${value}]`, { boton: value })
@@ -685,14 +756,25 @@ async function handleCallback(cq: CallbackQuery) {
       return
     }
 
+    // ── Ajuste 7-G: an ambiguous correction, answered by button ──
+    if (parsed.tipo === 'plan_duda') {
+      if (kind !== 'c') return
+      const op = parsed.opciones[Number(value)]
+      if (!op) return
+      const hecho = op.ejecutar ? await ejecutarUna(chatId, op.ejecutar) : null
+      await responderCorreccion(chatId, { id: borrador.id, nonce, acciones: parsed.acciones }, op.resultado, hecho)
+      return
+    }
+
     // ── Fase 4: [✅ Hacer todo] [✏️ No, corrijo] ──
     if (parsed.tipo === 'plan') {
       if (kind !== 'k') return
-      await borrarBorrador(borrador.id)
       if (value !== '1') {
-        await reply(chatId, 'Ok, no hice nada. Dímelo otra vez como quieras.')
+        // The plan keeps waiting: the next message corrects it.
+        await reply(chatId, COMO_CORREGIR)
         return
       }
+      await borrarBorrador(borrador.id)
       await reply(chatId, await ejecutarPlan(chatId, parsed.acciones))
       const tocadas = parsed.acciones.filter((a) => a.tarea && !a.error).map((a) => ({ id: a.tarea!.id, text: a.tarea!.text }))
       if (tocadas.length > 0) await guardarTurno(chatId, 'assistant', `[plan] ${tocadas.length} tareas`, { tareas: tocadas })

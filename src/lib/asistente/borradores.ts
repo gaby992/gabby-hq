@@ -7,6 +7,7 @@ import { createServerClient } from '@/lib/supabase-server'
 import type { NotaParsed, TareaParsed } from '@/lib/parser'
 import type { AccionParams } from './acciones'
 import type { AccionResuelta } from './plan'
+import type { OpcionDuda } from './correcciones'
 import type { SugerenciaDraft } from './sugerencias'
 import type { OrganizarDraft } from './organizar'
 
@@ -17,6 +18,7 @@ import type { OrganizarDraft } from './organizar'
  *   confirmar → [Sí, borrar] [No] over `ids`
  * Fase 4 (the interpreter):
  *   plan        → [✅ Hacer todo] [✏️ No, corrijo] over resolved actions
+ *   plan_duda   → buttons for an ambiguous correction of that plan
  *   elegir      → one interpreted action whose ref matched 2–5 tasks
  *   alarma_hora → "alarma …" without an hour: [9am] [12pm] [3pm] [6pm]
  *   aclarar     → "No te entendí": [Tarea nueva] [Orden] [Alarma]
@@ -27,6 +29,8 @@ export type BorradorParsed =
   | { tipo: 'accion'; params: AccionParams; candidatos: string[] }
   | { tipo: 'confirmar'; params: AccionParams; ids: string[] }
   | { tipo: 'plan'; acciones: AccionResuelta[] }
+  /** Ajuste 7-G: a correction that could mean two things — the plan waits while she picks. */
+  | { tipo: 'plan_duda'; acciones: AccionResuelta[]; opciones: OpcionDuda[] }
   | { tipo: 'elegir'; accion: AccionResuelta; candidatos: string[] }
   | { tipo: 'alarma_hora'; texto: string; fecha: string | null }
   | { tipo: 'aclarar'; texto: string }
