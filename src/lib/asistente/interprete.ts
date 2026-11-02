@@ -16,6 +16,8 @@ import { addDays, cancunHm, cancunYmd, formatDiaLargoEs } from './cancun'
 import { llmConfig, preguntarLlm } from './llm'
 import { cargarConfig, personaPrompt, type AsistenteConfig } from './config'
 import { historial, renderHistorial, tareasRecientes } from './conversacion'
+import { correosRecientes, quienCorto, type CorreoLite } from '@/lib/correo/pendientes'
+import type { CorreoAccion, CorreoTipo, CorreoUrgencia } from '@/types'
 
 export const MAX_TOKENS = 900
 export const TIMEOUT_MS = 20_000
@@ -43,15 +45,29 @@ export type AccionLlm =
   | { tipo: 'pregunta'; texto: string }
   | { tipo: 'que_sigue'; empresa?: string; solo_urgentes?: boolean; solo_vencer?: boolean }
   | { tipo: 'lista'; lista: 'manana' | 'tarde' | 'pendientes'; empresa?: string }
+  /** Fase 6: a decision on mail — one ("el correo de Andrew lo hago yo") or a set ("archiva los de marketing de hoy"). */
+  | { tipo: 'correo'; accion: CorreoAccion; ref?: string; filtro?: FiltroCorreo }
   | { tipo: 'desconocido'; texto: string }
+
+export interface FiltroCorreo {
+  tipo?: CorreoTipo
+  urgencia?: CorreoUrgencia
+  /** Only today's. */
+  hoy?: boolean
+  /** A sender name/domain fragment. */
+  de?: string
+}
 
 export type TipoAccionLlm = AccionLlm['tipo']
 
 const TIPOS: TipoAccionLlm[] = [
   'completar', 'cancelar', 'borrar', 'posponer', 'renombrar', 'cambiar', 'crear',
   'nota_empresa', 'nota_tarea', 'alarma', 'pregunta', 'que_sigue', 'lista', 'calendar',
-  'pagos_listar', 'dividir', 'siguiente_paso', 'desconocido',
+  'pagos_listar', 'dividir', 'siguiente_paso', 'correo', 'desconocido',
 ]
+
+const ACCIONES_CORREO: CorreoAccion[] = ['chelsea', 'yo', 'tarea', 'archivar']
+const TIPOS_CORREO: CorreoTipo[] = ['necesita_respuesta', 'pedido_de_tarea', 'fyi', 'notificacion', 'marketing', 'reunion', 'pago']
 
 /** A task as the interpreter and the plan see it: no notes. */
 export type TareaLite = Pick<TaskRow, 'id' | 'text' | 'due_date' | 'due_time' | 'priority' | 'importante' | 'company'>
@@ -62,6 +78,9 @@ export interface ContextoInterprete {
   porRef: Map<string, TareaLite>
   abiertas: TareaLite[]
   anterior: TareaLite | null
+  /** Fase 6: recent mail ("c1"… and the "#n" of the 📧 section of the last list). */
+  correos: CorreoLite[]
+  porRefCorreo: Map<string, CorreoLite>
 }
 
 // ── Context ──────────────────────────────────────────────────────────────
@@ -100,13 +119,16 @@ export async function construirContextoInterprete(
 ): Promise<ContextoInterprete> {
   const today = cancunYmd(now)
   const db = createServerClient()
-  const [openRes, alarma, anteriorLog, turnos, recientes] = await Promise.all([
+  const [openRes, alarma, anteriorLog, turnos, recientes, correos] = await Promise.all([
     db.from('tasks').select(COLS_SIN_NOTAS).eq('done', false).order('created_at', { ascending: false }),
     ultimaAlarma(),
     ultimaMencionada(chatId),
     historial(chatId, now),
     tareasRecientes(chatId),
+    correosRecientes({ estados: ['nuevo', 'para_chelsea', 'lo_hago_yo', 'tarea'], dias: 7, max: 40 }),
   ])
+  const correoById = new Map(correos.map((c) => [c.id, c]))
+  const porRefCorreo = new Map<string, CorreoLite>()
   // Fase 7: "la anterior" is the last task the thread talked about; the old log is the fallback.
   const anteriorId = recientes[0]?.id ?? anteriorLog
   if (openRes.error) throw new Error(`Supabase tasks: ${openRes.error.message}`)
@@ -122,7 +144,15 @@ export async function construirContextoInterprete(
     const que = alarma.tipo === 'manana' ? 'alarma 8:00 am' : alarma.tipo === 'tarde' ? 'alarma 6:00 pm' : 'respuesta a "¿qué sigue?" (1 = "el primero", 2 = "el segundo"…)'
     lines.push(`ÚLTIMA LISTA NUMERADA (${que}, ${alarma.enviada_en.slice(0, 16).replace('T', ' ')} UTC) — sus números:`)
     for (const it of alarma.items) {
-      const t = byId.get(it.task_id)
+      if (it.correo_id) {
+        const c = correoById.get(it.correo_id)
+        if (c) {
+          porRefCorreo.set(`#${it.n}`, c)
+          lines.push(`[#${it.n}] 📧 correo de ${quienCorto(c)} · «${c.asunto ?? '(sin asunto)'}» · ${c.estado}`)
+        } else lines.push(`[#${it.n}] (correo ya decidido)`)
+        continue
+      }
+      const t = it.task_id ? byId.get(it.task_id) : undefined
       if (!t) {
         lines.push(`[#${it.n}] (ya cerrada o borrada)`)
         continue
@@ -160,6 +190,18 @@ export async function construirContextoInterprete(
     lines.push(`ÚLTIMA TAREA MENCIONADA ("la anterior"): ${ref ? `[${ref}] ` : ''}${anterior.text}`, '')
   }
 
+  // Fase 6: the mail a decision can be about.
+  if (correos.length > 0) {
+    lines.push(`CORREOS RECIENTES (${correos.length}; "lo hago yo", "para Chelsea", "tarea", "archivar" se deciden con "correo"):`)
+    correos.forEach((c, i) => {
+      const ref = `c${i + 1}`
+      porRefCorreo.set(ref, c)
+      const fecha = c.recibido_en ? cancunYmd(new Date(c.recibido_en)) : ''
+      lines.push(`[${ref}] de ${quienCorto(c)} <${c.de_email ?? ''}> · «${c.asunto ?? '(sin asunto)'}» · ${c.urgencia ?? '?'} · ${c.tipo ?? '?'} · ${c.estado}${fecha === today ? ' · hoy' : fecha ? ` · ${fecha}` : ''}`)
+    })
+    lines.push('')
+  }
+
   lines.push(`EMPRESAS: ${companies.map((c) => c.name.trim()).join(', ')}`)
   lines.push(`HOY: ${today} (${formatDiaLargoEs(today)}) · hora actual ${cancunHm(now)} (Cancún) · mañana = ${addDays(today, 1)}`)
 
@@ -168,7 +210,7 @@ export async function construirContextoInterprete(
   const hilo = renderHistorial(turnos, (id) => (refPorId.has(id) ? `[${refPorId.get(id)}]` : null))
   if (hilo) lines.push('', hilo)
 
-  return { text: lines.join('\n'), porRef, abiertas, anterior }
+  return { text: lines.join('\n'), porRef, abiertas, anterior, correos, porRefCorreo }
 }
 
 // ── Prompt ───────────────────────────────────────────────────────────────
@@ -209,6 +251,10 @@ export function systemPrompt(today: string, cfg: AsistenteConfig = { nombre_pers
       'Esto NO es que_sigue (que_sigue es corto y ordenado; lista es todo)',
     '- {"tipo":"dividir","ref":REF}  → "me da flojera X", "no sé por dónde empezar con X", "divide X", "paso a paso X": partir una tarea en pasos',
     '- {"tipo":"siguiente_paso",("ref":REF)}  → "siguiente paso", "el que sigue" (sin ref = la última tarea dividida)',
+    '- {"tipo":"correo","accion":"chelsea|yo|tarea|archivar",("ref":"c3"|"#15"|"texto del remitente o asunto"),("filtro":{("tipo":"marketing|notificacion|fyi|necesita_respuesta|pedido_de_tarea|reunion|pago"),("urgencia":"alta|media|baja"),("hoy":true),("de":"…")})}  → ' +
+      'decisiones sobre CORREOS (los de CORREOS RECIENTES o los "📧" numerados de la última lista): "el correo de Andrew lo hago yo" → accion yo, ref "Andrew"; "el 15 para Chelsea" → accion chelsea, ref "#15"; ' +
+      '"archiva los de marketing de hoy" → accion archivar, filtro {tipo:"marketing", hoy:true}; "el de TOTT es tarea" → accion tarea. "lo hago yo"/"yo lo contesto" = yo; "pásaselo a Chelsea" = chelsea; "archívalo"/"bórralo" sobre un correo = archivar (un correo nunca se borra). ' +
+      'Un número de la última lista que es "📧 correo" NUNCA es completar/posponer: es "correo".',
     '- {"tipo":"desconocido","texto":"…"}  → saludos, comentarios o algo que no es ninguna de las anteriores',
     '',
     'REF = a qué tarea se refiere: el id entre corchetes del contexto ("#3" = número de la última alarma, "t12" = otra tarea abierta), ' +
@@ -423,6 +469,22 @@ export function validarAcciones(raw: unknown): AccionLlm[] {
       case 'siguiente_paso':
         out.push({ tipo, ref })
         break
+      case 'correo': {
+        const accion = str(a.accion)?.toLowerCase() as CorreoAccion
+        const f = (a.filtro ?? {}) as Record<string, unknown>
+        const tipoF = str(f.tipo)?.toLowerCase() as CorreoTipo | undefined
+        const urg = str(f.urgencia)?.toLowerCase() as CorreoUrgencia | undefined
+        const filtro: FiltroCorreo = {
+          tipo: tipoF && TIPOS_CORREO.includes(tipoF) ? tipoF : undefined,
+          urgencia: urg && ['alta', 'media', 'baja'].includes(urg) ? urg : undefined,
+          hoy: f.hoy === true || undefined,
+          de: str(f.de),
+        }
+        const hayFiltro = Object.values(filtro).some((v) => v !== undefined)
+        if (ACCIONES_CORREO.includes(accion) && (ref || hayFiltro)) out.push({ tipo, accion, ref, filtro: hayFiltro ? filtro : undefined })
+        else out.push({ tipo: 'desconocido', texto: texto || 'correo: no sé cuál' })
+        break
+      }
       case 'nota_empresa': {
         const empresa = str(a.empresa)
         const t = str(a.texto)

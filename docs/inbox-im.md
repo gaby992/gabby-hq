@@ -1,5 +1,10 @@
 # Inbox-IM module — setup
 
+> **Fase 6 (nov 2026):** el triage de correo ahora vive dentro de GabbyHQ
+> (`/correo`, Settings → Correo, `sql/2026-11-asistente-fase6-correo.sql`;
+> ver `asistente.md` § 6). Estas vistas y n8n siguen vivos solo hasta que lo
+> nuevo clasifique bien; después se apagan (asistente.md § 6b, paso 7).
+
 Adds three views to GabbyHQ for operating the n8n email-triage system:
 `/inbox` (triage feed), `/chelsea` (Chelsea's daily list), `/rules` (rules engine).
 Plus task due/start dates and "copy pending" lists.

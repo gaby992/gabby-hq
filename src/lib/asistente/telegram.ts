@@ -72,9 +72,10 @@ interface SendOptions {
  * Send one message (splitting if needed) and throw on any non-2xx so callers
  * can retry. Every part is logged — ok or error — in the Vercel function logs.
  */
-export async function sendTelegram(chatId: number, text: string, opts: SendOptions = {}): Promise<void> {
+export async function sendTelegram(chatId: number, text: string, opts: SendOptions = {}): Promise<number | null> {
   const parts = splitMessage(text)
   const tag = opts.tag ?? 'telegram'
+  let messageId: number | null = null
   for (let i = 0; i < parts.length; i++) {
     const body: Record<string, unknown> = {
       chat_id: chatId,
@@ -108,7 +109,10 @@ export async function sendTelegram(chatId: number, text: string, opts: SendOptio
       throw new TelegramError(res.status, description)
     }
     console.log(`[${tag}] telegram ok chat=${chatId} parte ${i + 1}/${parts.length} (${parts[i].length} chars)`)
+    const json = await res.json().catch(() => null)
+    if (typeof json?.result?.message_id === 'number') messageId = json.result.message_id
   }
+  return messageId
 }
 
 // ── Inline buttons ───────────────────────────────────────────────────────
@@ -145,6 +149,21 @@ export async function removeInlineKeyboard(chatId: number, messageId: number): P
     })
   } catch (err) {
     console.error(`[bot] editMessageReplyMarkup: ${String(err)}`)
+  }
+}
+
+/** Rewrites a message the bot sent (fase 6: "✅ Respondido" on a mail alert). Best-effort; drops its buttons. */
+export async function editMessageText(chatId: number, messageId: number, text: string, opts: { html?: boolean; replyMarkup?: unknown } = {}): Promise<boolean> {
+  try {
+    const body: Record<string, unknown> = { chat_id: chatId, message_id: messageId, text: text.slice(0, TELEGRAM_MAX), disable_web_page_preview: true }
+    if (opts.html) body.parse_mode = 'HTML'
+    body.reply_markup = opts.replyMarkup ?? { inline_keyboard: [] }
+    const res = await fetch(`${API()}/editMessageText`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    if (!res.ok) console.error(`[bot] editMessageText: ${res.status} ${await res.text().catch(() => '')}`)
+    return res.ok
+  } catch (err) {
+    console.error(`[bot] editMessageText: ${String(err)}`)
+    return false
   }
 }
 

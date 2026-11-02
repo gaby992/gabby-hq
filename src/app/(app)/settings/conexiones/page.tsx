@@ -41,6 +41,36 @@ export default function ConexionesPage() {
 
   useEffect(() => { load() }, [load])
 
+  // Fase 6-A: 📅 Calendar (one account only) · 📧 Correo (any number).
+  async function cambiarRol(id: string, rol: 'usa_calendar' | 'usa_gmail', valor: boolean) {
+    setError(null)
+    const res = await fetch('/api/google/conexiones', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, [rol]: valor }),
+    })
+    if (!res.ok) {
+      const json = await res.json().catch(() => null)
+      setError(json?.error ?? `HTTP ${res.status}`)
+      return
+    }
+    load()
+  }
+
+  async function cambiarDuena(id: string, duena: string) {
+    const res = await fetch('/api/google/conexiones', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, duena: duena || null }),
+    })
+    if (!res.ok) {
+      const json = await res.json().catch(() => null)
+      setError(json?.error ?? `HTTP ${res.status}`)
+      return
+    }
+    load()
+  }
+
   async function desconectar(id: string) {
     setConfirmando(null)
     const res = await fetch('/api/google/conexiones', {
@@ -75,7 +105,7 @@ export default function ConexionesPage() {
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-base font-semibold text-[#e8e8e8]">Google</h2>
-            <p className="text-xs text-[#888888] mt-0.5">Calendar (eventos de tareas con fecha y hora) · Gmail (fase 6)</p>
+            <p className="text-xs text-[#888888] mt-0.5">Calendar (eventos de tareas con fecha y hora) · Correo (triage de Gmail, fase 6)</p>
           </div>
           {configurado ? (
             <a
@@ -108,6 +138,29 @@ export default function ConexionesPage() {
                   </span>
                 </div>
                 <div className="flex items-center gap-2 text-xs">
+                  <select
+                    value={c.duena ?? ''}
+                    onChange={(e) => cambiarDuena(c.id, e.target.value)}
+                    title="De quién es esta cuenta"
+                    className="bg-[#111111] border border-[#2a2a2a] rounded-md px-2 py-1 text-[#e8e8e8]"
+                  >
+                    <option value="">¿De quién?</option>
+                    <option value="Gabby">Gabby</option>
+                    <option value="Chelsea">Chelsea</option>
+                  </select>
+                  <button
+                    onClick={() => cambiarRol(c.id, 'usa_calendar', !c.usa_calendar)}
+                    title="Calendar solo puede estar activo en una cuenta"
+                    className={`px-2.5 py-1 rounded-md transition-colors ${c.usa_calendar ? 'bg-[#7F77DD]/20 text-[#7F77DD] font-medium' : 'text-[#888888] hover:text-[#e8e8e8] hover:bg-[#2a2a2a]'}`}
+                  >
+                    📅 Calendar {c.usa_calendar ? 'on' : 'off'}
+                  </button>
+                  <button
+                    onClick={() => cambiarRol(c.id, 'usa_gmail', !c.usa_gmail)}
+                    className={`px-2.5 py-1 rounded-md transition-colors ${c.usa_gmail ? 'bg-emerald-900/40 text-emerald-400 font-medium' : 'text-[#888888] hover:text-[#e8e8e8] hover:bg-[#2a2a2a]'}`}
+                  >
+                    📧 Correo {c.usa_gmail ? 'on' : 'off'}
+                  </button>
                   <a href="/api/google/oauth/start" className="px-2.5 py-1 rounded-md text-[#888888] hover:text-[#e8e8e8] hover:bg-[#2a2a2a] transition-colors">
                     Reconectar
                   </a>
@@ -131,7 +184,9 @@ export default function ConexionesPage() {
           </ul>
         )}
         <p className="text-[11px] text-[#555555]">
-          El asistente usa la cuenta activa más reciente. Los eventos van a su calendario principal.
+          📅 Calendar: los eventos de tareas y pagos van al calendario principal de esa cuenta (solo una). 📧 Correo: el asistente
+          lee su Gmail cada 15 min; las listas VIP, ruido y alertas se configuran en{' '}
+          <Link href="/settings/correo" className="text-[#7F77DD] hover:underline">Settings → Correo</Link>.
         </p>
       </section>
     </div>

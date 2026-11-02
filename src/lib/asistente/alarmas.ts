@@ -13,16 +13,19 @@ import { daysSince } from '@/lib/dates'
 import { cancunDayBounds, cancunYmd, daysBetween, formatCortoEs, formatDiaLargoEs, formatHoraEs } from './cancun'
 import { allowedChatIds, escapeHtml, sendTelegram } from './telegram'
 import { cargarConfig, personaPrompt, type AsistenteConfig } from './config'
+import { CORREO_URGENCIA_EMOJI } from '@/types'
+import { correosQueEsperan, quienCorto } from '@/lib/correo/pendientes'
 import { preguntarLlm, llmConfig } from './llm'
 import { formatHoraEs as horaEs } from './cancun'
 
 /** 'que_sigue' (fase 4b) is the numbered "¿qué sigue?" answer, recorded like an alarm. */
 export type AlarmaTipo = 'manana' | 'tarde' | 'que_sigue'
 
-/** One numbered line of an alarm: `n` is what Gabby types in "pasa n". */
+/** One numbered line of an alarm: `n` is what Gabby types in "pasa n". Fase 6: a line may be a mail instead of a task. */
 export interface AlarmaItem {
   n: number
-  task_id: string
+  task_id?: string
+  correo_id?: string
 }
 
 /** Fixed display order. Anything else comes after, alphabetically. */
@@ -275,6 +278,26 @@ function renderGrupo(g: Grupo, today: string, opts: { notas: boolean; chelseaMai
   return lines
 }
 
+/**
+ * Fase 6-F: "📧 Correos" — mails waiting on a decision (alta, needs a
+ * reply, asks for a task), numbered after the tasks so "el 15 lo hago yo"
+ * works like "listo 3". Nothing when there is none.
+ */
+async function seccionCorreos(desde: number, items: AlarmaItem[]): Promise<string | null> {
+  const correos = await correosQueEsperan()
+  if (correos.length === 0) return null
+  const lines = [`📧 <b>Correos (${correos.length})</b>`]
+  let n = desde
+  for (const c of correos) {
+    n += 1
+    items.push({ n, correo_id: c.id })
+    const u = c.urgencia ?? 'media'
+    lines.push(`${CORREO_URGENCIA_EMOJI[u]} ${n}. ${escapeHtml(quienCorto(c))} · ${escapeHtml(c.asunto ?? '(sin asunto)')}${c.resumen && c.resumen !== c.asunto ? ` · ${escapeHtml(c.resumen)}` : ''}`)
+  }
+  lines.push(`Para decidir: <code>el ${desde + 1} lo hago yo</code> · <code>el ${desde + 1} para Chelsea</code> · <code>archiva el ${desde + 1}</code> · <a href="${appUrl()}/correo">/correo</a>`)
+  return lines.join('\n')
+}
+
 function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`
 }
@@ -336,6 +359,8 @@ export async function buildManana(today: string = cancunYmd()): Promise<Mensaje>
   const saludo = await lineaBuenosDias(cfg, tasks.filter((t) => !isChelsea(companies.find((c) => c.id === t.company_id)?.name ?? '')), today)
   const blocks: string[] = [`☀️ <b>Hoy, ${formatDiaLargoEs(today)}</b>\n${escapeHtml(saludo)}`]
   for (const g of grupos) blocks.push(renderGrupo(g, today, { notas: true, chelseaMail }).join('\n'))
+  const correos = await seccionCorreos(items.length, items)
+  if (correos) blocks.push(correos)
   const total = grupos.reduce((acc, g) => acc + g.items.length + g.extra, 0)
   blocks.push(`Total: ${plural(total, 'tarea abierta', 'tareas abiertas')} · ${link}`)
   return { text: blocks.join('\n\n'), items }
@@ -388,7 +413,11 @@ export async function buildTarde(today: string = cancunYmd()): Promise<Mensaje> 
     blocks.push(lines.join('\n'))
   }
 
-  if (items.length > 0) {
+  const tareas = items.length
+  const correos = await seccionCorreos(items.length, items)
+  if (correos) blocks.push(correos)
+
+  if (tareas > 0) {
     blocks.push('¿Qué pasa a mañana? Responde: <code>pasa 2,5</code> (o <code>pasa todo</code>)')
   }
 

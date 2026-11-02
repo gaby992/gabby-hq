@@ -9,7 +9,16 @@
 
 import { OpenAIError, avisarOpenAI, clasificarErrorOpenAI } from './openai-avisos'
 
-export type LlmProvider = 'openai' | 'anthropic'
+/** 'compatible' = any OpenAI-compatible chat endpoint (fase 6: JEV for mail) at its own base URL + key. */
+export type LlmProvider = 'openai' | 'anthropic' | 'compatible'
+
+/** Where one call goes. `preguntarLlm` builds it from the env; mail and the evaluator pass their own. */
+export interface LlmTarget {
+  provider: LlmProvider
+  model: string
+  baseUrl?: string
+  apiKey?: string
+}
 
 export interface LlmResult {
   text: string
@@ -22,7 +31,7 @@ export interface LlmResult {
 
 export class LlmError extends Error {}
 
-export function llmConfig(): { provider: LlmProvider; model: string; fallback: string } {
+export function llmConfig(): { provider: 'openai' | 'anthropic'; model: string; fallback: string } {
   const provider = (process.env.LLM_PROVIDER ?? 'openai').trim().toLowerCase()
   if (provider !== 'openai' && provider !== 'anthropic') {
     throw new LlmError(`LLM_PROVIDER inválido: "${provider}" (usa openai o anthropic)`)
@@ -30,6 +39,41 @@ export function llmConfig(): { provider: LlmProvider; model: string; fallback: s
   const model = (process.env.LLM_MODEL ?? 'gpt-5-mini').trim()
   const fallback = (process.env.LLM_MODEL_FALLBACK ?? 'gpt-4o-mini').trim()
   return { provider, model, fallback }
+}
+
+/**
+ * Fase 6: the mail classifier has its own provider, independent of
+ * /pregunta: LLM_PROVIDER_CORREO (openai | anthropic | compatible),
+ * LLM_MODEL_CORREO, and for "compatible" LLM_CORREO_BASE_URL +
+ * LLM_CORREO_API_KEY. Unset → the same model /pregunta uses.
+ */
+export function llmConfigCorreo(): LlmTarget {
+  const provider = (process.env.LLM_PROVIDER_CORREO ?? process.env.LLM_PROVIDER ?? 'openai').trim().toLowerCase()
+  if (provider !== 'openai' && provider !== 'anthropic' && provider !== 'compatible') {
+    throw new LlmError(`LLM_PROVIDER_CORREO inválido: "${provider}" (usa openai, anthropic o compatible)`)
+  }
+  const model = (process.env.LLM_MODEL_CORREO ?? process.env.LLM_MODEL ?? 'gpt-5-mini').trim()
+  return { provider, model, baseUrl: process.env.LLM_CORREO_BASE_URL?.trim() || undefined, apiKey: process.env.LLM_CORREO_API_KEY?.trim() || undefined }
+}
+
+/**
+ * "openai:gpt-5-mini" / "anthropic:claude-haiku-5-5" / "compatible:jev-1" /
+ * a bare model id (provider guessed from the name) → where to send it.
+ * "compatible" always uses LLM_CORREO_BASE_URL + LLM_CORREO_API_KEY.
+ */
+export function parsearModelo(spec: string): LlmTarget {
+  const s = spec.trim()
+  const m = s.match(/^(openai|anthropic|compatible):(.+)$/i)
+  const provider = (m ? m[1].toLowerCase() : /^claude/i.test(s) ? 'anthropic' : /^(gpt|o\d)/i.test(s) ? 'openai' : 'compatible') as LlmProvider
+  const model = (m ? m[2] : s).trim()
+  if (!model) throw new LlmError('modelo vacío')
+  return provider === 'compatible'
+    ? { provider, model, baseUrl: process.env.LLM_CORREO_BASE_URL?.trim() || undefined, apiKey: process.env.LLM_CORREO_API_KEY?.trim() || undefined }
+    : { provider, model }
+}
+
+export function nombreModelo(t: LlmTarget): string {
+  return `${t.provider}:${t.model}`
 }
 
 interface Opts {
@@ -52,9 +96,10 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
   }
 }
 
-async function openai(model: string, system: string, user: string, o: Opts) {
-  const key = process.env.OPENAI_API_KEY
-  if (!key) throw new LlmError('OPENAI_API_KEY no está definida')
+async function openai(model: string, system: string, user: string, o: Opts, compatible?: { baseUrl?: string; apiKey?: string }) {
+  const key = compatible ? compatible.apiKey : process.env.OPENAI_API_KEY
+  if (!key) throw new LlmError(compatible ? 'LLM_CORREO_API_KEY no está definida' : 'OPENAI_API_KEY no está definida')
+  if (compatible && !compatible.baseUrl) throw new LlmError('LLM_CORREO_BASE_URL no está definida')
   const body: Record<string, unknown> = {
     model,
     messages: [
@@ -68,10 +113,16 @@ async function openai(model: string, system: string, user: string, o: Opts) {
   // return an empty answer. Older models reject the field, so only add it
   // where it applies.
   if (/^(gpt-5|o\d)/i.test(model)) body.reasoning_effort = 'minimal'
-  if (o.json) body.response_format = { type: 'json_object' }
+  // A compatible endpoint may not know json mode or max_completion_tokens: the prompt asks for JSON instead.
+  if (o.json && !compatible) body.response_format = { type: 'json_object' }
+  if (compatible) {
+    delete body.max_completion_tokens
+    body.max_tokens = o.maxTokens
+  }
 
+  const base = (compatible?.baseUrl ?? 'https://api.openai.com/v1').replace(/\/$/, '')
   const res = await fetchWithTimeout(
-    'https://api.openai.com/v1/chat/completions',
+    `${base}/chat/completions`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
@@ -80,7 +131,10 @@ async function openai(model: string, system: string, user: string, o: Opts) {
     o.timeoutMs
   )
   const json = await res.json().catch(() => null)
-  if (!res.ok) throw clasificarErrorOpenAI(res.status, json)
+  if (!res.ok) {
+    if (compatible) throw new LlmError(json?.error?.message ?? json?.message ?? `${base} HTTP ${res.status}`)
+    throw clasificarErrorOpenAI(res.status, json)
+  }
   return {
     text: String(json?.choices?.[0]?.message?.content ?? '').trim(),
     tokensIn: Number(json?.usage?.prompt_tokens ?? 0),
@@ -119,6 +173,15 @@ async function anthropic(model: string, system: string, user: string, o: Opts) {
     tokensIn: Number(json?.usage?.input_tokens ?? 0),
     tokensOut: Number(json?.usage?.output_tokens ?? 0),
   }
+}
+
+/** One call to an explicit target (fase 6: mail classifier, model evaluation). No fallback, no warnings. */
+export async function llamarLlm(t: LlmTarget, system: string, user: string, o: Opts): Promise<LlmResult> {
+  const t0 = Date.now()
+  const r = t.provider === 'anthropic'
+    ? await anthropic(t.model, system, user, o)
+    : await openai(t.model, system, user, o, t.provider === 'compatible' ? { baseUrl: t.baseUrl, apiKey: t.apiKey } : undefined)
+  return { ...r, provider: t.provider, model: t.model, ms: Date.now() - t0 }
 }
 
 export async function preguntarLlm(system: string, user: string, o: Opts): Promise<LlmResult> {

@@ -67,6 +67,7 @@
         { "ejemplo": "olvida lo anterior", "que": "limpia la conversación y empieza de cero" },
         { "ejemplo": "mañana los correos de Chelsea, el miércoles armar el equipo de marketing y el jueves pasar $500 a WSH", "que": "tu semana en un mensaje: la arma por día, sin duplicar lo que ya existía, y te la muestra para que digas \"así queda\"" },
         { "ejemplo": "quita el marketing repetido · déjala donde estaba · la de marketing a las 10 · olvídalo", "que": "corrige el plan antes de aprobarlo: te muestra solo lo que cambia y vuelve a preguntar; nunca borra ni completa una tarea por una corrección" },
+        { "ejemplo": "el correo de Andrew lo hago yo · el 15 para Chelsea · archiva los de marketing de hoy", "que": "decide correos sin botones: lo hago yo / tarea crean la tarea con el Ref del correo; archivar lo saca del inbox de Gmail; varios a la vez pasan por el plan" },
         { "ejemplo": "me da flojera armar el equipo de marketing", "que": "la parte en 3-5 pasos (subtareas) y te dice solo el primero; \"siguiente paso\" avanza" }
       ]
     },

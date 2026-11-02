@@ -94,8 +94,14 @@ async function porNumeros(wanted: number[] | 'todo'): Promise<Resuelto> {
   if (!alarma) {
     return { text: 'No hay ninguna alarma con tareas numeradas todavía. Espera la de las 8:00 o la de las 6:00 pm, o dime una palabra del título.' }
   }
-  if (wanted === 'todo') return { ids: alarma.items.map((i) => i.task_id) }
-  const byN = new Map(alarma.items.map((i) => [i.n, i.task_id]))
+  const tareas = alarma.items.filter((i): i is AlarmaItem & { task_id: string } => !!i.task_id)
+  if (wanted === 'todo') return { ids: tareas.map((i) => i.task_id) }
+  // Fase 6: a number of the "📧 Correos" section is a mail, not a task.
+  const correos = wanted.filter((n) => alarma.items.some((i) => i.n === n && i.correo_id))
+  if (correos.length > 0) {
+    return { text: `${correos.length === 1 ? `El ${correos[0]} es un correo` : `Los ${correos.join(', ')} son correos`}: dime "el ${correos[0]} lo hago yo", "el ${correos[0]} para Chelsea" o "archiva el ${correos[0]}".` }
+  }
+  const byN = new Map(tareas.map((i) => [i.n, i.task_id]))
   const missing = wanted.filter((n) => !byN.has(n))
   if (missing.length > 0) {
     const max = Math.max(...alarma.items.map((i) => i.n))

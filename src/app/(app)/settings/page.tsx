@@ -105,12 +105,20 @@ export default function SettingsPage() {
     <div className="space-y-10">
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-lg font-semibold text-[#e8e8e8]">Settings</h1>
-        <Link
-          href="/settings/conexiones"
-          className="px-3 py-1.5 text-sm rounded-md text-[#888888] hover:text-[#e8e8e8] hover:bg-[#2a2a2a] transition-colors"
-        >
-          Conexiones (Google) →
-        </Link>
+        <div className="flex items-center gap-1">
+          <Link
+            href="/settings/conexiones"
+            className="px-3 py-1.5 text-sm rounded-md text-[#888888] hover:text-[#e8e8e8] hover:bg-[#2a2a2a] transition-colors"
+          >
+            Conexiones (Google) →
+          </Link>
+          <Link
+            href="/settings/correo"
+            className="px-3 py-1.5 text-sm rounded-md text-[#888888] hover:text-[#e8e8e8] hover:bg-[#2a2a2a] transition-colors"
+          >
+            Correo →
+          </Link>
+        </div>
       </div>
 
       {/* Companies */}

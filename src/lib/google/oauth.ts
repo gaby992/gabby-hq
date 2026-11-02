@@ -26,6 +26,11 @@ export interface ConexionRow {
   conectado_en: string
   ultimo_uso: string | null
   activa: boolean
+  /** Fase 6 roles (null before the fase 6 SQL runs). */
+  usa_calendar?: boolean | null
+  usa_gmail?: boolean | null
+  duena?: string | null
+  company_id?: string | null
 }
 
 function appUrl(): string {
@@ -115,17 +120,51 @@ export async function conectarConCodigo(code: string): Promise<string> {
   return email
 }
 
-/** The account the assistant uses: the most recently connected active one. */
+/**
+ * The account Calendar writes to (fase 6-A): the one with `usa_calendar`
+ * on — there is at most one. Before the fase 6 SQL runs (no flags yet),
+ * the most recently connected active account, as in fase 5.
+ */
 export async function conexionActiva(): Promise<ConexionRow | null> {
   const { data, error } = await createServerClient()
     .from('conexiones_google')
     .select('*')
     .eq('activa', true)
     .order('conectado_en', { ascending: false })
-    .limit(1)
-    .maybeSingle<ConexionRow>()
+  if (error) throw new GoogleError(`Supabase conexiones_google: ${error.message}`)
+  const rows = (data as ConexionRow[]) ?? []
+  return rows.find((r) => r.usa_calendar === true) ?? (rows.some((r) => r.usa_calendar === false) ? null : rows[0] ?? null)
+}
+
+/** The accounts whose mail the assistant reads (fase 6): `usa_gmail` on. */
+export async function conexionesGmail(): Promise<ConexionRow[]> {
+  const { data, error } = await createServerClient()
+    .from('conexiones_google')
+    .select('*')
+    .eq('activa', true)
+    .eq('usa_gmail', true)
+  if (error) throw new GoogleError(`Supabase conexiones_google: ${error.message}`)
+  return (data as ConexionRow[]) ?? []
+}
+
+export async function conexionPorId(id: string): Promise<ConexionRow | null> {
+  const { data, error } = await createServerClient().from('conexiones_google').select('*').eq('id', id).maybeSingle<ConexionRow>()
   if (error) throw new GoogleError(`Supabase conexiones_google: ${error.message}`)
   return data ?? null
+}
+
+/**
+ * Settings → Conexiones toggles. Calendar on one account turns it off on
+ * every other (the partial unique index enforces it in the DB too).
+ */
+export async function cambiarRoles(id: string, roles: { usa_calendar?: boolean; usa_gmail?: boolean; duena?: string | null; company_id?: string | null }): Promise<void> {
+  const db = createServerClient()
+  if (roles.usa_calendar === true) {
+    const { error } = await db.from('conexiones_google').update({ usa_calendar: false }).neq('id', id).eq('usa_calendar', true)
+    if (error) throw new GoogleError(`Supabase conexiones_google: ${error.message}`)
+  }
+  const { error } = await db.from('conexiones_google').update(roles).eq('id', id)
+  if (error) throw new GoogleError(`Supabase conexiones_google: ${error.message}`)
 }
 
 // Access tokens last an hour; a warm function reuses one across calls.

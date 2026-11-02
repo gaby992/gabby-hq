@@ -57,6 +57,7 @@ Es lo mismo que manda el bot con `/ayuda todo`. La guía técnica está en [asis
 - `olvida lo anterior` — limpia la conversación y empieza de cero
 - `mañana los correos de Chelsea, el miércoles armar el equipo de marketing y el jueves pasar $500 a WSH` — tu semana en un mensaje: la arma por día, sin duplicar lo que ya existía, y te la muestra para que digas "así queda"
 - `quita el marketing repetido · déjala donde estaba · la de marketing a las 10 · olvídalo` — corrige el plan antes de aprobarlo: te muestra solo lo que cambia y vuelve a preguntar; nunca borra ni completa una tarea por una corrección
+- `el correo de Andrew lo hago yo · el 15 para Chelsea · archiva los de marketing de hoy` — decide correos sin botones: lo hago yo / tarea crean la tarea con el Ref del correo; archivar lo saca del inbox de Gmail; varios a la vez pasan por el plan
 - `me da flojera armar el equipo de marketing` — la parte en 3-5 pasos (subtareas) y te dice solo el primero; "siguiente paso" avanza
 
 ## ℹ️ Otros

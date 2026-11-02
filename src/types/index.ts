@@ -76,6 +76,153 @@ export interface ConexionGoogle {
   conectado_en: string
   ultimo_uso: string | null
   activa: boolean
+  /** Fase 6: roles. Calendar on ONE account at most; mail on any number. */
+  usa_calendar: boolean
+  usa_gmail: boolean
+  /** 'Gabby' | 'Chelsea' — whose mailbox it is. */
+  duena: string | null
+  /** The company its tasks belong to (null = no company). */
+  company_id: string | null
+}
+
+// ── Fase 6: correo dentro de GabbyHQ ────────────────────────────────────
+
+export type CorreoUrgencia = 'alta' | 'media' | 'baja'
+
+export type CorreoTipo =
+  | 'necesita_respuesta'
+  | 'pedido_de_tarea'
+  | 'fyi'
+  | 'notificacion'
+  | 'marketing'
+  | 'reunion'
+  | 'pago'
+
+export type CorreoEstado =
+  | 'nuevo'
+  | 'para_chelsea'
+  | 'lo_hago_yo'
+  | 'tarea'
+  | 'archivado'
+  | 'respondido'
+  | 'registrado'
+
+/** What a rule imported from n8n (or written by hand) does with a match. */
+export type ReglaCorreoAccion = 'vip' | 'ruido' | 'para_chelsea' | 'lo_hago_yo' | 'archivar' | 'registrar'
+
+export interface ReglaCorreo {
+  /** An email, a domain, or a piece of the subject (case-insensitive). */
+  match: string
+  accion: ReglaCorreoAccion
+  /** Alert in Telegram even if the action already decided the state. */
+  alerta?: boolean
+}
+
+export interface CuentaCorreo {
+  id: string
+  conexion_id: string
+  nombre: string
+  duena: string | null
+  activa: boolean
+  vip: string[]
+  ruido: string[]
+  reglas: ReglaCorreo[]
+  chat_id_alertas: number | null
+  alertar: boolean
+  /** "07:00-21:00" in Cancún time. */
+  horario_alertas: string
+  ultimo_history_id: string | null
+  created_at: string
+  /** Joined for the UI. */
+  conexion?: Pick<ConexionGoogle, 'email' | 'usa_gmail' | 'activa' | 'company_id'>
+}
+
+export interface Correo {
+  id: string
+  cuenta_id: string
+  gmail_message_id: string
+  gmail_thread_id: string | null
+  de_nombre: string | null
+  de_email: string | null
+  asunto: string | null
+  resumen: string | null
+  cuerpo_texto: string | null
+  recibido_en: string | null
+  urgencia: CorreoUrgencia | null
+  tipo: CorreoTipo | null
+  categoria: string | null
+  confianza: number | null
+  razon: string | null
+  estado: CorreoEstado
+  alertado: boolean
+  decidido_en: string | null
+  telegram_chat_id: number | null
+  telegram_message_id: number | null
+  task_id: string | null
+  created_at: string
+}
+
+/** The four decisions — the Telegram buttons, the web row and "el correo de Andrew lo hago yo". */
+export type CorreoAccion = 'chelsea' | 'yo' | 'tarea' | 'archivar'
+
+export interface CorreoEvaluacion {
+  id: string
+  correo_id: string
+  modelo: string
+  urgencia: CorreoUrgencia | null
+  tipo: CorreoTipo | null
+  razon: string | null
+  created_at: string
+}
+
+export interface CorreoVeredicto {
+  id: string
+  correo_id: string
+  urgencia: CorreoUrgencia
+  tipo: CorreoTipo
+  created_at: string
+}
+
+export const CORREO_URGENCIA_ORDER: CorreoUrgencia[] = ['alta', 'media', 'baja']
+
+export const CORREO_URGENCIA_EMOJI: Record<CorreoUrgencia, string> = { alta: '✴️', media: '▫️', baja: '▪️' }
+
+export const CORREO_URGENCIA_LABELS: Record<CorreoUrgencia, string> = { alta: 'Alta', media: 'Media', baja: 'Baja' }
+
+export const CORREO_TIPO_LABELS: Record<CorreoTipo, string> = {
+  necesita_respuesta: 'Necesita respuesta',
+  pedido_de_tarea: 'Pedido de tarea',
+  fyi: 'FYI',
+  notificacion: 'Notificación',
+  marketing: 'Marketing',
+  reunion: 'Reunión',
+  pago: 'Pago',
+}
+
+export const CORREO_ESTADO_LABELS: Record<CorreoEstado, string> = {
+  nuevo: 'Nuevo',
+  para_chelsea: 'Para Chelsea',
+  lo_hago_yo: 'Lo hago yo',
+  tarea: 'Tarea',
+  archivado: 'Archivado',
+  respondido: 'Respondido',
+  registrado: 'Registrado',
+}
+
+export const CORREO_ACCION_LABELS: Record<CorreoAccion, string> = {
+  chelsea: 'Para Chelsea',
+  yo: 'Lo hago yo',
+  tarea: 'Tarea',
+  archivar: 'Archivar',
+}
+
+export const REGLA_CORREO_ACCION_LABELS: Record<ReglaCorreoAccion, string> = {
+  vip: 'VIP (alta + alerta)',
+  ruido: 'Ruido (solo registrar, sin IA)',
+  para_chelsea: 'Auto → Chelsea',
+  lo_hago_yo: 'Auto → Gabby (tarea)',
+  archivar: 'Auto archivar',
+  registrar: 'Solo registrar',
 }
 
 /** A monthly payment date (fase 5-C). Not a task: lives in Settings and in Calendar. */

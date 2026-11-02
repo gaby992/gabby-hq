@@ -26,6 +26,8 @@ import {
 } from '@/lib/asistente/plan'
 import { dividirTarea, siguientePaso } from '@/lib/asistente/pasos'
 import { aplicarCorreccion, fusionarCorreccion, leerCorreccion, renderCorreccion, type Resultado } from '@/lib/asistente/correcciones'
+import { accionDeBoton } from '@/lib/correo/alertas'
+import { decidirCorreo } from '@/lib/correo/decisiones'
 import { tareasRecientes } from '@/lib/asistente/conversacion'
 import {
   HORAS_BOTONES,
@@ -679,6 +681,22 @@ async function handleCallback(cq: CallbackQuery) {
     } catch (err) {
       console.error('[bot] callback recordatorio error:', err)
       await reply(chatId, ERROR_GENERICO)
+    }
+    return
+  }
+
+  // ── Fase 6: a mail alert's buttons [Para Chelsea] [Lo hago yo] [Tarea] [Archivar] — no draft involved ──
+  const mm = data.match(/^m:([0-9a-f-]{36}):(ch|yo|ta|ar)$/)
+  if (mm) {
+    const accion = accionDeBoton(mm[2])
+    if (!accion) return
+    try {
+      await removeInlineKeyboard(chatId, messageId)
+      const d = await decidirCorreo(mm[1], accion)
+      await reply(chatId, d.texto)
+    } catch (err) {
+      console.error('[bot] callback correo error:', err)
+      await reply(chatId, `⚠️ No pude: ${err instanceof Error ? err.message : String(err)}`)
     }
     return
   }

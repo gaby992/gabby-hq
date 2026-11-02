@@ -19,6 +19,7 @@ import { daysSince } from '@/lib/dates'
 import { SIMBOLO, guardarAlarma, simboloDe, type AlarmaItem } from './alarmas'
 import { addDays, cancunYmd, daysBetween, formatHoraEs, formatVenceEs } from './cancun'
 import { escapeHtml, sendTelegram } from './telegram'
+import { correosQueEsperan, quienCorto, type CorreoLite } from '@/lib/correo/pendientes'
 
 export interface QueSigueOpts {
   /** "qué sigue de IM" */
@@ -52,6 +53,8 @@ export interface QueSigue {
   ahora: Rankeada | null
   despues: Rankeada[]
   porVencer: TaskLite[]
+  /** Fase 6: mails with urgencia alta waiting on a decision (numbered too). */
+  correos: CorreoLite[]
   notas: { empresa: string; texto: string; dias: number }[]
   /** The numbering, in message order. */
   items: AlarmaItem[]
@@ -63,6 +66,7 @@ export interface QueSigue {
 
 const MAX_DESPUES = 3
 const MAX_VENCER = 3
+const MAX_CORREOS = 3
 const MAX_NOTA_CHARS = 140
 
 function corto(s: string, max: number): string {
@@ -130,6 +134,9 @@ export async function calcularQueSigue(opts: QueSigueOpts = {}, now: Date = new 
         .sort((a, b) => a.due_date!.localeCompare(b.due_date!))
         .slice(0, MAX_VENCER)
 
+  // Fase 6: alta mails count as "what's next" too (not for "qué sigue de IM").
+  const correos = opts.solo_vencer || opts.empresa ? [] : (await correosQueEsperan({ max: 12 })).filter((c) => c.urgencia === 'alta').slice(0, MAX_CORREOS)
+
   const notasFrescas = opts.solo_vencer
     ? []
     : notas
@@ -167,6 +174,15 @@ export async function calcularQueSigue(opts: QueSigueOpts = {}, now: Date = new 
         : ['— nada vence esta semana']),
     ].join('\n'))
   }
+  if (correos.length > 0) {
+    bloques.push([
+      '<b>Correos urgentes</b>',
+      ...correos.map((c) => {
+        items.push({ n: items.length + 1, correo_id: c.id })
+        return `📧 ${items.length}. ${escapeHtml(quienCorto(c))} · ${escapeHtml(c.asunto ?? '(sin asunto)')}${c.resumen && c.resumen !== c.asunto ? ` · ${escapeHtml(c.resumen)}` : ''}`
+      }),
+    ].join('\n'))
+  }
   if (!opts.solo_vencer) {
     bloques.push([
       '<b>Por dónde ibas</b>',
@@ -178,7 +194,7 @@ export async function calcularQueSigue(opts: QueSigueOpts = {}, now: Date = new 
 
   const html = bloques.join('\n\n')
   const textoPlano = html.replace(/<\/?b>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
-  return { ahora, despues, porVencer, notas: notasFrescas, items, html, textoPlano }
+  return { ahora, despues, porVencer, correos, notas: notasFrescas, items, html, textoPlano }
 }
 
 /**

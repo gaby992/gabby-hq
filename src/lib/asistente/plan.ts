@@ -12,7 +12,11 @@ import type { Cambios, TareaParsed } from '@/lib/parser'
 import { cancelarTareas, ejecutarAccion, renombrarTarea } from './acciones'
 import { enviarLista } from './alarmas'
 import { addDays, cancunHm, cancunYmd, formatFechaHoraEs, formatHoraEs, formatVenceEs } from './cancun'
-import { buscarEnAbiertas, type AccionLlm, type ContextoInterprete, type TareaLite } from './interprete'
+import { buscarEnAbiertas, type AccionLlm, type ContextoInterprete, type FiltroCorreo, type TareaLite } from './interprete'
+import { decidirCorreo } from '@/lib/correo/decisiones'
+import { quienCorto, type CorreoLite } from '@/lib/correo/pendientes'
+import { CORREO_ACCION_LABELS, CORREO_TIPO_LABELS } from '@/types'
+import { normalizar } from './acciones'
 import { ejecutarNota } from './notas-bot'
 import { responderPregunta } from './pregunta'
 import { enviarQueSigue } from './que-sigue'
@@ -45,6 +49,8 @@ export type AccionResuelta = AccionLlm & {
   dispara_en?: string
   /** crear: an open task that is the same thing (fase 7-G) — update it instead of creating. */
   existente?: TareaRef & { motivo: string }
+  /** correo: the mails the decision applies to (fase 6). */
+  correos?: CorreoLite[]
   error?: string
 }
 
@@ -135,9 +141,51 @@ export function resolverAcciones(acciones: AccionLlm[], ctx: ContextoInterprete,
       if (anterior) r.tarea = anterior
       else r.error = 'no sé de qué tarea: dime "siguiente paso de X"'
     }
+    if (a.tipo === 'correo') {
+      // A "ref" on a mail action is not a task ref: undo whatever resolverRef said.
+      r.tarea = undefined
+      r.candidatos = undefined
+      r.error = undefined
+      const res = resolverCorreos(a.ref, a.filtro, ctx)
+      if ('error' in res) r.error = res.error
+      else r.correos = res.correos
+    }
     out.push(r)
   }
   return emparejarCrear(out, ctx)
+}
+
+/** "#15" / "c3" / "Andrew" / a filter → the mails a decision is about. */
+function resolverCorreos(ref: string | undefined, filtro: FiltroCorreo | undefined, ctx: ContextoInterprete): { correos: CorreoLite[] } | { error: string } {
+  if (ref) {
+    const num = ref.trim().match(/^#?\s*(\d+)$/)
+    const key = num ? `#${num[1]}` : ref.trim().toLowerCase()
+    const directo = ctx.porRefCorreo.get(key)
+    if (directo) return { correos: [directo] }
+    if (/^(#\d+|c\d+)$/.test(key)) return { error: `no encontré el correo ${key}` }
+    const needle = normalizar(ref)
+    const hits = ctx.correos.filter((c) => normalizar(`${c.de_nombre ?? ''} ${c.de_email ?? ''} ${c.asunto ?? ''}`).includes(needle))
+    if (hits.length === 1) return { correos: hits }
+    if (hits.length === 0) return { error: `no encontré ningún correo de «${ref}» en los últimos 7 días` }
+    if (!filtro) return { error: `«${ref}» coincide con ${hits.length} correos: ${hits.slice(0, 4).map((c) => `«${corto(c.asunto ?? '', 30)}»`).join(', ')}` }
+    return { correos: aplicarFiltro(hits, filtro) }
+  }
+  if (!filtro) return { error: 'no sé de qué correo hablas' }
+  const hits = aplicarFiltro(ctx.correos, filtro)
+  if (hits.length === 0) return { error: 'no hay correos que cumplan eso' }
+  return { correos: hits }
+}
+
+function aplicarFiltro(correos: CorreoLite[], f: FiltroCorreo): CorreoLite[] {
+  const today = cancunYmd()
+  const de = f.de ? normalizar(f.de) : null
+  return correos.filter((c) => {
+    if (f.tipo && c.tipo !== f.tipo) return false
+    if (f.urgencia && c.urgencia !== f.urgencia) return false
+    if (f.hoy && (!c.recibido_en || cancunYmd(new Date(c.recibido_en)) !== today)) return false
+    if (de && !normalizar(`${c.de_nombre ?? ''} ${c.de_email ?? ''}`).includes(de)) return false
+    return true
+  })
 }
 
 /** Second pass over the resolved actions: which "crear" is really an open task. */
@@ -166,7 +214,7 @@ function emparejarCrear(acciones: AccionResuelta[], ctx: ContextoInterprete): Ac
 const ICONO: Record<AccionLlm['tipo'], string> = {
   completar: '✅', cancelar: '🗑', borrar: '❌', posponer: '➡️', renombrar: '✏️', cambiar: '✏️', crear: '➕',
   nota_empresa: '📝', nota_tarea: '📎', alarma: '⏰', pregunta: '❓', que_sigue: '🎯', lista: '📋', calendar: '📅',
-  pagos_listar: '💳', dividir: '🪜', siguiente_paso: '🪜', desconocido: '🤷',
+  pagos_listar: '💳', dividir: '🪜', siguiente_paso: '🪜', correo: '📧', desconocido: '🤷',
 }
 
 function fechaDicha(ymd: string, today: string): string {
@@ -215,6 +263,13 @@ function frase(a: AccionResuelta, today: string, conTarea: boolean): string {
     case 'pagos_listar': return `Listar pagos${a.empresa_ref ? ` de ${a.empresa_ref.name.trim()}` : ''}${a.semana ? ' de esta semana' : ''}`
     case 'dividir': return `Dividir en pasos${tt}`
     case 'siguiente_paso': return `Siguiente paso${tt}`
+    case 'correo': {
+      const que = CORREO_ACCION_LABELS[a.accion]
+      const cs = a.correos ?? []
+      if (cs.length === 1) return `${que}: «${corto(cs[0].asunto ?? '(sin asunto)', 40)}» de ${quienCorto(cs[0])}`
+      const filtro = a.filtro ? [a.filtro.tipo ? CORREO_TIPO_LABELS[a.filtro.tipo].toLowerCase() : null, a.filtro.urgencia, a.filtro.de ? `de ${a.filtro.de}` : null, a.filtro.hoy ? 'de hoy' : null].filter(Boolean).join(' ') : ''
+      return `${que}: ${cs.length} correos${filtro ? ` (${filtro})` : ''}${cs.length > 0 ? ` — ${cs.slice(0, 3).map((c) => `«${corto(c.asunto ?? '', 25)}»`).join(', ')}${cs.length > 3 ? '…' : ''}` : ''}`
+    }
     case 'desconocido': return `No entendí «${corto(a.texto, 60)}»`
   }
 }
@@ -258,6 +313,7 @@ function simboloPlan(a: AccionResuelta): string {
 export function tituloDe(a: AccionResuelta): string {
   if (a.tipo === 'crear') return a.existente ? a.existente.text : a.titulo
   if (a.tipo === 'alarma') return a.texto
+  if (a.tipo === 'correo') return (a.correos ?? []).map((c) => `${c.de_nombre ?? c.de_email ?? ''} ${c.asunto ?? ''}`).join(' · ')
   return a.tarea?.text ?? ('ref' in a && a.ref ? a.ref : '')
 }
 
@@ -460,7 +516,8 @@ export function lineaCorreccion(a: AccionResuelta, semana: boolean, alarma: Extr
  */
 export function necesitaConfirmacion(acciones: AccionResuelta[]): boolean {
   const reales = acciones.filter((a) => a.tipo !== 'desconocido')
-  return reales.length >= 2 || reales.some((a) => a.tipo === 'cancelar')
+  // Fase 6: a decision over several mails at once ("archiva los de marketing") is shown first.
+  return reales.length >= 2 || reales.some((a) => a.tipo === 'cancelar' || (a.tipo === 'correo' && (a.correos?.length ?? 0) >= 2))
 }
 
 function tareaDe(a: AccionResuelta): TareaRef {
@@ -575,6 +632,17 @@ export async function ejecutarUna(chatId: number, a: AccionResuelta): Promise<st
     }
     case 'pagos_listar':
       return textoListaPagos(a.empresa_ref?.id ?? null, a.empresa_ref?.name.trim() ?? null, { semana: a.semana === true })
+    case 'correo': {
+      const out: string[] = []
+      for (const c of a.correos ?? []) {
+        try {
+          out.push((await decidirCorreo(c.id, a.accion)).texto)
+        } catch (err) {
+          out.push(`⚠️ «${corto(c.asunto ?? '', 40)}»: ${err instanceof Error ? err.message : String(err)}`)
+        }
+      }
+      return out.join('\n') || '📧 ningún correo'
+    }
     case 'desconocido':
       return `🤷 No entendí «${corto(a.texto, 60)}»`
   }
@@ -604,6 +672,7 @@ export function resumenParaLog(acciones: AccionResuelta[]): string {
     acciones: acciones.map((a) => ({
       ...a,
       tarea: a.tarea ? { id: a.tarea.id, text: a.tarea.text } : undefined,
+      correos: a.correos ? a.correos.map((c) => ({ id: c.id, asunto: c.asunto })) : undefined,
       candidatos: undefined,
       empresa_ref: a.empresa_ref ? a.empresa_ref.name : undefined,
     })),

@@ -10,6 +10,8 @@ import type { Company, NotaEmpresa, Priority } from '@/types'
 import { CHELSEA_COMPANY_NAME } from '@/lib/chelsea'
 import { CANCUN_TZ, addDays, cancunDayBounds, cancunYmd, daysBetween, formatHoraEs, formatVenceEs } from './cancun'
 import { countChelseaMail } from './alarmas'
+import { correosRecientes, quienCorto } from '@/lib/correo/pendientes'
+import { CORREO_ESTADO_LABELS } from '@/types'
 
 /** Only these columns are read — `notes` is deliberately absent. */
 interface TaskLite {
@@ -96,12 +98,14 @@ export async function construirContexto(now: Date = new Date()): Promise<Context
 
   const db = createServerClient()
   const cols = 'id, text, priority, importante, due_date, due_time, company_id, completed_at'
-  const [openRes, doneRes, companiesRes, notasRes, chelseaMail] = await Promise.all([
+  const [openRes, doneRes, companiesRes, notasRes, chelseaMail, correos] = await Promise.all([
     db.from('tasks').select(cols).eq('done', false),
     db.from('tasks').select(cols).eq('done', true).gte('completed_at', hace7).order('completed_at', { ascending: false }),
     db.from('companies').select('*'),
     db.from('notas_empresa').select('*'),
     countChelseaMail(),
+    // Fase 6: subject + summary + state of the last 7 days. NEVER the body.
+    correosRecientes({ estados: ['nuevo', 'para_chelsea', 'lo_hago_yo', 'tarea', 'respondido', 'archivado'], dias: 7, max: 40 }),
   ])
   if (openRes.error) throw new Error(`Supabase tasks: ${openRes.error.message}`)
   if (doneRes.error) throw new Error(`Supabase tasks (hechas): ${doneRes.error.message}`)
@@ -169,6 +173,17 @@ export async function construirContexto(now: Date = new Date()): Promise<Context
           : `Correos pendientes de Chelsea en inbox-IM: ${chelseaMail}`
       )
     }
+    lines.push('')
+  }
+
+  if (correos.length > 0) {
+    lines.push(`== Correos (últimos 7 días, ${correos.length}) ==`)
+    const c = cap(correos)
+    for (const m of c.items) {
+      const fecha = m.recibido_en ? formatVenceEs(cancunYmd(new Date(m.recibido_en))) : ''
+      lines.push(`- ${quienCorto(m)} · «${m.asunto ?? '(sin asunto)'}»${m.resumen && m.resumen !== m.asunto ? `: ${m.resumen}` : ''} [${m.cuenta} · ${m.urgencia ?? '?'} · ${m.tipo ?? '?'} · ${CORREO_ESTADO_LABELS[m.estado].toLowerCase()}${fecha ? ` · ${fecha}` : ''}]`)
+    }
+    if (c.extra > 0) lines.push(`- (+${c.extra} más)`)
     lines.push('')
   }
 

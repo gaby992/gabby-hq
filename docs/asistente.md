@@ -113,6 +113,7 @@ Archivos del asistente dentro del repo:
 | `src/lib/asistente/organizar.ts` | Fase 7: el modo "organízame" (cola, botones, resumen) |
 | `src/lib/asistente/similitud.ts` | Fase 7-G: "nunca duplicar" — similitud de títulos (≥ 0.75), palabras clave específicas (lista `GENERICAS`), una tarea por línea |
 | `src/lib/asistente/correcciones.ts` | Ajuste 7-G: corregir el plan pendiente ("quita X repetido", "déjala donde estaba", "olvídalo", fusionar lo que diga el modelo) sin borrar ni completar nada |
+| `src/lib/correo/*` | Fase 6: correo dentro de GabbyHQ (Gmail, clasificador, alertas, decisiones, evaluación de modelos) — ver § 6 |
 | `src/lib/asistente/pasos.ts` | Fase 7-H: dividir una tarea en 3–5 subtareas y "siguiente paso" |
 | `src/app/api/asistente/config/route.ts` | Fase 7: Settings → Asistente (config + costo del mes) |
 | `src/components/AsistenteConfigPanel.tsx` | Fase 7: el panel de Settings → Asistente |
@@ -1517,9 +1518,228 @@ cuenta: cada cuenta se conecta desde Settings.
 
 ---
 
-## 6. Fase 6 — Gmail
+## 6. Fase 6 — Correo dentro de GabbyHQ (reemplaza n8n / inbox-IM)
 
-_Pendiente. La cuenta ya queda autorizada con `gmail.readonly` + `gmail.modify` desde la fase 5._
+**Por qué.** El triage de n8n clasificaba mal urgencia y tipo y dejó de
+alertar los VIP. Se rehace aquí, con las dos cuentas ya conectadas en
+Settings → Conexiones: `chelsea@interactivemarketing.net` (primero) y
+`gabrielarangel169@gmail.com` (después, misma config). n8n sigue vivo hasta
+que esto clasifique bien; se apaga en 6b. Nada de lo nuevo escribe en
+`im_triaje`; `/inbox`, `/chelsea` y `/rules` quedan intactas hasta entonces.
+
+### 6a. Qué hace
+
+**A) Roles por cuenta** (`conexiones_google.usa_calendar`, `usa_gmail`,
+`duena`, `company_id`). Settings → Conexiones muestra por cuenta un selector
+"¿De quién?" (Gabby / Chelsea) y dos toggles: **📅 Calendar** (solo puede
+estar encendido en UNA cuenta: encenderlo en una lo apaga en las demás, y un
+índice único parcial lo garantiza en la base) y **📧 Correo** (en las que
+quieras). `conexionActiva()` ahora devuelve la cuenta con Calendar encendido,
+no "la más reciente"; antes del SQL (sin columnas) sigue siendo la más
+reciente, para que nada se rompa. Defaults del SQL: Gabby = calendar on,
+correo off; Chelsea = calendar off, correo on.
+
+**B) Config de correo por cuenta** (`cuentas_correo`, Settings → **Correo**).
+Una tarjeta por cuenta: nombre ("IM Chelsea"), dueña, activa, alertar; **VIP**
+y **ruido** (un email o dominio por línea; un dominio cubre sus subdominios);
+**reglas** `{match, accion, alerta}` donde `match` es email, dominio o texto
+del asunto y `accion` ∈ vip · ruido · para_chelsea · lo_hago_yo · archivar ·
+registrar; **chat de alertas** (vacío = `ALLOWED_CHAT_IDS`); **horario**
+`07:00-21:00` (Cancún; fuera de él no suena nada y esos correos salen en la
+lista de las 8); el cursor de Gmail (`ultimo_history_id`, con "Reiniciar
+cursor" para volver a leer 3 días sin duplicar) y **Importar de n8n**: se
+pega el JSON de `im_reglas` (o `{vip, ruido, reglas}`) y se suma a lo que
+hay: auto_chelsea → para_chelsea, auto_gabby → lo_hago_yo, auto_archivar →
+archivar, solo_registrar → registrar; un remitente/dominio con `alerta: true`
+entra también a VIP. El SQL precarga la cuenta de Chelsea (activa) y la de
+Gabby (inactiva) con el VIP y el ruido iniciales. "📥 Leer ahora" corre la
+ingesta desde el navegador (máx 20 correos) para probar sin esperar al cron.
+
+**C) Ingesta** (`src/lib/correo/ingesta.ts`, cron `*/15 * * * *` →
+`/api/correo/ingesta` con `CRON_SECRET`; también entra con la sesión web).
+Por cuenta activa con 📧 encendido: `users.history` desde el cursor (la
+primera vez, o si Gmail ya olvidó el cursor, `newer_than:3d` en INBOX), máx
+50 por corrida, de más viejo a más nuevo, en lotes de 4. Cada mensaje →
+fila en `correos` (asunto MIME-decodificado, remitente partido en nombre y
+email, cuerpo en texto plano sin la cita del hilo, 3000 caracteres) →
+clasificador → alerta si toca. El cursor solo avanza cuando el lote entero
+se procesó; si algo quedó, la siguiente corrida vuelve a listar y el índice
+único de `gmail_message_id` evita duplicados. Lo que la cuenta misma envió
+(CC a sí misma) se ignora. Cada llamada al modelo queda en `bot_preguntas`
+con `modelo = correo:…` y `chat_id = 0`, así Settings → Asistente la cuenta
+en el costo del mes.
+
+**D) Clasificador v2** (`src/lib/correo/clasificar.ts`). Entra el correo,
+sale `{urgencia alta|media|baja, tipo necesita_respuesta|pedido_de_tarea|
+fyi|notificacion|marketing|reunion|pago, categoria, confianza 0-1, resumen,
+razon}`. Orden:
+
+1. **Reglas deterministas, sin modelo**: ruido (lista o regla) → `registrado`,
+   baja, sin IA, sin alerta; **VIP** → urgencia **alta** fija + alerta
+   forzada (el modelo solo pone tipo y resumen); regla para_chelsea /
+   lo_hago_yo / archivar / registrar → ese estado directo (lo_hago_yo crea
+   la tarea al momento); **pago fallido / AMEX** (regex en asunto y primeras
+   líneas: declined, failed, past due, rechazado, american express…) → alta
+   + pago.
+2. **LLM solo para lo demás**, con un prompt que dice qué es alta de verdad
+   (cliente esperando, fecha cercana, pago fallido, cuenta suspendida) y que
+   un correo automático nunca es alta salvo que anuncie un fallo. En un hilo
+   recibe los **resúmenes previos** del mismo `gmail_thread_id` y resume
+   **solo lo nuevo** (resumen diferencial). Si el modelo falla, el correo
+   queda media/fyi con el error en `razon` y sigue visible (un VIP sigue
+   alertando).
+
+Proveedor propio, independiente del de `/pregunta`: `LLM_PROVIDER_CORREO`
+(openai | anthropic | compatible), `LLM_MODEL_CORREO`, y para "compatible"
+`LLM_CORREO_BASE_URL` + `LLM_CORREO_API_KEY` (cualquier endpoint estilo
+OpenAI `/chat/completions`: así entra JEV sin tocar código). Sin esas vars,
+usa el mismo modelo que `/pregunta`.
+
+**E) Evaluación** (`/correo/evaluar`, `/api/correo/evaluar`). Elige cuenta,
+ventana (3/7/14/30 días) y un modelo (`openai:gpt-5-mini`,
+`anthropic:claude-haiku-5-5`, `compatible:<modelo JEV>`) → reclasifica esos
+correos **sin cambiar su estado** y guarda cada respuesta en
+`correo_evaluaciones` (una fila por correo × modelo; repetir reemplaza). La
+tabla muestra cada correo con la columna "producción" (cómo quedó de verdad)
+y una columna por modelo evaluado; por fila, **✓ correcto** (guarda la
+clasificación de producción como verdad) o **debió ser: urgencia · tipo**
+(`correo_veredictos`). Arriba, el % de acierto por modelo (urgencia, tipo,
+ambos) sobre las filas con veredicto. Eso decide entre gpt-5-mini, JEV y
+Claude con datos reales.
+
+**F) Alertas y decisiones** (`src/lib/correo/alertas.ts`,
+`decisiones.ts`). Alerta SOLO si: urgencia alta, VIP, necesita_respuesta o
+pedido_de_tarea — y dentro del horario de la cuenta. Lo demás, silencio.
+
+```
+📧 IM Chelsea · ✴️ alta · necesita respuesta · De: Andrew (TOTT)
+Landing page changes
+Andrew pide cambios al hero para el viernes
+cliente con fecha cercana
+[ 📨 Para Chelsea ] [ 🙋 Lo hago yo ]
+[ ➕ Tarea ]        [ 🗄 Archivar ]
+```
+
+Los botones viajan como `m:<uuid del correo>:ch|yo|ta|ar` (sin borrador:
+valen hasta que se decide). **Lo hago yo** y **Tarea** crean una tarea en
+`tasks` con notas de tres líneas (`De: …` / resumen / `Ref: gmail:{id}`),
+deduplicada por esa línea `Ref:` (igual que el botón de inbox-IM), con la
+empresa de la cuenta (`conexiones_google.company_id`) y urgente ★ si el
+correo era alta. **Archivar** quita INBOX en Gmail: es lo único que el
+asistente toca del Gmail. **Lenguaje natural** (acción `correo` del
+intérprete): "el correo de Andrew lo hago yo", "el 15 para Chelsea",
+"archiva los de marketing de hoy" (filtro por tipo/urgencia/remitente/hoy);
+varios correos a la vez pasan por el plan con [Hacer todo]. **Autoresolver**
+en cada corrida: si en el hilo hay un SENT posterior al correo → estado
+`respondido` y la alerta se edita a "✅ Respondido".
+
+**Listas.** La de las 8 y el cierre traen una sección **📧 Correos (N)**
+numerada a continuación de las tareas (alta + necesita respuesta + pedido de
+tarea, pendientes): "el 15 lo hago yo" funciona como "listo 3". Un "listo
+15" sobre un correo responde que es un correo y cómo decidirlo. "¿Qué
+sigue?" incluye **Correos urgentes** (alta, máx 3, también numerados).
+`/pregunta` recibe asunto + resumen + estado de los últimos 7 días, nunca
+el cuerpo.
+
+**G) Web.** `/correo`: feed con filtros por cuenta, estado, urgencia, tipo y
+búsqueda; las mismas 4 acciones por fila; clic en la fila abre razón y
+cuerpo; **Copy pending (Chelsea)** con el formato en inglés de siempre
+(HIGH/MEDIUM/LOW) sobre los correos `para_chelsea`. `/correo/evaluar` (E) y
+Settings → Correo (B). La nav tiene **Correo** junto a Inbox IM.
+
+| Archivo | Qué hace |
+| --- | --- |
+| `src/lib/correo/cuentas.ts` | cuentas_correo: cargar/guardar, listas y reglas normalizadas, `coincideLista`, `reglaQueAplica`, `dentroDeHorario` |
+| `src/lib/correo/gmail.ts` | Gmail API: history/list, mensaje → campos (MIME, remitente, HTML → texto, sin citas), quitar INBOX, ¿hilo respondido? |
+| `src/lib/correo/clasificar.ts` | reglas deterministas + LLM, prompt, validación, `mereceAlerta` |
+| `src/lib/correo/ingesta.ts` | el cron: nuevos → fila → clasificar → alertar; autoresolver; cursor |
+| `src/lib/correo/alertas.ts` | el mensaje con botones, "✅ Respondido" |
+| `src/lib/correo/decisiones.ts` | las 4 decisiones (tarea con Ref, archivar en Gmail) |
+| `src/lib/correo/evaluar.ts` | reclasificar con otro modelo, tabla y % de acierto, veredictos |
+| `src/lib/correo/importar.ts` | JSON de n8n → listas y reglas |
+| `src/lib/correo/pendientes.ts` | lo que las listas, "qué sigue", `/pregunta` y el intérprete saben del correo (nunca el cuerpo) |
+| `src/lib/asistente/llm.ts` | `llamarLlm(target)` con proveedor `compatible`; `llmConfigCorreo()`, `parsearModelo()` |
+
+### 6b. Lo que hay que hacer a mano
+
+1. Supabase → SQL Editor → `sql/2026-11-asistente-fase6-correo.sql` en una
+   query. Abajo: las columnas nuevas de `conexiones_google`, las dos cuentas
+   precargadas y `rowsecurity = false` en las 4 tablas.
+2. Vercel → env vars (ver 6c) → push → redeploy. El cron nuevo aparece en
+   Vercel → Settings → Cron Jobs (`/api/correo/ingesta` cada 15 min).
+3. Settings → Conexiones: confirma que Gabby tiene 📅 Calendar on y Chelsea
+   📧 Correo on (el SQL lo deja así). Si Calendar quedó apagado en las dos,
+   enciéndelo en la de Gabby.
+4. Settings → Correo: revisa la tarjeta "IM Chelsea" (VIP y ruido ya
+   cargados), pon el chat de alertas si no es el del bot, guarda. Pega el
+   JSON de n8n en "Importar de n8n" si quieres traer las reglas viejas.
+5. "📥 Leer ahora" → trae los últimos 3 días. Revisa `/correo`.
+6. Orden del resto (H): evaluar modelos (6d-3), activar alertas con el
+   ganador (ya están activas: apágalas en la tarjeta si prefieres evaluar en
+   silencio), y después activar la cuenta de Gabby: en Conexiones 📧 Correo
+   on en gabrielarangel169@gmail.com y en Settings → Correo marcar "IM Gabby"
+   como activa.
+7. **Apagar n8n cuando esto clasifique bien** (validado con 6d): en n8n
+   desactiva los 4 workflows del triage (A reglas/VIP, B ingesta → Supabase
+   inbox-IM, C alertas Telegram, D autoresolver) con el toggle "Active" de
+   cada uno — no los borres hasta un mes después, por si hay que volver. En
+   BotFather, `/mybots` → el bot viejo del inbox → "Delete Bot" (o
+   `/revoke` para invalidar su token sin borrarlo). Después, las vistas
+   `/inbox`, `/chelsea` y `/rules` y las env vars `SUPABASE_INBOXIM_*`
+   se eliminan en una fase de limpieza.
+
+### 6c. Env vars que agrega esta fase
+
+| Variable | Valor | Obligatoria |
+| --- | --- | --- |
+| `LLM_PROVIDER_CORREO` | `openai` \| `anthropic` \| `compatible` | No (default: el de `/pregunta`) |
+| `LLM_MODEL_CORREO` | p. ej. `gpt-5-mini`, `claude-haiku-5-5`, el modelo de JEV | No (default: `LLM_MODEL`) |
+| `LLM_CORREO_BASE_URL` | base URL del endpoint compatible (JEV), sin `/chat/completions` | Solo con `compatible` |
+| `LLM_CORREO_API_KEY` | la API key de JEV (Secret) | Solo con `compatible` |
+
+`CRON_SECRET`, `TELEGRAM_BOT_TOKEN`, `ALLOWED_CHAT_IDS`, `GOOGLE_*` y
+`APP_ENCRYPTION_KEY` ya existían. Evaluar con `anthropic:…` necesita
+`ANTHROPIC_API_KEY`.
+
+### 6d. Cómo probar que funciona
+
+1. **A + B.** Tras el SQL, crea una tarea con hora y "ponla en calendar" →
+   el evento sigue cayendo en el calendario de Gabby. Apaga 📅 en Gabby y
+   enciéndelo en Chelsea → el siguiente evento va al de Chelsea (y vuelve).
+2. **C + D.** Con Chelsea activa, "📥 Leer ahora" → `/correo` muestra los
+   correos de 3 días con urgencia, tipo, resumen y razón. Un correo de
+   `tottatl.com` sale alta con razón "VIP: tottatl.com"; uno de
+   `bankofamerica.com` está en estado Registrado sin pasar por el modelo.
+   Vercel logs: `[correo-ingesta] IM Chelsea: +N · alertas N · respondidos N`.
+3. **E.** `/correo/evaluar` → modelo `openai:gpt-5-mini` → Evaluar; luego
+   `compatible:<modelo JEV>` (con las env vars de JEV). Marca 15–20 filas
+   con ✓ o "debió ser". Arriba, el % por modelo. El ganador va a
+   `LLM_PROVIDER_CORREO` / `LLM_MODEL_CORREO`.
+4. **F.** Mándate un correo desde una dirección VIP a la cuenta de Chelsea →
+   en ≤ 15 min llega la alerta con 4 botones. Toca **Lo hago yo** → la tarea
+   aparece en /tasks con las notas `De:` / resumen / `Ref: gmail:…` y el
+   mensaje pierde los botones. Contesta ese correo desde Gmail → en la
+   siguiente corrida el estado es Respondido y la alerta dice "✅
+   Respondido". Por texto: `el correo de <nombre> para Chelsea`,
+   `archiva los de marketing de hoy` (plan con [Hacer todo]).
+5. **Listas.** Con un correo alta pendiente, `dame la lista` → sección "📧
+   Correos (1)" numerada al final; `el N lo hago yo` lo decide; `listo N`
+   responde que es un correo. `¿qué sigue?` → "Correos urgentes".
+   `¿qué correos tengo pendientes?` → `/pregunta` los lista sin cuerpo.
+6. **Cuenta de Gabby.** Paso 6 de 6b; "Leer ahora" → sus correos aparecen
+   en `/correo` con el filtro de cuenta "IM Gabby".
+
+### 6e. Qué puede fallar y dónde verlo
+
+| Síntoma | Causa probable | Dónde verlo / qué hacer |
+| --- | --- | --- |
+| "Leer ahora" dice `invalid_grant` | El refresh token de esa cuenta se revocó | Conexiones → Reconectar esa cuenta |
+| Nada entra | 📧 Correo apagado en Conexiones, o la cuenta inactiva en Settings → Correo | Enciende los dos; logs `[correo-ingesta] … sin cuentas activas` |
+| Todo sale media/fyi con "modelo falló" en razón | `LLM_*_CORREO` mal, key sin saldo, o timeout | Logs `[correo] clasificar falló`; `bot_preguntas` no registra la llamada |
+| Llegan correos viejos otra vez | Cursor reiniciado o Gmail olvidó el historyId | Normal: no se duplican (índice único) |
+| Alertas fuera de hora | `horario_alertas` mal escrito (debe ser `HH:MM-HH:MM`) | Se guarda `07:00-21:00` si el formato no es válido |
+| "Archivar" dice que no pudo sacarlo de Gmail | La cuenta no tiene `gmail.modify` (conectada antes de la fase 5) | Conexiones → Reconectar; el estado sí cambió |
+| El evento de Calendar cae en la cuenta equivocada | 📅 encendido en la otra cuenta | Conexiones: enciéndelo en la correcta (apaga la otra solo) |
 
 ---
 
