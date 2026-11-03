@@ -10,7 +10,7 @@ import { cancunHm } from '@/lib/asistente/cancun'
 
 const COLS = '*, conexion:conexiones_google(email, usa_gmail, activa, company_id)'
 
-const ACCIONES: ReglaCorreoAccion[] = ['vip', 'ruido', 'para_chelsea', 'lo_hago_yo', 'archivar', 'registrar']
+const ACCIONES: ReglaCorreoAccion[] = ['vip', 'ruido', 'solo_app', 'para_chelsea', 'lo_hago_yo', 'archivar', 'registrar']
 
 function fila(r: Record<string, unknown>): CuentaCorreo {
   return {
@@ -156,12 +156,14 @@ export function moverANivel(cuenta: Pick<CuentaCorreo, 'vip' | 'ruido' | 'solo_a
   return { listas, anterior, yaEstaba: false }
 }
 
-/** The first rule that applies: by sender (email/domain) or by a piece of the subject. */
+/** The first rule that applies: by sender (email/domain) or by a piece of the subject (`^accepted:` = the subject starts with it). */
 export function reglaQueAplica(reglas: ReglaCorreo[], correo: { de_email: string | null; asunto: string | null }): ReglaCorreo | null {
-  const asunto = (correo.asunto ?? '').toLowerCase()
+  const asunto = (correo.asunto ?? '').trim().toLowerCase()
   for (const r of reglas) {
     if (r.match.includes('@') || /^[a-z0-9.-]+\.[a-z]{2,}$/.test(r.match)) {
       if (coincideLista([r.match], correo.de_email)) return r
+    } else if (r.match.startsWith('^')) {
+      if (r.match.length > 1 && asunto.startsWith(r.match.slice(1).trimStart())) return r
     } else if (asunto.includes(r.match)) {
       return r
     }

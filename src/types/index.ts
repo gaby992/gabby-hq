@@ -108,10 +108,10 @@ export type CorreoEstado =
   | 'registrado'
 
 /** What a rule imported from n8n (or written by hand) does with a match. */
-export type ReglaCorreoAccion = 'vip' | 'ruido' | 'para_chelsea' | 'lo_hago_yo' | 'archivar' | 'registrar'
+export type ReglaCorreoAccion = 'vip' | 'ruido' | 'solo_app' | 'para_chelsea' | 'lo_hago_yo' | 'archivar' | 'registrar'
 
 export interface ReglaCorreo {
-  /** An email, a domain, or a piece of the subject (case-insensitive). */
+  /** An email, a domain, or a piece of the subject (case-insensitive); `^texto` = the subject starts with it. */
   match: string
   accion: ReglaCorreoAccion
   /** Alert in Telegram even if the action already decided the state. */
@@ -237,6 +237,7 @@ export const NIVEL_REMITENTE_LABELS: Record<NivelRemitente, string> = { silencio
 export const REGLA_CORREO_ACCION_LABELS: Record<ReglaCorreoAccion, string> = {
   vip: '🔔 Alerta (alta + Telegram)',
   ruido: '🔇 Silencio (solo registrar, sin IA)',
+  solo_app: '📋 Solo app (clasifica, nunca alerta)',
   para_chelsea: 'Auto → Chelsea',
   lo_hago_yo: 'Auto → Gabby (tarea)',
   archivar: 'Auto archivar',

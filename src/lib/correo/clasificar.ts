@@ -85,6 +85,9 @@ export function clasificarPorReglas(c: EntradaCorreo, cuenta: Pick<CuentaCorreo,
         return { fija: { urgencia: 'alta', confianza: 1 }, sinLlm: false, alerta: true, vip: true, razon: `regla VIP: ${regla.match}` }
       case 'ruido':
         return { fija: { urgencia: 'baja', tipo: 'notificacion', categoria: 'informativo', confianza: 1 }, estado: 'registrado', sinLlm: true, alerta: false, razon: `regla ruido: ${regla.match}` }
+      case 'solo_app':
+        // By subject ("^accepted:" = calendar replies): the model classifies it, it never alerts.
+        return { fija: {}, sinLlm: false, alerta: false, soloApp: true, razon: `regla solo app: ${regla.match}` }
       case 'para_chelsea':
         return { fija: { urgencia: 'media', tipo: 'fyi', categoria: 'operativo', confianza: 1 }, estado: 'para_chelsea', sinLlm: true, alerta: regla.alerta === true, razon: `regla → Chelsea: ${regla.match}` }
       case 'lo_hago_yo':

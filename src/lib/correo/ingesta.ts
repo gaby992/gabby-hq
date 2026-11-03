@@ -39,7 +39,7 @@ export interface ResumenIngesta {
 const errorMessage = mensajeError
 
 /** Summaries of the earlier mails of the same thread, oldest first (the differential summary needs them). */
-async function resumenesDelHilo(cuentaId: string, threadId: string, antesDe: string): Promise<string[]> {
+export async function resumenesDelHilo(cuentaId: string, threadId: string, antesDe: string): Promise<string[]> {
   if (!threadId) return []
   const { data } = await createServerClient()
     .from('correos')

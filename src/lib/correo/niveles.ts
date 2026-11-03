@@ -22,7 +22,7 @@ export function esNivel(v: unknown): v is NivelRemitente {
 
 /** "silencio: zoom.us · <what the model said>" — the level replaces any earlier list/rule prefix. */
 function razonCon(nivel: NivelRemitente, match: string, razon: string | null): string {
-  const resto = (razon ?? '').replace(/^(VIP|regla VIP|ruido|regla ruido|silencio|alerta|solo app):\s*[^·]*(·\s*)?/i, '').trim()
+  const resto = (razon ?? '').replace(/^(VIP|regla VIP|ruido|regla ruido|regla solo app|silencio|alerta|solo app):\s*[^·]*(·\s*)?/i, '').trim()
   const prefijo = `${nivel === 'solo_app' ? 'solo app' : nivel}: ${match}`
   return resto ? `${prefijo} · ${resto}`.slice(0, 240) : prefijo
 }

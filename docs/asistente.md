@@ -18,7 +18,7 @@ sección y **no se empieza una fase hasta validar la anterior**.
 | 5 | Conexión de Google en Settings + Calendar (solo a pedido) + pagos recurrentes | ✅ Construida — pendiente de validar |
 | 6 | Correo dentro de GabbyHQ: Gmail, clasificador, alertas, evaluación de modelos (reemplaza n8n) | ✅ Construida — pendiente de validar |
 | 6b | Ajustes del correo: listas desde `correos`, lista viva "correos", tachado en sitio, alertas solo VIP/alta, seguridad de mensajes, bug del cierre | ✅ Construida — pendiente de validar (correr el SQL 6b) |
-| 6c | Correo: tres niveles por remitente (🔇 Silencio · 📋 Solo app · 🔔 Alerta), "Reaplicar reglas", aprender desde el bot ("el 5 es silencio") | ✅ Construida — pendiente de validar (correr el SQL 6c) |
+| 6c | Correo: tres niveles por remitente (🔇 Silencio · 📋 Solo app · 🔔 Alerta), "Reaplicar reglas", aprender desde el bot ("el 5 es silencio"), "Reclasificar sin modelo", regla `^asunto` → Solo app | ✅ Construida — pendiente de validar (correr el SQL 6c) |
 | 7 | De comandos a conversación: memoria, sugerencias, "organízame", personalidad | ✅ Construida — pendiente de validar |
 
 ---
@@ -168,7 +168,7 @@ Archivos del asistente dentro del repo:
 | `sql/2026-11-asistente-fase5c.sql` | Migración de la fase 5-C: `pagos_recurrentes` |
 | `sql/2026-11-asistente-fase6-correo.sql` | Migración de la fase 6: roles por cuenta en `conexiones_google` + `cuentas_correo`, `correos`, `correo_evaluaciones`, `correo_veredictos` |
 | `sql/2026-11-asistente-fase6b-ajustes.sql` | Ajustes 6b: `bot_alarmas.tipo` admite `lista` y `correos` + columnas `chat_id`, `message_id`, `texto`; `correos.vip` y `correos.respondido_en` |
-| `sql/2026-11-asistente-fase6c-niveles.sql` | Ajustes 6c: `cuentas_correo.solo_app` (la lista 📋 Solo app) + precarga de Silencio y Solo app en IM Chelsea |
+| `sql/2026-11-asistente-fase6c-niveles.sql` | Ajustes 6c: `cuentas_correo.solo_app` (la lista 📋 Solo app) + precarga de Silencio, Solo app y las reglas `^accepted:` / `^declined:` en IM Chelsea (idempotente: se repite si se amplía) |
 | `sql/2026-11-duplicadas-select.sql` | Solo lectura (ajuste 6b-8): tareas con el mismo título donde una está cerrada y otra abierta, para revisar antes de borrar |
 | `sql/2026-11-asistente-fase7.sql` | Migración de la fase 7: `bot_conversacion` + `asistente_config` |
 | `src/lib/asistente/pagos.ts` | Fase 5-C: pagos recurrentes (fila + evento mensual en Calendar) |
@@ -1925,9 +1925,15 @@ modelo. Lo que no está en ninguna lista lo decide el modelo: alta → suena
 como Alerta; lo demás se comporta como Solo app (listas y /correo, sin
 sonar). El SQL precarga en IM Chelsea, además de los bancos: `zoom.us`,
 `fathom.video`, `fireflies.ai`, `read.ai`, `otter.ai`, `trustpilotmail.com`,
-`gusto.com`, `calendar-notification@google.com` en Silencio, y
+`gusto.com`, `calendar-notification@google.com`, `slack.com` en Silencio, y
 `gabrielarangel169@gmail.com` en Solo app (lo que Gabby le manda a Chelsea
-no es pendiente de ella).
+no es pendiente de ella). Las respuestas de calendario ("Accepted: …",
+"Declined: …") no llegan de un remitente fijo sino de quien acepta, así que
+van como **regla por asunto** con la acción nueva `📋 Solo app`: una regla
+cuyo `match` empieza con `^` aplica cuando el asunto **empieza** por ese
+texto (`^accepted:`); sin `^` basta con que lo contenga. Las reglas se
+evalúan después de las tres listas: un "Accepted:" de un remitente en
+Alerta sigue sonando.
 
 **2) Reaplicar reglas a lo ya ingerido.** Botón "🔁 Reaplicar reglas" en la
 tarjeta de cada cuenta (guarda primero: lee las listas de la base) y ruta
@@ -1964,16 +1970,42 @@ Alerta en IM Chelsea (estaba en Solo app)`. Varios correos del mismo
 remitente en una orden ("archiva el 3 y el 4 y márcalos como silencio")
 aprenden el dominio una sola vez. En `/ayuda todo` está el ejemplo.
 
+**4) Reclasificar lo que nunca pasó por el modelo.** Los correos ingeridos
+mientras el clasificador estaba caído (2 nov) quedaron con `confianza = 0`,
+`resumen = asunto` y una razón "⚠️ clasificador no disponible". "Reaplicar
+reglas" no los toca (solo mira listas). Botón "🤖 Reclasificar sin modelo"
+en la tarjeta de cada cuenta y ruta `/api/correo/reclasificar` (`GET` con el
+bearer de `CRON_SECRET`, `?cuenta=<id>`; `POST {cuenta_id}` con sesión).
+Recorre los pendientes (`nuevo` / `para_chelsea`) de 30 días con
+`confianza = 0` (o nula) o razón vacía, máx 200 por clic y 80 s, de más
+viejo a más nuevo para que los resúmenes del hilo se acumulen, y los pasa
+por reglas + modelo como recién llegados: actualiza urgencia, tipo,
+categoría, resumen, razón, confianza y `vip`; si una lista o regla decide el
+estado sin efectos (registrado, archivado, para Chelsea) también lo aplica
+(🔇 tacha la línea en la última lista). **Nunca alerta por Telegram** y no
+crea tareas. Un correo con tarea no se toca. Si el modelo vuelve a fallar
+la fila queda como estaba y cuenta como "sin modelo". Responde "N
+reclasificados" (y "· M sin modelo" si hubo).
+
+```
+curl -H "Authorization: Bearer $CRON_SECRET" https://gabby-hq.vercel.app/api/correo/reclasificar
+→ {"ok":true,"texto":"IM Chelsea: 23 reclasificados", …}
+```
+
 **Cómo probar**
 
 1. Corre el SQL 6c → Settings → Correo muestra tres columnas; IM Chelsea
-   tiene `zoom.us` en Silencio y `gabrielarangel169@gmail.com` en Solo app.
+   tiene `zoom.us` y `slack.com` en Silencio, `gabrielarangel169@gmail.com`
+   en Solo app y dos reglas `^accepted:` / `^declined:` → 📋 Solo app.
 2. "🔁 Reaplicar reglas" → aviso "N a silencio · …"; en /correo con "Todos"
    ya no salen los de Zoom; con "Silencio (registrado)" sí.
 3. Mándate un correo desde tu Gmail a la de Chelsea → entra a /correo y a
    `correos`, sin alerta en Telegram aunque diga "urgente".
 4. `correos` → `el 2 es silencio` → confirma con el dominio; su línea queda
    tachada con 🔇 y Settings → Correo lo muestra en Silencio.
+5. "🤖 Reclasificar sin modelo" → aviso "N reclasificados"; en /correo los
+   del 2 nov ya traen resumen propio y confianza > 0, y Settings →
+   Asistente cuenta esas llamadas como `correo:<modelo>`.
 
 ## 7. Fase 7 — De comandos a conversación
 

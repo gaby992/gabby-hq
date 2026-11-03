@@ -10,6 +10,7 @@ import { REGLA_CORREO_ACCION_LABELS, type ConexionGoogle, type CuentaCorreo, typ
  * or domain per line), the rules, the chat and hours of the alerts,
  * "Reaplicar reglas" and "Importar de n8n" (paste the JSON). Nothing here
  * touches Gmail; it only decides how the classifier and the alerts behave.
+ * "Reclasificar sin modelo" re-runs rules + model on what came in unclassified.
  */
 export default function CorreoSettingsPage() {
   const [cuentas, setCuentas] = useState<CuentaCorreo[]>([])
@@ -135,6 +136,7 @@ function TarjetaCuenta({ cuenta, onSaved, onError, onAviso }: { cuenta: CuentaCo
   const [ruido, setRuido] = useState(cuenta.ruido.join('\n'))
   const [soloApp, setSoloApp] = useState(cuenta.solo_app.join('\n'))
   const [reaplicando, setReaplicando] = useState(false)
+  const [reclasificando, setReclasificando] = useState(false)
   const [reglas, setReglas] = useState<ReglaCorreo[]>(cuenta.reglas)
   const [chat, setChat] = useState(cuenta.chat_id_alertas ? String(cuenta.chat_id_alertas) : '')
   const [horario, setHorario] = useState(cuenta.horario_alertas)
@@ -207,6 +209,21 @@ function TarjetaCuenta({ cuenta, onSaved, onError, onAviso }: { cuenta: CuentaCo
     }
   }
 
+  async function reclasificar() {
+    setReclasificando(true)
+    onError(null)
+    try {
+      const res = await fetch('/api/correo/reclasificar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cuenta_id: cuenta.id }) })
+      const j = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(j?.error ?? `HTTP ${res.status}`)
+      onAviso(`Reclasificado en ${cuenta.nombre}: ${j.texto ?? ''}`)
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setReclasificando(false)
+    }
+  }
+
   function agregarRegla() {
     const match = nuevaRegla.match.trim().toLowerCase()
     if (!match) return
@@ -268,7 +285,7 @@ function TarjetaCuenta({ cuenta, onSaved, onError, onAviso }: { cuenta: CuentaCo
           </div>
         ))}
         <div className="flex flex-wrap items-center gap-2">
-          <input value={nuevaRegla.match} onChange={(e) => setNuevaRegla({ ...nuevaRegla, match: e.target.value })} placeholder="email, dominio o texto del asunto" className={`${inputCls} w-64`} />
+          <input value={nuevaRegla.match} onChange={(e) => setNuevaRegla({ ...nuevaRegla, match: e.target.value })} placeholder="email, dominio, texto del asunto o ^empieza por" className={`${inputCls} w-64`} />
           <select value={nuevaRegla.accion} onChange={(e) => setNuevaRegla({ ...nuevaRegla, accion: e.target.value as ReglaCorreoAccion })} className={inputCls}>
             {ACCIONES.map((a) => <option key={a} value={a}>{REGLA_CORREO_ACCION_LABELS[a]}</option>)}
           </select>
@@ -297,6 +314,9 @@ function TarjetaCuenta({ cuenta, onSaved, onError, onAviso }: { cuenta: CuentaCo
         </button>
         <button onClick={reaplicar} disabled={reaplicando || saving} title="Vuelve a leer las tres listas sobre los correos ya leídos que siguen pendientes (guarda primero)" className="px-3 py-1.5 text-xs rounded-md bg-[#2a2a2a] text-[#e8e8e8] hover:bg-[#333333] disabled:opacity-50">
           {reaplicando ? 'Reaplicando…' : '🔁 Reaplicar reglas'}
+        </button>
+        <button onClick={reclasificar} disabled={reclasificando || saving} title="Los pendientes que entraron sin clasificar (confianza 0, sin razón) pasan otra vez por reglas + modelo. No alerta por Telegram" className="px-3 py-1.5 text-xs rounded-md bg-[#2a2a2a] text-[#e8e8e8] hover:bg-[#333333] disabled:opacity-50">
+          {reclasificando ? 'Reclasificando…' : '🤖 Reclasificar sin modelo'}
         </button>
         <button onClick={() => guardar({ reiniciar_cursor: true })} disabled={saving} title="La próxima lectura trae los últimos 3 días otra vez (no duplica)" className="px-3 py-1.5 text-xs rounded-md text-[#888888] hover:text-[#e8e8e8] hover:bg-[#2a2a2a]">
           Reiniciar cursor de Gmail
