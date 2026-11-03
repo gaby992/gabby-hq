@@ -5,7 +5,6 @@
 // like by then.
 
 import { createServerClient } from '@/lib/supabase-server'
-import { createInboxClient } from '@/lib/supabase-inboxim'
 import type { Company, NotaEmpresa, Task } from '@/types'
 import { CHELSEA_COMPANY_NAME } from '@/lib/chelsea'
 import { NOTA_FRESCA_DIAS } from '@/lib/notas'
@@ -13,20 +12,14 @@ import { daysSince } from '@/lib/dates'
 import { cancunDayBounds, cancunYmd, daysBetween, formatCortoEs, formatDiaLargoEs, formatHoraEs } from './cancun'
 import { allowedChatIds, escapeHtml, sendTelegram } from './telegram'
 import { cargarConfig, personaPrompt, type AsistenteConfig } from './config'
-import { CORREO_URGENCIA_EMOJI } from '@/types'
-import { correosQueEsperan, quienCorto } from '@/lib/correo/pendientes'
+import { seccionCorreosDiaria } from '@/lib/correo/listas'
+import { guardarAlarma, type AlarmaItem, type AlarmaTipo } from './registro-listas'
+import { mensajeError } from '@/lib/errores'
 import { preguntarLlm, llmConfig } from './llm'
 import { formatHoraEs as horaEs } from './cancun'
 
-/** 'que_sigue' (fase 4b) is the numbered "¿qué sigue?" answer, recorded like an alarm. */
-export type AlarmaTipo = 'manana' | 'tarde' | 'que_sigue'
-
-/** One numbered line of an alarm: `n` is what Gabby types in "pasa n". Fase 6: a line may be a mail instead of a task. */
-export interface AlarmaItem {
-  n: number
-  task_id?: string
-  correo_id?: string
-}
+// The numbering record (bot_alarmas) lives in registro-listas.ts; re-exported so the old imports keep working.
+export { guardarAlarma, ultimaAlarma, type AlarmaItem, type AlarmaTipo } from './registro-listas'
 
 /** Fixed display order. Anything else comes after, alphabetically. */
 const EMPRESAS_ORDEN = ['IM', 'DATAVIA', 'PD', 'Personal', CHELSEA_COMPANY_NAME]
@@ -74,10 +67,7 @@ function appUrl(): string {
   return (process.env.APP_URL ?? 'https://gabby-hq.vercel.app').replace(/\/$/, '')
 }
 
-function errorMessage(err: unknown): string {
-  if (err instanceof Error) return err.message
-  return String(err)
-}
+const errorMessage = mensajeError
 
 // ── Data ─────────────────────────────────────────────────────────────────
 
@@ -114,27 +104,6 @@ async function loadDoneToday(today: string): Promise<{ tasks: Task[]; companies:
   if (tasksRes.error) throw new Error(`Supabase tasks (hechas): ${tasksRes.error.message}`)
   if (companiesRes.error) throw new Error(`Supabase companies: ${companiesRes.error.message}`)
   return { tasks: (tasksRes.data as Task[]) ?? [], companies: (companiesRes.data as Company[]) ?? [] }
-}
-
-/**
- * Mail waiting on Chelsea, read from the inbox-IM project. READ-ONLY: the same
- * service client and the same status filter `/api/inbox?status=pasado_a_chelsea`
- * uses — the cron has no session cookie, so it cannot go through that route.
- * Returns null when inbox-IM is unreachable; the alarm still goes out.
- */
-export async function countChelseaMail(): Promise<number | null> {
-  try {
-    const inbox = createInboxClient()
-    const { count, error } = await inbox
-      .from('im_triaje')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'pasado_a_chelsea')
-    if (error) throw error
-    return count ?? 0
-  } catch (err) {
-    console.error(`[alarma] inbox-IM no disponible: ${errorMessage(err)}`)
-    return null
-  }
 }
 
 // ── Grouping ─────────────────────────────────────────────────────────────
@@ -263,39 +232,27 @@ function masLine(g: Grupo): string {
   return `· +${g.extra} más en <a href="${url}">GabbyHQ</a>`
 }
 
-function chelseaMailLine(count: number | null): string {
-  if (count === null) return '📬 Correos: no se pudo consultar inbox-IM'
-  if (count === 0) return '📬 Sin correos pendientes'
-  return `📬 ${count} ${count === 1 ? 'correo pendiente' : 'correos pendientes'} → <a href="${appUrl()}/inbox">/inbox</a>`
-}
-
-function renderGrupo(g: Grupo, today: string, opts: { notas: boolean; chelseaMail?: number | null; header?: boolean }): string[] {
+function renderGrupo(g: Grupo, today: string, opts: { notas: boolean; header?: boolean }): string[] {
   const lines = opts.header === false ? [] : [`<b>${escapeHtml(g.name)}</b>`]
   if (opts.notas && g.nota) lines.push(`📝 ${escapeHtml(g.nota)}`)
   for (const item of g.items) lines.push(lineFor(item, today))
   if (g.extra > 0) lines.push(masLine(g))
-  if (g.isChelsea && opts.chelseaMail !== undefined) lines.push(chelseaMailLine(opts.chelseaMail))
   return lines
 }
 
 /**
- * Fase 6-F: "📧 Correos" — mails waiting on a decision (alta, needs a
- * reply, asks for a task), numbered after the tasks so "el 15 lo hago yo"
- * works like "listo 3". Nothing when there is none.
+ * Fase 6-F / ajuste 6-0: "📧" — the pending mails of the `correos` table
+ * (nuevo / para_chelsea), per account, numbered after the tasks so "el 15
+ * lo hago yo" works like "listo 3"; 5 per account, then "+N más → correos".
+ * Never inbox-IM. Never throws: a failure becomes one line.
  */
-async function seccionCorreos(desde: number, items: AlarmaItem[]): Promise<string | null> {
-  const correos = await correosQueEsperan()
-  if (correos.length === 0) return null
-  const lines = [`📧 <b>Correos (${correos.length})</b>`]
-  let n = desde
-  for (const c of correos) {
-    n += 1
-    items.push({ n, correo_id: c.id })
-    const u = c.urgencia ?? 'media'
-    lines.push(`${CORREO_URGENCIA_EMOJI[u]} ${n}. ${escapeHtml(quienCorto(c))} · ${escapeHtml(c.asunto ?? '(sin asunto)')}${c.resumen && c.resumen !== c.asunto ? ` · ${escapeHtml(c.resumen)}` : ''}`)
+async function seccionCorreos(desde: number, items: AlarmaItem[]): Promise<string> {
+  try {
+    return await seccionCorreosDiaria(desde, items)
+  } catch (err) {
+    console.error(`[alarma] sección de correos: ${errorMessage(err)}`)
+    return '📧 Correos: no se pudieron consultar ahora'
   }
-  lines.push(`Para decidir: <code>el ${desde + 1} lo hago yo</code> · <code>el ${desde + 1} para Chelsea</code> · <code>archiva el ${desde + 1}</code> · <a href="${appUrl()}/correo">/correo</a>`)
-  return lines.join('\n')
 }
 
 function plural(n: number, one: string, many: string): string {
@@ -338,29 +295,21 @@ async function lineaBuenosDias(cfg: AsistenteConfig, tasks: Task[], today: strin
 }
 
 export async function buildManana(today: string = cancunYmd()): Promise<Mensaje> {
-  const [{ tasks, companies, notas }, chelseaMail, cfg] = await Promise.all([loadOpenTasks(), countChelseaMail(), cargarConfig()])
+  const [{ tasks, companies, notas }, cfg] = await Promise.all([loadOpenTasks(), cargarConfig()])
   // Fase 4b: only notes of the last 3 days are "por dónde iba"; older ones stay in /hoy, greyed.
   const frescas = notas.filter((n) => daysSince(n.updated_at) <= NOTA_FRESCA_DIAS)
   const { grupos, items } = buildGrupos(tasks, companies, frescas, today)
 
-  // Chelsea's block also exists when the only thing to say is her mail count
-  // (or that inbox-IM could not be read) — even if the company has no tasks.
-  const hasChelsea = grupos.some((g) => g.isChelsea)
-  const chelseaCompany = companies.find((c) => isChelsea(c.name))
-  if (!hasChelsea && (chelseaMail === null || chelseaMail > 0)) {
-    grupos.push({ id: chelseaCompany?.id ?? null, name: chelseaCompany?.name.trim() ?? CHELSEA_COMPANY_NAME, nota: null, items: [], extra: 0, isChelsea: true })
-  }
-
   const link = `<a href="${appUrl()}/hoy">abrir GabbyHQ</a>`
   if (grupos.length === 0) {
-    return { text: `☀️ No tienes nada pendiente. Revisa Construir en GabbyHQ.\n${link}`, items: [] }
+    const correos = await seccionCorreos(0, items)
+    return { text: `☀️ No tienes tareas pendientes. Revisa Construir en GabbyHQ.\n${link}\n\n${correos}`, items }
   }
 
   const saludo = await lineaBuenosDias(cfg, tasks.filter((t) => !isChelsea(companies.find((c) => c.id === t.company_id)?.name ?? '')), today)
   const blocks: string[] = [`☀️ <b>Hoy, ${formatDiaLargoEs(today)}</b>\n${escapeHtml(saludo)}`]
-  for (const g of grupos) blocks.push(renderGrupo(g, today, { notas: true, chelseaMail }).join('\n'))
-  const correos = await seccionCorreos(items.length, items)
-  if (correos) blocks.push(correos)
+  for (const g of grupos) blocks.push(renderGrupo(g, today, { notas: true }).join('\n'))
+  blocks.push(await seccionCorreos(items.length, items))
   const total = grupos.reduce((acc, g) => acc + g.items.length + g.extra, 0)
   blocks.push(`Total: ${plural(total, 'tarea abierta', 'tareas abiertas')} · ${link}`)
   return { text: blocks.join('\n\n'), items }
@@ -414,8 +363,7 @@ export async function buildTarde(today: string = cancunYmd()): Promise<Mensaje> 
   }
 
   const tareas = items.length
-  const correos = await seccionCorreos(items.length, items)
-  if (correos) blocks.push(correos)
+  blocks.push(await seccionCorreos(items.length, items))
 
   if (tareas > 0) {
     blocks.push('¿Qué pasa a mañana? Responde: <code>pasa 2,5</code> (o <code>pasa todo</code>)')
@@ -443,23 +391,15 @@ export async function buildPendientes(company: Pick<Company, 'id' | 'name'>, tod
 
 // ── Sending, recording, retrying ─────────────────────────────────────────
 
-export async function guardarAlarma(tipo: AlarmaTipo, items: AlarmaItem[]): Promise<void> {
-  const db = createServerClient()
-  const { error } = await db
-    .from('bot_alarmas')
-    .insert({ tipo, items, enviada_en: new Date().toISOString() })
-  if (error) throw new Error(`Supabase bot_alarmas: ${error.message}`)
-}
-
 /**
  * Fase 4c: the same list, on demand ("/hoy", "dame la lista", "cierre"),
- * sent to ONE chat and recorded like the cron's, so "listo 3" works on it.
+ * sent to ONE chat and recorded (tipo 'lista', with the message) so
+ * "listo 3" works on it and a mail line can be struck through later.
  */
 export async function enviarLista(chatId: number, tipo: 'manana' | 'tarde' | 'pendientes', company?: Pick<Company, 'id' | 'name'> | null): Promise<number> {
   const built = tipo === 'tarde' ? await buildTarde() : tipo === 'pendientes' && company ? await buildPendientes(company) : await buildManana()
-  await sendTelegram(chatId, built.text, { html: true, tag: `lista-${tipo}` })
-  // A per-company list is numbered like the morning one; bot_alarmas keeps the numbers under 'manana'.
-  await guardarAlarma(tipo === 'tarde' ? 'tarde' : 'manana', built.items)
+  const messageId = await sendTelegram(chatId, built.text, { html: true, tag: `lista-${tipo}` })
+  await guardarAlarma('lista', built.items, { chat_id: chatId, message_id: messageId, texto: built.text })
   return built.items.length
 }
 
@@ -491,8 +431,13 @@ export async function ejecutarAlarma(tipo: AlarmaTipo, opts: { test?: boolean } 
   const attempt = async (): Promise<AlarmaItem[]> => {
     const built = tipo === 'manana' ? await buildManana() : await buildTarde()
     const text = (opts.test ? '🧪 <i>prueba manual</i>\n' : '') + built.text
-    for (const chat of chats) await sendTelegram(chat, text, { html: true, tag })
-    await guardarAlarma(tipo, built.items)
+    let primero: { chat_id: number; message_id: number | null } | null = null
+    for (const chat of chats) {
+      const id = await sendTelegram(chat, text, { html: true, tag })
+      if (!primero) primero = { chat_id: chat, message_id: id }
+    }
+    // Ajuste 6-7: the close records its numbers like the morning (and where it went, for in-place strikes).
+    await guardarAlarma(tipo, built.items, primero ? { ...primero, texto: text } : null)
     // Fase 7-E: nothing closed and things still open → offer a clean start (one draft per chat).
     if (tipo === 'tarde' && built.cerradas === 0 && built.items.length > 0 && (await cargarConfig()).sugerencias) {
       const { diaDificil, botonesDe } = await import('./sugerencias')

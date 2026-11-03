@@ -19,7 +19,8 @@ import { daysSince } from '@/lib/dates'
 import { SIMBOLO, guardarAlarma, simboloDe, type AlarmaItem } from './alarmas'
 import { addDays, cancunYmd, daysBetween, formatHoraEs, formatVenceEs } from './cancun'
 import { escapeHtml, sendTelegram } from './telegram'
-import { correosQueEsperan, quienCorto, type CorreoLite } from '@/lib/correo/pendientes'
+import { correosQueEsperan, type CorreoLite } from '@/lib/correo/pendientes'
+import { lineaCorreo } from '@/lib/correo/listas'
 
 export interface QueSigueOpts {
   /** "qué sigue de IM" */
@@ -179,7 +180,7 @@ export async function calcularQueSigue(opts: QueSigueOpts = {}, now: Date = new 
       '<b>Correos urgentes</b>',
       ...correos.map((c) => {
         items.push({ n: items.length + 1, correo_id: c.id })
-        return `📧 ${items.length}. ${escapeHtml(quienCorto(c))} · ${escapeHtml(c.asunto ?? '(sin asunto)')}${c.resumen && c.resumen !== c.asunto ? ` · ${escapeHtml(c.resumen)}` : ''}`
+        return lineaCorreo(items.length, c)
       }),
     ].join('\n'))
   }
@@ -203,10 +204,10 @@ export async function calcularQueSigue(opts: QueSigueOpts = {}, now: Date = new 
  */
 export async function enviarQueSigue(chatId: number, opts: QueSigueOpts = {}): Promise<number> {
   const q = await calcularQueSigue(opts)
-  await sendTelegram(chatId, q.html, { html: true, tag: 'que-sigue' })
+  const messageId = await sendTelegram(chatId, q.html, { html: true, tag: 'que-sigue' })
   if (q.items.length > 0) {
     try {
-      await guardarAlarma('que_sigue', q.items)
+      await guardarAlarma('que_sigue', q.items, { chat_id: chatId, message_id: messageId, texto: q.html })
     } catch (err) {
       console.error(`[que-sigue] bot_alarmas: ${err instanceof Error ? err.message : String(err)}`)
     }

@@ -17,6 +17,7 @@ sección y **no se empieza una fase hasta validar la anterior**.
 | 4c | Lista completa a demanda, "qué sigue" siempre con 3 secciones, fechas en el intérprete | ✅ Construida — pendiente de validar |
 | 5 | Conexión de Google en Settings + Calendar (solo a pedido) + pagos recurrentes | ✅ Construida — pendiente de validar |
 | 6 | Correo dentro de GabbyHQ: Gmail, clasificador, alertas, evaluación de modelos (reemplaza n8n) | ✅ Construida — pendiente de validar |
+| 6b | Ajustes del correo: listas desde `correos`, lista viva "correos", tachado en sitio, alertas solo VIP/alta, seguridad de mensajes, bug del cierre | ✅ Construida — pendiente de validar (correr el SQL 6b) |
 | 7 | De comandos a conversación: memoria, sugerencias, "organízame", personalidad | ✅ Construida — pendiente de validar |
 
 ---
@@ -114,6 +115,9 @@ Archivos del asistente dentro del repo:
 | `src/lib/asistente/similitud.ts` | Fase 7-G: "nunca duplicar" — similitud de títulos (≥ 0.75), palabras clave específicas (lista `GENERICAS`), una tarea por línea |
 | `src/lib/asistente/correcciones.ts` | Ajuste 7-G: corregir el plan pendiente ("quita X repetido", "déjala donde estaba", "olvídalo", fusionar lo que diga el modelo) sin borrar ni completar nada |
 | `src/lib/correo/*` | Fase 6: correo dentro de GabbyHQ (Gmail, clasificador, alertas, decisiones, evaluación de modelos) — ver § 6 |
+| `src/lib/correo/listas.ts` | Ajustes 6b: la sección 📧 de las listas, la lista "correos" de una cuenta y el tachado en sitio — ver § 6f |
+| `src/lib/asistente/registro-listas.ts` | Ajustes 6b: `bot_alarmas` con chat/mensaje/texto; la última lista numerada de cualquier tipo |
+| `src/lib/errores.ts` | Ajuste 6b-1: `mensajeError` / `redactar` — ningún valor de env var ni key sale en mensajes ni logs |
 | `src/lib/asistente/pasos.ts` | Fase 7-H: dividir una tarea en 3–5 subtareas y "siguiente paso" |
 | `src/app/api/asistente/config/route.ts` | Fase 7: Settings → Asistente (config + costo del mes) |
 | `src/components/AsistenteConfigPanel.tsx` | Fase 7: el panel de Settings → Asistente |
@@ -162,6 +166,8 @@ Archivos del asistente dentro del repo:
 | `sql/2026-11-asistente-fase5.sql` | Migración de la fase 5: `conexiones_google` + `tasks.due_time` + `tasks.gcal_event_id` |
 | `sql/2026-11-asistente-fase5c.sql` | Migración de la fase 5-C: `pagos_recurrentes` |
 | `sql/2026-11-asistente-fase6-correo.sql` | Migración de la fase 6: roles por cuenta en `conexiones_google` + `cuentas_correo`, `correos`, `correo_evaluaciones`, `correo_veredictos` |
+| `sql/2026-11-asistente-fase6b-ajustes.sql` | Ajustes 6b: `bot_alarmas.tipo` admite `lista` y `correos` + columnas `chat_id`, `message_id`, `texto`; `correos.vip` y `correos.respondido_en` |
+| `sql/2026-11-duplicadas-select.sql` | Solo lectura (ajuste 6b-8): tareas con el mismo título donde una está cerrada y otra abierta, para revisar antes de borrar |
 | `sql/2026-11-asistente-fase7.sql` | Migración de la fase 7: `bot_conversacion` + `asistente_config` |
 | `src/lib/asistente/pagos.ts` | Fase 5-C: pagos recurrentes (fila + evento mensual en Calendar) |
 | `src/app/api/calendar/tarea/route.ts` | Fase 5-B: botón "📅 Agregar a Calendar" del panel de edición y casilla del formulario |
@@ -1609,8 +1615,10 @@ ambos) sobre las filas con veredicto. Eso decide entre gpt-5-mini, JEV y
 Claude con datos reales.
 
 **F) Alertas y decisiones** (`src/lib/correo/alertas.ts`,
-`decisiones.ts`). Alerta SOLO si: urgencia alta, VIP, necesita_respuesta o
-pedido_de_tarea — y dentro del horario de la cuenta. Lo demás, silencio.
+`decisiones.ts`). Alerta individual SOLO si: **VIP** (o regla con alerta) o
+**urgencia alta** — y dentro del horario de la cuenta (ajuste 6b-4; antes
+también necesita_respuesta / pedido_de_tarea). Lo demás no suena: sale en
+las listas (§ 6f).
 
 ```
 📧 IM Chelsea · ✴️ alta · necesita respuesta · De: Andrew (TOTT)
@@ -1665,7 +1673,9 @@ Settings → Correo (B). La nav tiene **Correo** junto a Inbox IM.
 
 1. Supabase → SQL Editor → `sql/2026-11-asistente-fase6-correo.sql` en una
    query. Abajo: las columnas nuevas de `conexiones_google`, las dos cuentas
-   precargadas y `rowsecurity = false` en las 4 tablas.
+   precargadas y `rowsecurity = false` en las 4 tablas. Después, en otra
+   query, `sql/2026-11-asistente-fase6b-ajustes.sql` (los ajustes de § 6f:
+   sin él la lista "correos" se guarda sin mensaje y nada se tacha en sitio).
 2. Vercel → env vars (ver 6c) → push → redeploy. El cron nuevo aparece en
    Vercel → Settings → Cron Jobs (`/api/correo/ingesta` cada 15 min).
 3. Settings → Conexiones: confirma que Gabby tiene 📅 Calendar on y Chelsea
@@ -1726,7 +1736,7 @@ Settings → Correo (B). La nav tiene **Correo** junto a Inbox IM.
 5. **Listas.** Con un correo alta pendiente, `dame la lista` → sección "📧
    Correos (1)" numerada al final; `el N lo hago yo` lo decide; `listo N`
    responde que es un correo. `¿qué sigue?` → "Correos urgentes".
-   `¿qué correos tengo pendientes?` → `/pregunta` los lista sin cuerpo.
+   `¿qué correos tengo pendientes?` → la lista viva "correos" (§ 6f-2).
 6. **Cuenta de Gabby.** Paso 6 de 6b; "Leer ahora" → sus correos aparecen
    en `/correo` con el filtro de cuenta "IM Gabby".
 
@@ -1741,6 +1751,149 @@ Settings → Correo (B). La nav tiene **Correo** junto a Inbox IM.
 | Alertas fuera de hora | `horario_alertas` mal escrito (debe ser `HH:MM-HH:MM`) | Se guarda `07:00-21:00` si el formato no es válido |
 | "Archivar" dice que no pudo sacarlo de Gmail | La cuenta no tiene `gmail.modify` (conectada antes de la fase 5) | Conexiones → Reconectar; el estado sí cambió |
 | El evento de Calendar cae en la cuenta equivocada | 📅 encendido en la otra cuenta | Conexiones: enciéndelo en la correcta (apaga la otra solo) |
+| "correos" se manda pero "el 3 lo hago yo" no lo encuentra, o nada se tacha | Falta `sql/2026-11-asistente-fase6b-ajustes.sql` (la fila se guarda sin mensaje y como `que_sigue`) | Corre el SQL 6b; logs `[bot_alarmas] sin migración 6b` |
+| Un botón de la alerta dice "ese botón ya caducó (48 h)" | Respondido / Para Chelsea hace más de 48 h | Decídelo en `/correo` o con texto ("el correo de X lo hago yo") |
+
+### 6f. Ajustes 6b (3 nov 2026) — listas desde `correos`, lista viva, seguridad, bug del cierre
+
+Nueve ajustes después de la primera semana. SQL: `sql/2026-11-asistente-fase6b-ajustes.sql`.
+
+**0) Las listas leen la tabla `correos`, nunca inbox-IM.** La de las 8, el
+cierre y "¿qué sigue?" ya no consultan `im_triaje` (desaparece la línea
+"📬 Sin correos pendientes" bajo CHELSEA y `countChelseaMail`). En su lugar,
+una sección **📧 por cuenta** a continuación de las tareas, con los correos
+**pendientes** (estado `nuevo` o `para_chelsea`, últimos 7 días), numerados
+en la misma secuencia de la lista para que "el 15 lo hago yo" funcione:
+
+```
+📧 IM Chelsea (7)
+📧 15. ✴️ Andrew (TOTT) · Landing page changes · hace 3h
+📧 16. Lion's Gate (TOTT) · Invoice October · hace 5h · 📨 Chelsea
+📧 17. Meta Ads · Your campaign was approved · hace 9h
+📧 18. …
+📧 19. …
+· +2 más → correos
+✅ Chelsea respondió · Lion's Gate (TOTT) · Proposal v2
+Para decidir: el 15 lo hago yo · el 15 para Chelsea · archiva el 15 · correos = la lista completa · /correo
+```
+
+Orden: alta → alguien espera (necesita respuesta / pedido de tarea) → resto;
+dentro de cada grupo el más nuevo primero. Máximo **5 por cuenta** y "+N más
+→ correos". Sin nada pendiente: una línea "📧 Sin correos pendientes". Si la
+consulta falla, la lista sale igual con "📧 Correos: no se pudieron consultar
+ahora". El contexto de `/pregunta` también dejó de leer inbox-IM (cuenta los
+`para_chelsea` de la tabla `correos`). Código: `src/lib/correo/listas.ts`
+(`seccionCorreosDiaria`) y `pendientes.ts` (`correosPendientes`).
+
+**1) Seguridad: ningún valor de env var ni key en mensajes ni logs.** El bot
+llegó a imprimir en Telegram "modelo falló: LLM_PROVIDER_CORREO inválido:
+sk-proj-…" porque la key se pegó en la variable equivocada y el error la
+repetía. Tres capas:
+- `llmConfig()` / `llmConfigCorreo()` ya no incluyen el valor en el error
+  (solo el **nombre** de la variable y los valores permitidos).
+- El clasificador deja en `razon` un texto genérico por tipo: `⚠️
+  clasificador no disponible (config | timeout | respuesta | proveedor)`.
+  Es lo que la alerta y `/correo` muestran.
+- `src/lib/errores.ts`: `mensajeError(err)` / `redactar(texto)` enmascaran
+  cualquier cosa con pinta de credencial (`sk-…`, `Bearer …`, tokens
+  largos) y el valor real de toda env var cuyo nombre contenga KEY, SECRET,
+  TOKEN, PASSWORD o SEED. **Todos los catch** que convierten un error en
+  texto (Telegram, respuestas de `/api/*`, logs del plan, intérprete,
+  pregunta, pasos, organízame, alarmas, ingesta, decisiones, Calendar,
+  pagos) pasan por ahí. `motivoParaUsuario(err)` devuelve solo "config"
+  cuando el problema es de variables.
+
+**2) Lista viva de correos.** `correos`, `mis correos`, `correos de
+Chelsea`, `correos de IM Gabby`, `¿qué correos tengo pendientes?` (y el
+botón **[📋 Correos de IM Chelsea]** al pie de cada alerta) → un mensaje
+con **todos** los pendientes de esa cuenta (sin cuenta: de todas, con el
+nombre de la cuenta al final de cada línea), numerados y agrupados
+**✴️ Alta / ✉️ Necesitan respuesta / Resto**, con remitente y "hace Nh";
+debajo, los VIP respondidos en las últimas 48 h en cursiva. Se guarda en
+`bot_alarmas` con `tipo = 'correos'`, así "el 3 para Chelsea", "archiva el
+5", "el 2 lo hago yo" resuelven contra ella (el intérprete recibe "lista de
+CORREOS: todos sus números son correos"). Más de 40 → "+N más → /correo".
+Una cuenta que no existe: "No tengo una cuenta de correo «X». Las que hay:
+…". Si el nombre coincide con la dueña (`duena`), el nombre o el email de
+la cuenta, la encuentra.
+
+**3) Actualización en sitio.** `bot_alarmas` guarda ahora `chat_id`,
+`message_id` y `texto` de cada lista enviada (las de las 8 y 6, "qué
+sigue", las pedidas a mano y la de correos). Cuando un correo se decide
+(botón, texto o web) o el autoresolver ve la respuesta, el **último mensaje
+de lista** que lo numera, si tiene **menos de 12 h**, se edita tachando
+esa línea: `~~16. Lion's Gate (TOTT) · Invoice…~~ ✅` (o `🙋`, `➕`, `📨
+Chelsea`, `🗄`). Sin mensajes nuevos: la lista refleja el estado real. Una
+lista que Telegram partió en varios mensajes (> 4000 caracteres) no se
+edita (solo se conoce el id del último trozo). `tacharCorreoEnLista` en
+`listas.ts`; `ultimaListaCon` en `registro-listas.ts`.
+
+**4) Alertas individuales solo para VIP y alta** (`mereceAlerta`). Lo
+demás — necesita respuesta, pedido de tarea, media — solo sale en las
+listas.
+
+**5) `/chelsea` lee `correos`.** La sección de correos de la web es
+`/api/correo?estado=para_chelsea` (con "Show resolved": + `respondido`, 14
+días), agrupada por el día en que se pasó o respondió. La casilla archiva
+(sale del inbox de Gmail); el botón 🙋 lo toma Gabby como tarea. "Copy
+pending list" conserva el formato en inglés (🔴 HIGH / 🟡 MEDIUM / 🟢 LOW +
+Tasks). `/inbox` y `/rules` siguen en inbox-IM hasta la fase de limpieza.
+
+**6) "Respondido" no cierra para Gabby.** El autoresolver marca
+`respondido` y guarda `respondido_en`; la alerta se edita a **"✅ Chelsea
+respondió · asunto · De: …"** (el nombre es `cuentas_correo.duena`; sin
+dueña, "✅ Respondido") y **conserva [🙋 Lo hago yo] [➕ Tarea]** 48 h. Si
+Gabby toca uno, se crea la tarea normal (estado `lo_hago_yo` / `tarea`,
+`respondido_en` se queda) y el mensaje pasa a "✅ Chelsea respondió · 📝
+tarea creada · asunto". En las listas, los **VIP** respondidos (columna
+`correos.vip`, que el clasificador marca cuando el remitente está en la
+lista VIP o en una regla VIP; el SQL rellena los anteriores por la `razon`)
+se quedan 48 h en cursiva: "✅ Chelsea respondió · Lion's Gate (TOTT) ·
+asunto". Lo mismo para **Para Chelsea**: la alerta pasa a "📨 Para Chelsea
+· asunto" y conserva [🙋 Lo hago yo] 48 h. Pasadas las 48 h, el botón
+responde "ese botón ya caducó (48 h); decídelo en /correo".
+
+**7) Bug del cierre de las 6: "1 listo" → "no encontré el 1".** Tres
+causas posibles, tres arreglos:
+- `ultimaAlarma()` tomaba **solo la última fila** de `bot_alarmas` y, si
+  tenía `items` vacío (una lista pedida sin tareas, "/pendientes X" vacío),
+  devolvía "ninguna" aunque el cierre estuviera justo antes. Ahora revisa
+  las últimas 8 filas y usa la **primera con items**, de **cualquier
+  tipo** (`manana`, `tarde`, `que_sigue`, `lista`, `correos`).
+- "1 listo", "3 terminado", "2, 5 hechas", "el 4 listo", "listo el 3" se
+  resuelven en el **parser**, sin modelo (`accion: listo`), contra esa
+  última lista. Si el número es un correo: "El 1 es un correo: dime 'el 1
+  lo hago yo'…". Por el intérprete, un `#n` que es correo da el mismo
+  aviso en vez de "no encontré".
+- Las listas pedidas a mano se guardan como `tipo = 'lista'` (antes
+  `manana`) y el cierre del cron, como siempre, `tarde`; ambos con el
+  mensaje. `idDeNumero` del webhook usa la misma `ultimaAlarma()`.
+
+**8) Duplicadas: solo un SELECT.** `sql/2026-11-duplicadas-select.sql`
+lista las tareas cuyo título normalizado (sin acentos ni mayúsculas) se
+repite con **una cerrada y otra abierta**, con id, empresa, estado, fechas
+y el inicio de las notas, para decidir a ojo. No borra ni actualiza nada.
+
+**Cómo probar 6f** (después del SQL 6b y el deploy):
+1. `correos` → la lista por urgencia; `correos de Chelsea` → solo esa
+   cuenta; `correos de nadie` → "No tengo una cuenta…".
+2. `el 2 lo hago yo` → tarea creada y, en el mensaje de la lista, la línea
+   2 tachada con 🙋 (sin mensaje nuevo de lista). `archiva el 3` → tachada
+   con 🗄.
+3. `/hoy` → sección 📧 por cuenta con máximo 5 líneas y "+N más → correos";
+   `el 15 para Chelsea` funciona con esos números; `15 listo` responde que
+   es un correo.
+4. `cierre` (o la de las 6) → `1 listo` cierra el 1 de ese cierre; `listo
+   el 2` también.
+5. Contesta desde Gmail un correo alertado → en ≤ 15 min la alerta dice
+   "✅ Chelsea respondió" con [Lo hago yo] [Tarea]; toca [Lo hago yo] →
+   "✅ Chelsea respondió · 📝 tarea creada". Si era VIP, la lista de las 8
+   lo muestra en cursiva 48 h.
+6. Un correo media / necesita respuesta ya no manda alerta: aparece en
+   `correos` y en la lista de las 8.
+7. Pon a propósito `LLM_PROVIDER_CORREO=sk-xxx` → `razon` dice "⚠️
+   clasificador no disponible (config)"; en los logs no aparece el valor.
+8. `/chelsea` muestra los `para_chelsea` de `correos`; la casilla archiva.
 
 ---
 
@@ -2031,8 +2184,8 @@ El código es el mismo repo.
    `sql/2026-10-asistente-fase2.sql`, `sql/2026-10-asistente-fase3.sql` y
    `sql/2026-10-asistente-fase4.sql`, `sql/2026-11-asistente-fase4b.sql` y
    `sql/2026-11-asistente-fase5.sql`, `sql/2026-11-asistente-fase5c.sql`,
-   `sql/2026-11-asistente-fase6-correo.sql` y
-   `sql/2026-11-asistente-fase7.sql` (y sus pruebas en queries aparte, ver
+   `sql/2026-11-asistente-fase6-correo.sql`, `sql/2026-11-asistente-fase7.sql` y
+   `sql/2026-11-asistente-fase6b-ajustes.sql` (y sus pruebas en queries aparte, ver
    1b, 2b, 3b y 4b Paso 1). El SQL de la fase 6 precarga las cuentas de
    correo de Gabby y Chelsea: cambia esos emails y listas por los de la
    persona (o bórralas y créalas en Settings → Correo).

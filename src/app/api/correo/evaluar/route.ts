@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { isValidSession } from '@/lib/session'
 import { evaluar, tablaEvaluacion } from '@/lib/correo/evaluar'
 import { llmConfigCorreo, nombreModelo } from '@/lib/asistente/llm'
+import { mensajeError } from '@/lib/errores'
 
 // Fase 6-E. GET without `modelo`: the table (mails × models × verdicts).
 // GET with `modelo=`: re-classifies the window's mails with that model,
@@ -31,6 +32,6 @@ export async function GET(request: Request) {
     }
     return NextResponse.json({ ...t, modelo_actual: actual, dias })
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 })
+    return NextResponse.json({ error: mensajeError(err) }, { status: 500 })
   }
 }

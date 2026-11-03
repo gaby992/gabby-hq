@@ -11,6 +11,7 @@ import { addDays, cancunYmd, daysBetween, formatVenceEs } from './cancun'
 import type { AsistenteConfig } from './config'
 import { fechaEstaSemana } from './sugerencias'
 import { inlineKeyboard } from './telegram'
+import { mensajeError } from '@/lib/errores'
 
 export const MAX_ITEMS = 8
 
@@ -138,7 +139,7 @@ export async function responderOrganizar(d: OrganizarDraft, valor: RespuestaOrga
         d.stats.saltadas += 1
       }
     } catch (err) {
-      hecho = `⚠️ No pude con «${it.text}»: ${err instanceof Error ? err.message : String(err)}`
+      hecho = `⚠️ No pude con «${it.text}»: ${mensajeError(err)}`
     }
   }
   const next = { ...d, idx: valor === 'fin' ? d.cola.length : d.idx + 1 }

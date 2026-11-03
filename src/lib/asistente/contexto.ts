@@ -1,6 +1,6 @@
 // What the assistant knows when it answers a question: today's picture, the
-// week, what was closed recently, the "por dónde iba" notes and Chelsea's
-// mail count — as plain text, grouped by company, capped at ~3000 tokens.
+// week, what was closed recently, the "por dónde iba" notes and the recent
+// mail (fase 6) — as plain text, grouped by company, capped at ~3000 tokens.
 //
 // NEVER includes `tasks.notes`: that column carries email bodies
 // ("Ref: gmail:…") and must not leave the database.
@@ -9,7 +9,6 @@ import { createServerClient } from '@/lib/supabase-server'
 import type { Company, NotaEmpresa, Priority } from '@/types'
 import { CHELSEA_COMPANY_NAME } from '@/lib/chelsea'
 import { CANCUN_TZ, addDays, cancunDayBounds, cancunYmd, daysBetween, formatHoraEs, formatVenceEs } from './cancun'
-import { countChelseaMail } from './alarmas'
 import { correosRecientes, quienCorto } from '@/lib/correo/pendientes'
 import { CORREO_ESTADO_LABELS } from '@/types'
 
@@ -98,12 +97,11 @@ export async function construirContexto(now: Date = new Date()): Promise<Context
 
   const db = createServerClient()
   const cols = 'id, text, priority, importante, due_date, due_time, company_id, completed_at'
-  const [openRes, doneRes, companiesRes, notasRes, chelseaMail, correos] = await Promise.all([
+  const [openRes, doneRes, companiesRes, notasRes, correos] = await Promise.all([
     db.from('tasks').select(cols).eq('done', false),
     db.from('tasks').select(cols).eq('done', true).gte('completed_at', hace7).order('completed_at', { ascending: false }),
     db.from('companies').select('*'),
     db.from('notas_empresa').select('*'),
-    countChelseaMail(),
     // Fase 6: subject + summary + state of the last 7 days. NEVER the body.
     correosRecientes({ estados: ['nuevo', 'para_chelsea', 'lo_hago_yo', 'tarea', 'respondido', 'archivado'], dias: 7, max: 40 }),
   ])
@@ -138,7 +136,7 @@ export async function construirContexto(now: Date = new Date()): Promise<Context
     const nota = s.id ? notas.find((n) => n.company_id === s.id)?.nota?.trim() : null
     const isChelsea = s.name.toLowerCase() === CHELSEA_COMPANY_NAME.toLowerCase()
 
-    if (!nota && hoy.length === 0 && semana.length === 0 && cerradas.length === 0 && !isChelsea) continue
+    if (!nota && hoy.length === 0 && semana.length === 0 && cerradas.length === 0 && !(isChelsea && correos.some((m) => m.estado === 'para_chelsea'))) continue
 
     lines.push(`== ${s.name} ==`)
     if (nota) {
@@ -167,11 +165,9 @@ export async function construirContexto(now: Date = new Date()): Promise<Context
       if (c.extra > 0) lines.push(`- (+${c.extra} más)`)
     }
     if (isChelsea) {
-      lines.push(
-        chelseaMail === null
-          ? 'Correos pendientes de Chelsea en inbox-IM: no disponible ahora'
-          : `Correos pendientes de Chelsea en inbox-IM: ${chelseaMail}`
-      )
+      // Ajuste 6-0: Chelsea's mail is the `correos` table (para_chelsea), listed below — never inbox-IM.
+      const suyos = correos.filter((m) => m.estado === 'para_chelsea').length
+      lines.push(`Correos pasados a Chelsea sin responder: ${suyos} (ver == Correos ==)`)
     }
     lines.push('')
   }

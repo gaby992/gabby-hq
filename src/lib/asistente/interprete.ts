@@ -18,6 +18,7 @@ import { cargarConfig, personaPrompt, type AsistenteConfig } from './config'
 import { historial, renderHistorial, tareasRecientes } from './conversacion'
 import { correosRecientes, quienCorto, type CorreoLite } from '@/lib/correo/pendientes'
 import type { CorreoAccion, CorreoTipo, CorreoUrgencia } from '@/types'
+import { mensajeError } from '@/lib/errores'
 
 export const MAX_TOKENS = 900
 export const TIMEOUT_MS = 20_000
@@ -141,7 +142,11 @@ export async function construirContextoInterprete(
 
   // 1. The last alarm, in its own numbering — "el 9" means this.
   if (alarma) {
-    const que = alarma.tipo === 'manana' ? 'alarma 8:00 am' : alarma.tipo === 'tarde' ? 'alarma 6:00 pm' : 'respuesta a "¿qué sigue?" (1 = "el primero", 2 = "el segundo"…)'
+    const que = alarma.tipo === 'manana' ? 'alarma 8:00 am'
+      : alarma.tipo === 'tarde' ? 'alarma 6:00 pm (cierre del día)'
+      : alarma.tipo === 'lista' ? 'lista pedida a mano'
+      : alarma.tipo === 'correos' ? 'lista de CORREOS: todos sus números son correos, nunca tareas'
+      : 'respuesta a "¿qué sigue?" (1 = "el primero", 2 = "el segundo"…)'
     lines.push(`ÚLTIMA LISTA NUMERADA (${que}, ${alarma.enviada_en.slice(0, 16).replace('T', ' ')} UTC) — sus números:`)
     for (const it of alarma.items) {
       if (it.correo_id) {
@@ -546,7 +551,7 @@ export async function interpretar(
     console.log(`[interprete] ok · ${modelo} · ${acciones.length} acciones · in ${r.tokensIn} · out ${r.tokensOut} · ${r.ms} ms`)
     return { acciones, contexto, modelo, tokensIn: r.tokensIn, tokensOut: r.tokensOut, ms: r.ms }
   } catch (err) {
-    const motivo = err instanceof Error ? err.message : String(err)
+    const motivo = mensajeError(err)
     const ms = Date.now() - t0
     console.error(`[interprete] error · ${modelo} · ${ms} ms · ${motivo}`)
     await registrarInterpretacion({ chat_id: chatId, pregunta: mensaje, respuesta: `ERROR: ${motivo}`, modelo, tokens_in: 0, tokens_out: 0, ms })

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { isValidSession } from '@/lib/session'
 import { createServerClient } from '@/lib/supabase-server'
 import { cargarConfig, guardarConfig } from '@/lib/asistente/config'
+import { mensajeError } from '@/lib/errores'
 
 // Settings → Asistente (fase 7-D/F): the persona config and this month's
 // LLM cost, read from bot_preguntas (every turn that hit the model is there).
@@ -59,6 +60,6 @@ export async function PUT(request: Request) {
     })
     return NextResponse.json({ ok: true, config })
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 })
+    return NextResponse.json({ error: mensajeError(err) }, { status: 500 })
   }
 }

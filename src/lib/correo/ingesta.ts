@@ -4,18 +4,21 @@
 //   2. one row per message in `correos`, then the classifier (rules → LLM);
 //   3. an alert in Telegram when it deserves one and the account's hours
 //      allow it — outside them it stays `nuevo` and the 8:00 list shows it;
-//   4. the autoresolver: a SENT reply in the thread → `respondido` and the
-//      alert edited to "✅ Respondido".
+//   4. the autoresolver: a SENT reply in the thread → `respondido`
+//      (+ respondido_en), the alert edited to "✅ Chelsea respondió" with
+//      [Lo hago yo] [Tarea] still there, and its line struck in the last list.
 // A failure in one message never stops the rest; the cursor only advances
 // when the whole batch was processed.
 
 import { createServerClient } from '@/lib/supabase-server'
 import type { Correo, CuentaCorreo } from '@/types'
 import { conexionPorId, type ConexionRow } from '@/lib/google/oauth'
+import { mensajeError } from '@/lib/errores'
 import { enviarAlerta, marcarRespondidoEnTelegram } from './alertas'
 import { clasificar, mereceAlerta } from './clasificar'
 import { cuentasActivas, dentroDeHorario, guardarCuenta } from './cuentas'
 import { hiloRespondido, listarNuevos, obtenerMensaje } from './gmail'
+import { tacharCorreoEnLista } from './listas'
 
 export const DIAS_BACKLOG = 3
 export const MAX_POR_CORRIDA = 50
@@ -33,9 +36,7 @@ export interface ResumenIngesta {
   error?: string
 }
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
+const errorMessage = mensajeError
 
 /** Summaries of the earlier mails of the same thread, oldest first (the differential summary needs them). */
 async function resumenesDelHilo(cuentaId: string, threadId: string, antesDe: string): Promise<string[]> {
@@ -91,9 +92,15 @@ async function procesarMensaje(cuenta: CuentaCorreo, conn: ConexionRow, id: stri
     razon: r.clas.razon,
     estado: r.estado,
     decidido_en: r.estado === 'nuevo' ? null : now.toISOString(),
+    vip: r.vip,
   }
-  const { data: correo, error: e2 } = await db.from('correos').update(update).eq('id', inserted.id).select('*').single<Correo>()
-  if (e2) throw new Error(`Supabase correos: ${e2.message}`)
+  let { data: correo, error: e2 } = await db.from('correos').update(update).eq('id', inserted.id).select('*').single<Correo>()
+  if (e2 && /vip/.test(e2.message)) {
+    // Before sql/2026-11-asistente-fase6b-ajustes.sql: the column is not there yet.
+    delete update.vip
+    ;({ data: correo, error: e2 } = await db.from('correos').update(update).eq('id', inserted.id).select('*').single<Correo>())
+  }
+  if (e2 || !correo) throw new Error(`Supabase correos: ${e2?.message ?? 'sin fila'}`)
   if (r.modelo) {
     // Same log as every other model call, so Settings → Asistente counts its cost.
     void db.from('bot_preguntas').insert({ chat_id: 0, pregunta: `[correo] ${m.asunto.slice(0, 120)}`, respuesta: JSON.stringify(r.clas), modelo: `correo:${r.modelo}`, tokens_in: r.tokensIn, tokens_out: r.tokensOut, ms: r.ms })
@@ -130,9 +137,12 @@ export async function autoresolver(cuenta: CuentaCorreo, conn: ConexionRow): Pro
   for (const c of (data as Correo[]) ?? []) {
     try {
       if (!(await hiloRespondido(conn, c.gmail_thread_id!, c.recibido_en ?? c.created_at))) continue
-      const { error: e } = await db.from('correos').update({ estado: 'respondido', decidido_en: new Date().toISOString() }).eq('id', c.id)
+      const ahora = new Date().toISOString()
+      let { error: e } = await db.from('correos').update({ estado: 'respondido', decidido_en: ahora, respondido_en: ahora }).eq('id', c.id)
+      if (e && /respondido_en/.test(e.message)) ({ error: e } = await db.from('correos').update({ estado: 'respondido', decidido_en: ahora }).eq('id', c.id))
       if (e) throw new Error(e.message)
-      await marcarRespondidoEnTelegram(c)
+      await marcarRespondidoEnTelegram(c, cuenta)
+      await tacharCorreoEnLista(c.id, '✅')
       n += 1
     } catch (err) {
       console.error(`[correo] autoresolver «${c.asunto}»: ${errorMessage(err)}`)

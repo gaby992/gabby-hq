@@ -1,8 +1,8 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { URGENCIA_EMOJI, URGENCIA_ORDER, URGENCIA_LABELS } from '@/types'
-import type { ImTriaje, ImUrgencia, Company, Task } from '@/types'
+import { CORREO_URGENCIA_EMOJI, CORREO_URGENCIA_ORDER, CORREO_URGENCIA_LABELS } from '@/types'
+import type { Correo, CorreoUrgencia, Company, Task } from '@/types'
 import CopyButton from '@/components/CopyButton'
 import TaskCard from '@/components/TaskCard'
 import { supabase } from '@/lib/supabase'
@@ -38,13 +38,22 @@ function oneLine(text: string | null): string {
   return (text ?? '').replace(/\s+/g, ' ').trim()
 }
 
+function remitente(c: Correo): string {
+  return c.de_nombre || c.de_email || '(no sender)'
+}
+
 /** Today as 'YYYY-MM-DD' in Cancun, so the whole page agrees on "today". */
 function todayKey(): string {
   return dayKey(new Date().toISOString())
 }
 
+/**
+ * /chelsea: what Chelsea owes. Ajuste 6-5: the mail half reads the `correos`
+ * table of fase 6 (estado para_chelsea; "Show resolved" adds the ones the
+ * autoresolver saw answered), never inbox-IM's im_triaje.
+ */
 export default function ChelseaPage() {
-  const [items, setItems] = useState<ImTriaje[]>([])
+  const [items, setItems] = useState<Correo[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showResolved, setShowResolved] = useState(false)
@@ -62,19 +71,16 @@ export default function ChelseaPage() {
   const fetchItems = useCallback(async () => {
     setLoading(true)
     setError(null)
-    // Pending is defined by status alone (auto-routed items may have no asignado_a).
-    // Resolved history is scoped to Chelsea so Gabby's own resolved items don't leak in.
-    const reqs = [fetch('/api/inbox?status=pasado_a_chelsea')]
-    if (showResolved) reqs.push(fetch('/api/inbox?status=resuelto&asignado=Chelsea'))
-    const results = await Promise.all(reqs)
-    if (results.some((r) => !r.ok)) {
+    // Pending = handed to Chelsea and not answered yet. Resolved = answered (autoresolver) in the last 14 days.
+    const estados = showResolved ? 'para_chelsea,respondido' : 'para_chelsea'
+    const res = await fetch(`/api/correo?estado=${estados}&dias=${showResolved ? 14 : 30}`)
+    if (!res.ok) {
       setError('Could not load Chelsea list.')
       setItems([])
       setLoading(false)
       return
     }
-    const lists = await Promise.all(results.map((r) => r.json() as Promise<ImTriaje[]>))
-    setItems(lists.flat())
+    setItems((await res.json()) as Correo[])
     setLoading(false)
   }, [showResolved])
 
@@ -115,7 +121,7 @@ export default function ChelseaPage() {
   useEffect(() => { fetchItems() }, [fetchItems])
   useEffect(() => { fetchTasks() }, [fetchTasks])
 
-  const pending = useMemo(() => items.filter((i) => i.status === 'pasado_a_chelsea'), [items])
+  const pending = useMemo(() => items.filter((i) => i.estado === 'para_chelsea'), [items])
   const chelseaCompany = useMemo(() => findChelseaCompany(companies), [companies])
   // Open tasks first (soonest due date up top, undated last), done ones after.
   const sortedTasks = useMemo(() => {
@@ -131,18 +137,19 @@ export default function ChelseaPage() {
   // Same order the list shows, so the copied text reads the way the page does.
   const openTasks = useMemo(() => sortedTasks.filter((t) => !t.done), [sortedTasks])
 
-  async function markDone(id: string) {
+  // The checkbox archives the mail (INBOX removed in Gmail); "Lo hago yo" takes it back as Gabby's task.
+  async function decidir(id: string, accion: 'archivar' | 'yo') {
     const prev = items
-    setItems((is) => is.map((i) => (i.id === id ? { ...i, status: 'resuelto' } : i)))
-    if (!showResolved) setItems((is) => is.filter((i) => i.id !== id))
-    const res = await fetch('/api/inbox', {
+    setItems((is) => is.filter((i) => i.id !== id))
+    const res = await fetch('/api/correo', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids: [id], action: 'done' }),
+      body: JSON.stringify({ ids: [id], accion }),
     })
-    if (!res.ok) {
+    const out = res.ok ? ((await res.json()) as { error?: string }[]) : null
+    if (!out || out.some((o) => o.error)) {
       setItems(prev)
-      setError('Could not update — reverted.')
+      setError(out?.find((o) => o.error)?.error ?? 'Could not update — reverted.')
     }
   }
 
@@ -155,11 +162,12 @@ export default function ChelseaPage() {
     })
   }
 
-  // Group by day of decidido_at, most recent first.
+  // Group by the day it was handed over (or answered), most recent first.
   const groups = useMemo(() => {
-    const map = new Map<string, ImTriaje[]>()
+    const map = new Map<string, Correo[]>()
+    const fecha = (c: Correo) => c.respondido_en ?? c.decidido_en ?? c.recibido_en
     for (const item of items) {
-      const key = dayKey(item.decidido_at)
+      const key = dayKey(fecha(item))
       if (!map.has(key)) map.set(key, [])
       map.get(key)!.push(item)
     }
@@ -167,7 +175,7 @@ export default function ChelseaPage() {
       .sort((a, b) => (a[0] < b[0] ? 1 : -1))
       .map(([key, list]) => ({
         key,
-        label: dayLabel(list[0].decidido_at),
+        label: dayLabel(fecha(list[0])),
         items: list,
       }))
   }, [items])
@@ -177,18 +185,19 @@ export default function ChelseaPage() {
   function buildPendingText(): string {
     const lines: string[] = [`CHELSEA'S PENDING — ${todayLabel()}`]
 
-    // ── Mail: grouped by urgency, each row carrying its resumen_ia ──
-    const headers: Record<ImUrgencia, string> = { alta: 'HIGH', media: 'MEDIUM', baja: 'LOW' }
-    function pushMail(items: ImTriaje[]) {
+    // ── Mail: grouped by urgency, each row carrying its resumen ──
+    const headers: Record<CorreoUrgencia, string> = { alta: 'HIGH', media: 'MEDIUM', baja: 'LOW' }
+    const icons: Record<CorreoUrgencia, string> = { alta: '🔴', media: '🟡', baja: '🟢' }
+    function pushMail(items: Correo[]) {
       for (const i of items) {
-        const summary = oneLine(i.resumen_ia)
-        lines.push(`- ${i.remitente || '(no sender)'} — ${i.asunto || '(no subject)'}${summary ? `: ${summary}` : ''}`)
+        const summary = oneLine(i.resumen)
+        lines.push(`- ${remitente(i)} — ${i.asunto || '(no subject)'}${summary ? `: ${summary}` : ''}`)
       }
     }
-    for (const u of URGENCIA_ORDER) {
+    for (const u of CORREO_URGENCIA_ORDER) {
       const bucket = pending.filter((i) => i.urgencia === u)
       if (bucket.length === 0) continue
-      lines.push('', `${URGENCIA_EMOJI[u]} ${headers[u]}:`)
+      lines.push('', `${icons[u]} ${headers[u]}:`)
       pushMail(bucket)
     }
     const noUrg = pending.filter((i) => !i.urgencia)
@@ -249,7 +258,7 @@ export default function ChelseaPage() {
           <h2 className="text-xs font-semibold text-[#888888] uppercase tracking-wider">{group.label}</h2>
           <div className="space-y-1.5">
             {group.items.map((i) => {
-              const resolved = i.status === 'resuelto'
+              const resolved = i.estado !== 'para_chelsea'
               const isExpanded = expanded.has(i.id)
               return (
                 <div
@@ -258,9 +267,9 @@ export default function ChelseaPage() {
                 >
                   <div className="flex items-start gap-3">
                     <button
-                      onClick={() => !resolved && markDone(i.id)}
+                      onClick={() => !resolved && decidir(i.id, 'archivar')}
                       disabled={resolved}
-                      title={resolved ? 'Resolved' : 'Mark resolved'}
+                      title={resolved ? 'Respondido' : 'Archivar (sale del inbox de Gmail)'}
                       className={`mt-0.5 flex-shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
                         resolved ? 'bg-[#7F77DD] border-[#7F77DD]' : 'border-[#2a2a2a] hover:border-[#888888]'
                       }`}
@@ -271,24 +280,34 @@ export default function ChelseaPage() {
                         </svg>
                       )}
                     </button>
-                    <div className="flex-1 min-w-0" onClick={() => i.resumen_ia && toggleExpand(i.id)}>
+                    <div className="flex-1 min-w-0" onClick={() => i.resumen && toggleExpand(i.id)}>
                       <div className="flex flex-wrap items-center gap-2">
-                        <span title={i.urgencia ? URGENCIA_LABELS[i.urgencia] : ''}>
-                          {i.urgencia ? URGENCIA_EMOJI[i.urgencia] : '⚪'}
+                        <span title={i.urgencia ? CORREO_URGENCIA_LABELS[i.urgencia] : ''}>
+                          {i.urgencia ? CORREO_URGENCIA_EMOJI[i.urgencia] : '⚪'}
                         </span>
                         <span className={`text-sm font-medium ${resolved ? 'line-through text-[#555555]' : 'text-[#e8e8e8]'}`}>
-                          {i.remitente || '(no sender)'}
+                          {remitente(i)}
                         </span>
                         <span className={`text-sm ${resolved ? 'text-[#555555]' : 'text-[#888888]'} truncate`}>
                           {i.asunto || '(no subject)'}
                         </span>
+                        {resolved && <span className="text-xs text-[#555555]">✅ respondido</span>}
                       </div>
-                      {i.resumen_ia && (
+                      {i.resumen && (
                         <p className={`text-xs text-[#888888] mt-0.5 cursor-pointer ${isExpanded ? '' : 'truncate'}`}>
-                          {i.resumen_ia}
+                          {i.resumen}
                         </p>
                       )}
                     </div>
+                    {!resolved && (
+                      <button
+                        onClick={() => decidir(i.id, 'yo')}
+                        title="Lo hago yo: pasa a tarea de Gabby"
+                        className="flex-shrink-0 text-xs text-[#888888] hover:text-[#e8e8e8] px-1.5 py-0.5 rounded border border-[#2a2a2a]"
+                      >
+                        🙋
+                      </button>
+                    )}
                   </div>
                 </div>
               )

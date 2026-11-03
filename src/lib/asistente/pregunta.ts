@@ -5,6 +5,7 @@ import { createServerClient } from '@/lib/supabase-server'
 import { construirContexto } from './contexto'
 import { llmConfig, preguntarLlm } from './llm'
 import { cargarConfig, personaPrompt, type AsistenteConfig } from './config'
+import { mensajeError } from '@/lib/errores'
 
 /** The persona (fase 7) + the answer rules. */
 export function systemPromptPregunta(cfg: AsistenteConfig): string {
@@ -80,7 +81,7 @@ export async function responderPregunta(chatId: number, pregunta: string): Promi
     await registrar({ chat_id: chatId, pregunta: q, respuesta, modelo, tokens_in: r.tokensIn, tokens_out: r.tokensOut, ms: r.ms })
     return respuesta
   } catch (err) {
-    const motivo = err instanceof Error ? err.message : String(err)
+    const motivo = mensajeError(err)
     const ms = Date.now() - t0
     console.error(`[pregunta] error · ${modelo} · ${ms} ms · ${motivo}`)
     await registrar({ chat_id: chatId, pregunta: q, respuesta: `ERROR: ${motivo}`, modelo, tokens_in: 0, tokens_out: 0, ms })

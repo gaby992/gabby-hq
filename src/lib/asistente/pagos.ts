@@ -11,6 +11,7 @@ import { actualizarEventoPago, borrarEvento, crearEventoPago, type PagoEvento } 
 import { googleConfigurado } from '@/lib/google/oauth'
 import { addDays, cancunYmd, formatVenceEs } from './cancun'
 import { normalizar } from './acciones'
+import { mensajeError } from '@/lib/errores'
 
 export interface PagoConEmpresa extends PagoRecurrente {
   company: { name: string } | null
@@ -23,7 +24,7 @@ function tabla() {
 }
 
 function errorMsg(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
+  return mensajeError(err)
 }
 
 /** 'YYYY-MM-DD' of the next day-N: this month if still ahead (or today), else next month. */

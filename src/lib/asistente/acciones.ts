@@ -13,8 +13,10 @@ import { PRIORITY_LABELS } from '@/types'
 import type { Accion, Cambios } from '@/lib/parser'
 import { addDays, cancunYmd, formatCortoEs, formatHoraEs, formatVenceEs } from './cancun'
 import { agregarACalendar, avisosDe, borrarEventoDeTarea, sincronizarTarea } from '@/lib/google/sync'
-import type { AlarmaItem, AlarmaTipo } from './alarmas'
+import { ultimaAlarma, type AlarmaItem } from './registro-listas'
 import { inlineKeyboard, type InlineButton } from './telegram'
+
+export { ultimaAlarma }
 
 /** The action plus whatever it needs besides the task ids. Travels inside drafts. */
 export interface AccionParams {
@@ -34,13 +36,6 @@ export const USO: Record<Accion, string> = {
 }
 
 const MAX_CANDIDATOS = 5
-
-interface UltimaAlarma {
-  id: string
-  tipo: AlarmaTipo
-  enviada_en: string
-  items: AlarmaItem[]
-}
 
 export interface TaskRow {
   id: string
@@ -75,24 +70,12 @@ export function normalizar(s: string): string {
   return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
 }
 
-export async function ultimaAlarma(): Promise<UltimaAlarma | null> {
-  const { data, error } = await createServerClient()
-    .from('bot_alarmas')
-    .select('id, tipo, enviada_en, items')
-    .order('enviada_en', { ascending: false })
-    .limit(1)
-    .maybeSingle<UltimaAlarma>()
-  if (error) throw new Error(`Supabase bot_alarmas: ${error.message}`)
-  if (!data || !Array.isArray(data.items) || data.items.length === 0) return null
-  return data
-}
-
 type Resuelto = { ids: string[] } | { text: string } | { elegir: TaskRow[] }
 
 async function porNumeros(wanted: number[] | 'todo'): Promise<Resuelto> {
   const alarma = await ultimaAlarma()
   if (!alarma) {
-    return { text: 'No hay ninguna alarma con tareas numeradas todavía. Espera la de las 8:00 o la de las 6:00 pm, o dime una palabra del título.' }
+    return { text: 'No hay ninguna lista numerada todavía. Pide "/hoy", "cierre", "¿qué sigue?" o "correos", o dime una palabra del título.' }
   }
   const tareas = alarma.items.filter((i): i is AlarmaItem & { task_id: string } => !!i.task_id)
   if (wanted === 'todo') return { ids: tareas.map((i) => i.task_id) }
@@ -105,7 +88,7 @@ async function porNumeros(wanted: number[] | 'todo'): Promise<Resuelto> {
   const missing = wanted.filter((n) => !byN.has(n))
   if (missing.length > 0) {
     const max = Math.max(...alarma.items.map((i) => i.n))
-    return { text: `No encontré ${missing.length === 1 ? 'el' : 'los'} ${missing.join(', ')} en la última alarma (va del 1 al ${max}).` }
+    return { text: `No encontré ${missing.length === 1 ? 'el' : 'los'} ${missing.join(', ')} en la última lista (va del 1 al ${max}).` }
   }
   return { ids: wanted.map((n) => byN.get(n)!) }
 }

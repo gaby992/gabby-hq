@@ -15,6 +15,7 @@ Es lo mismo que manda el bot con `/ayuda todo`. La guía técnica está en [asis
 - `qué vence esta semana` — solo lo que vence de aquí al domingo
 - `qué sigue de IM` — lo mismo, pero solo de esa empresa
 - `/pendientes IM` — todo lo abierto de IM, numerado
+- `correos · correos de Chelsea` — todos los correos pendientes de esa cuenta (o de todas), numerados por urgencia; luego "el 3 lo hago yo", "el 2 para Chelsea", "archiva el 5". La línea se tacha sola cuando se resuelve
 - `¿qué cerré ayer?` — pregunta libre: te contesta con tus tareas y notas (también "? qué tengo hoy")
 - `mis alarmas` — tus alarmas pendientes, numeradas
 - `pagos de IM` — los pagos recurrentes de esa empresa; "qué pagos hay esta semana" filtra
@@ -48,6 +49,7 @@ Es lo mismo que manda el bot con `/ayuda todo`. La guía técnica está en [asis
 
 ## 🧾 Varias de una vez
 
+- `1 listo · 3 terminado · 2, 5 hechas` — cierra esos números de la última lista que te mandé (la de las 8, el cierre, "qué sigue", una pedida o la de correos), sin pasar por el modelo
 - `1 terminado / 9 cancelar no se va hacer / 11 se llama URo, pasar para mañana / 12 pasar para mañana` — te muestra el plan numerado y esperas [✅ Hacer todo] o [✏️ No, corrijo]; nada se ejecuta antes
 - `el 3 ya está y pasa el 4 al lunes` — dos órdenes en una frase, separadas por "y", comas o barras
 - `alarma mañana 3pm revisar pagos y agrégala como tarea` — una alarma y una tarea a la vez
@@ -57,7 +59,7 @@ Es lo mismo que manda el bot con `/ayuda todo`. La guía técnica está en [asis
 - `olvida lo anterior` — limpia la conversación y empieza de cero
 - `mañana los correos de Chelsea, el miércoles armar el equipo de marketing y el jueves pasar $500 a WSH` — tu semana en un mensaje: la arma por día, sin duplicar lo que ya existía, y te la muestra para que digas "así queda"
 - `quita el marketing repetido · déjala donde estaba · la de marketing a las 10 · olvídalo` — corrige el plan antes de aprobarlo: te muestra solo lo que cambia y vuelve a preguntar; nunca borra ni completa una tarea por una corrección
-- `el correo de Andrew lo hago yo · el 15 para Chelsea · archiva los de marketing de hoy` — decide correos sin botones: lo hago yo / tarea crean la tarea con el Ref del correo; archivar lo saca del inbox de Gmail; varios a la vez pasan por el plan
+- `el correo de Andrew lo hago yo · el 15 para Chelsea · archiva los de marketing de hoy` — decide correos sin botones: lo hago yo / tarea crean la tarea con el Ref del correo; archivar lo saca del inbox de Gmail; varios a la vez pasan por el plan. Un correo respondido o pasado a Chelsea conserva [Lo hago yo] 48 h en su alerta
 - `me da flojera armar el equipo de marketing` — la parte en 3-5 pasos (subtareas) y te dice solo el primero; "siguiente paso" avanza
 
 ## ℹ️ Otros

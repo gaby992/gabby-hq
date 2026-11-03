@@ -92,6 +92,8 @@ export type Parsed =
   | { kind: 'que_sigue'; opts: QueSigueOpts }
   /** Fase 4c: the 8:00 / 6:00 pm list, on demand; fase 4d: 'pendientes' + empresa = one company's full list. */
   | { kind: 'lista'; tipo: ListaTipo; empresa?: CompanyRef | null }
+  /** Ajuste 6-2: "correos" / "correos de Chelsea" → every pending mail of that account (null = all), numbered. */
+  | { kind: 'correos'; cuenta: string | null }
   /** Fase 5-B: "pon en calendar la de TOTT" → the open task whose title contains `termino`. */
   | { kind: 'calendar'; termino: string }
   /** Fase 5-C: recurring payments — the bot only LISTS them (they are managed in /settings). */
@@ -461,6 +463,18 @@ function parseLista(text: string, companies: CompanyRef[]): { tipo: ListaTipo; e
 // A voice note that DICTATES the fields as a comma-separated list:
 // "Agregar un nuevo task, whatsapp, chelito, due date, mañana, compañía".
 // The field words are not the title; what is left between them is.
+/** "correos", "mis correos", "correos de Chelsea", "lista de correos", "¿qué correos tengo pendientes?" */
+function parseCorreos(text: string): Parsed | null {
+  const n = sinAcentos(text.trim().replace(/^[¿?¡!\s]+|[?!.\s]+$/g, '')).toLowerCase()
+  const m = n.match(/^\/?(?:mis\s+|los\s+|(?:la\s+)?lista\s+de\s+(?:los\s+)?|dame\s+(?:los\s+|la\s+lista\s+de\s+)?|ver\s+|mandame\s+(?:los\s+)?)?correos(?:\s+pendientes)?(?:\s+(?:de|del|de\s+la\s+cuenta(?:\s+de)?)\s+(.+))?$/)
+  if (m) return { kind: 'correos', cuenta: m[1] ? tidy(m[1]) : null }
+  if (/^(?:que|cuales)\s+correos\s+(?:tengo|hay)(?:\s+pendientes)?(?:\s+(?:de|del)\s+(.+))?$/.test(n)) {
+    const de = n.match(/\s(?:de|del)\s+(.+)$/)
+    return { kind: 'correos', cuenta: de ? tidy(de[1]) : null }
+  }
+  return null
+}
+
 const CAMPO_RE = /^(?:agregar?|agrega|añadir?|crear?|nuevo|nueva|un|una|task|tarea|tareas|titulo|título|due|date|fecha|vence|para|compañ[ií]a|company|empresa|prioridad|priority|urgencia)$/i
 export function parseDictado(text: string, companies: CompanyRef[], today: string): TareaParsed | null {
   const partes = text.split(/\s*,\s*/).map((x) => x.trim()).filter(Boolean)
@@ -505,6 +519,8 @@ export function parseMensaje(raw: string, companies: CompanyRef[], today: string
   if (/^(?:organizame|organiza(?:me)?\s+(?:mis\s+)?(?:pendientes|tareas|dia)|ayudame\s+con\s+(?:mis\s+)?(?:pendientes|tareas)|no\s+se\s+por\s+donde\s+empezar|estoy\s+abrumad[ao]|que\s+hago|ponme\s+en\s+orden|ordename)$/.test(n0)) return { kind: 'organizar' }
   const lista = parseLista(text, companies)
   if (lista) return { kind: 'lista', tipo: lista.tipo, empresa: lista.empresa ?? null }
+  const correos = parseCorreos(text)
+  if (correos) return correos
   const pagos = parsePagos(text, companies)
   if (pagos) return pagos
   const calCmd = text.match(/^(?:pon|ponme|agrega|agr[ée]game|mete|m[ée]teme)\s+(?:en|al)\s+(?:el\s+)?(?:google\s+)?(?:calendar|calendario|agenda)\s+(?:la\s+(?:tarea\s+)?(?:de|del)\s+|la\s+|el\s+)?(.+)$/i)
@@ -529,8 +545,12 @@ export function parseMensaje(raw: string, companies: CompanyRef[], today: string
   if (/^(?:mis\s+)?alarmas\s*[.!?]?$/i.test(text)) return { kind: 'alarmas' }
   const quitar = text.match(/^(?:quita|quitar|borra|borrar|elimina|cancela)\s+(?:la\s+)?alarma\s+([\s\S]+)$/i)
   if (quitar) return { kind: 'quitar_alarma', arg: tidy(quitar[1]) }
+  // Ajuste 6-7: "1 listo", "3 terminado", "2, 5 hechas", "el 4 listo" — numbers of the last list, no model needed.
+  const nListo = text.match(/^(?:(?:el|la|los|las)\s+)?(\d+(?:[\s,;]+\d+)*)\s+(?:listo|lista|listos|listas|terminad[oa]s?|hech[oa]s?|done|completad[oa]s?|cerrad[oa]s?|ya\s+est[aá]n?)\s*[.!]*$/i)
+  if (nListo) return { kind: 'accion', accion: 'listo', arg: tidy(nListo[1]) }
   const accion = text.match(/^(pasa|listo|borra)\b\s*([\s\S]*)$/i)
-  if (accion) return { kind: 'accion', accion: accion[1].toLowerCase() as Accion, arg: tidy(accion[2]) }
+  // "listo el 3" → "3" (an article before a number is noise, not a title word).
+  if (accion) return { kind: 'accion', accion: accion[1].toLowerCase() as Accion, arg: tidy(accion[2]).replace(/^(?:el|la|los|las)\s+(?=\d)/i, '') }
 
   // "calendar: …" / "… y ponla en calendar" comes off first, whatever the form.
   const cal = extraerCalendar(text)
@@ -581,6 +601,7 @@ export function ayuda(modelo: string): string {
     '🧭 ORGANÍZAME · "no sé por dónde empezar" · "estoy abrumada" → repasamos tus pendientes uno por uno con botones (Hoy · Mañana · Esta semana · Cancelar · Delegar · Siguiente); "para" sale',
     '🪜 "me da flojera «X»" · "divide X" → la parto en 3-5 pasos (subtareas) y te digo el primero · "siguiente paso" · 📆 Cuéntame la semana ("hoy…, mañana…, el miércoles…") y la armo por día sin duplicar',
     '🎯 ¿QUÉ SIGUE? · "qué hago primero" · "solo urgentes" · "qué vence esta semana" · "qué sigue de IM" → una tarea para ahora, 3 después, 3 por vencer; luego "listo 1" / "pasa el segundo"',
+    '📧 CORREOS · "correos" · "correos de Chelsea" → todos los pendientes numerados; luego "el 3 lo hago yo" · "el 2 para Chelsea" · "archiva el 5"',
     '📋 /hoy · "dame la lista" · "todo lo pendiente" → la lista completa de las 8:00, ahora · "cierre" → la de las 6:00 pm · /pendientes IM → solo esa empresa',
     '💳 PAGOS: "pagos de IM" · "qué pagos hay esta semana" (se administran en /settings → Pagos recurrentes)',
     '📥 AGREGAR',

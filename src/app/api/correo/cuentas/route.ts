@@ -4,6 +4,7 @@ import { cargarCuentas, crearCuenta, guardarCuenta, normalizarLista, normalizarR
 import { fusionarImport, importarDeN8n } from '@/lib/correo/importar'
 import { createServerClient } from '@/lib/supabase-server'
 import type { ConexionGoogle } from '@/types'
+import { mensajeError } from '@/lib/errores'
 
 // Settings → Correo (fase 6-B): one card per account. GET lists accounts
 // (with the connections that have none yet); PUT saves one; POST creates
@@ -23,7 +24,7 @@ export async function GET() {
     const sinCuenta = con.filter((c) => !cuentas.some((x) => x.conexion_id === c.id))
     return NextResponse.json({ cuentas, sin_cuenta: sinCuenta })
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 })
+    return NextResponse.json({ error: mensajeError(err) }, { status: 500 })
   }
 }
 
@@ -47,7 +48,7 @@ export async function PUT(request: Request) {
     await guardarCuenta(b.id, cambios)
     return NextResponse.json({ ok: true })
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 })
+    return NextResponse.json({ error: mensajeError(err) }, { status: 500 })
   }
 }
 
@@ -79,6 +80,6 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({ error: 'conexion_id o (id + json) requerido' }, { status: 400 })
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 })
+    return NextResponse.json({ error: mensajeError(err) }, { status: 500 })
   }
 }

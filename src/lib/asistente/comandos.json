@@ -13,6 +13,7 @@
         { "ejemplo": "qué vence esta semana", "que": "solo lo que vence de aquí al domingo" },
         { "ejemplo": "qué sigue de IM", "que": "lo mismo, pero solo de esa empresa" },
         { "ejemplo": "/pendientes IM", "que": "todo lo abierto de IM, numerado" },
+        { "ejemplo": "correos · correos de Chelsea", "que": "todos los correos pendientes de esa cuenta (o de todas), numerados por urgencia; luego \"el 3 lo hago yo\", \"el 2 para Chelsea\", \"archiva el 5\". La línea se tacha sola cuando se resuelve" },
         { "ejemplo": "¿qué cerré ayer?", "que": "pregunta libre: te contesta con tus tareas y notas (también \"? qué tengo hoy\")" },
         { "ejemplo": "mis alarmas", "que": "tus alarmas pendientes, numeradas" },
         { "ejemplo": "pagos de IM", "que": "los pagos recurrentes de esa empresa; \"qué pagos hay esta semana\" filtra" }
@@ -58,6 +59,7 @@
       "emoji": "🧾",
       "titulo": "Varias de una vez",
       "lineas": [
+        { "ejemplo": "1 listo · 3 terminado · 2, 5 hechas", "que": "cierra esos números de la última lista que te mandé (la de las 8, el cierre, \"qué sigue\", una pedida o la de correos), sin pasar por el modelo" },
         { "ejemplo": "1 terminado / 9 cancelar no se va hacer / 11 se llama URo, pasar para mañana / 12 pasar para mañana", "que": "te muestra el plan numerado y esperas [✅ Hacer todo] o [✏️ No, corrijo]; nada se ejecuta antes" },
         { "ejemplo": "el 3 ya está y pasa el 4 al lunes", "que": "dos órdenes en una frase, separadas por \"y\", comas o barras" },
         { "ejemplo": "alarma mañana 3pm revisar pagos y agrégala como tarea", "que": "una alarma y una tarea a la vez" },
@@ -67,7 +69,7 @@
         { "ejemplo": "olvida lo anterior", "que": "limpia la conversación y empieza de cero" },
         { "ejemplo": "mañana los correos de Chelsea, el miércoles armar el equipo de marketing y el jueves pasar $500 a WSH", "que": "tu semana en un mensaje: la arma por día, sin duplicar lo que ya existía, y te la muestra para que digas \"así queda\"" },
         { "ejemplo": "quita el marketing repetido · déjala donde estaba · la de marketing a las 10 · olvídalo", "que": "corrige el plan antes de aprobarlo: te muestra solo lo que cambia y vuelve a preguntar; nunca borra ni completa una tarea por una corrección" },
-        { "ejemplo": "el correo de Andrew lo hago yo · el 15 para Chelsea · archiva los de marketing de hoy", "que": "decide correos sin botones: lo hago yo / tarea crean la tarea con el Ref del correo; archivar lo saca del inbox de Gmail; varios a la vez pasan por el plan" },
+        { "ejemplo": "el correo de Andrew lo hago yo · el 15 para Chelsea · archiva los de marketing de hoy", "que": "decide correos sin botones: lo hago yo / tarea crean la tarea con el Ref del correo; archivar lo saca del inbox de Gmail; varios a la vez pasan por el plan. Un correo respondido o pasado a Chelsea conserva [Lo hago yo] 48 h en su alerta" },
         { "ejemplo": "me da flojera armar el equipo de marketing", "que": "la parte en 3-5 pasos (subtareas) y te dice solo el primero; \"siguiente paso\" avanza" }
       ]
     },

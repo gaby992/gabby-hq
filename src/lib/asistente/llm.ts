@@ -8,6 +8,7 @@
 // (default gpt-4o-mini) and Telegram gets a once-a-day warning.
 
 import { OpenAIError, avisarOpenAI, clasificarErrorOpenAI } from './openai-avisos'
+import { redactar } from '@/lib/errores'
 
 /** 'compatible' = any OpenAI-compatible chat endpoint (fase 6: JEV for mail) at its own base URL + key. */
 export type LlmProvider = 'openai' | 'anthropic' | 'compatible'
@@ -34,7 +35,8 @@ export class LlmError extends Error {}
 export function llmConfig(): { provider: 'openai' | 'anthropic'; model: string; fallback: string } {
   const provider = (process.env.LLM_PROVIDER ?? 'openai').trim().toLowerCase()
   if (provider !== 'openai' && provider !== 'anthropic') {
-    throw new LlmError(`LLM_PROVIDER inválido: "${provider}" (usa openai o anthropic)`)
+    // Never echo the value: it may be a key pasted into the wrong variable.
+    throw new LlmError('LLM_PROVIDER inválido (usa openai o anthropic)')
   }
   const model = (process.env.LLM_MODEL ?? 'gpt-5-mini').trim()
   const fallback = (process.env.LLM_MODEL_FALLBACK ?? 'gpt-4o-mini').trim()
@@ -50,7 +52,8 @@ export function llmConfig(): { provider: 'openai' | 'anthropic'; model: string; 
 export function llmConfigCorreo(): LlmTarget {
   const provider = (process.env.LLM_PROVIDER_CORREO ?? process.env.LLM_PROVIDER ?? 'openai').trim().toLowerCase()
   if (provider !== 'openai' && provider !== 'anthropic' && provider !== 'compatible') {
-    throw new LlmError(`LLM_PROVIDER_CORREO inválido: "${provider}" (usa openai, anthropic o compatible)`)
+    // Never echo the value (ajuste 6-1: a key once ended up here and went out to Telegram).
+    throw new LlmError('LLM_PROVIDER_CORREO inválido (usa openai, anthropic o compatible)')
   }
   const model = (process.env.LLM_MODEL_CORREO ?? process.env.LLM_MODEL ?? 'gpt-5-mini').trim()
   return { provider, model, baseUrl: process.env.LLM_CORREO_BASE_URL?.trim() || undefined, apiKey: process.env.LLM_CORREO_API_KEY?.trim() || undefined }
@@ -132,7 +135,7 @@ async function openai(model: string, system: string, user: string, o: Opts, comp
   )
   const json = await res.json().catch(() => null)
   if (!res.ok) {
-    if (compatible) throw new LlmError(json?.error?.message ?? json?.message ?? `${base} HTTP ${res.status}`)
+    if (compatible) throw new LlmError(redactar(String(json?.error?.message ?? json?.message ?? `endpoint compatible HTTP ${res.status}`)))
     throw clasificarErrorOpenAI(res.status, json)
   }
   return {
@@ -164,7 +167,7 @@ async function anthropic(model: string, system: string, user: string, o: Opts) {
     o.timeoutMs
   )
   const json = await res.json().catch(() => null)
-  if (!res.ok) throw new LlmError(json?.error?.message ?? `Anthropic HTTP ${res.status}`)
+  if (!res.ok) throw new LlmError(redactar(String(json?.error?.message ?? `Anthropic HTTP ${res.status}`)))
   const text = Array.isArray(json?.content)
     ? json.content.filter((b: { type: string }) => b.type === 'text').map((b: { text: string }) => b.text).join('')
     : ''

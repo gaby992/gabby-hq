@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { isValidSession } from '@/lib/session'
 import { borrarEventoDeTarea, sincronizarTarea } from '@/lib/google/sync'
 import { createServerClient } from '@/lib/supabase-server'
+import { mensajeError } from '@/lib/errores'
 
 // Fase 5-D: the browser writes tasks straight into Supabase; after a write
 // it calls here so the task's Calendar event (if it has one) follows.
@@ -24,6 +25,6 @@ export async function POST(request: Request) {
     const r = await sincronizarTarea(taskId)
     return NextResponse.json({ ok: !r.aviso, estado: r.estado, aviso: r.aviso })
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 })
+    return NextResponse.json({ error: mensajeError(err) }, { status: 500 })
   }
 }

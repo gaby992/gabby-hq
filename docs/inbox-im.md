@@ -4,6 +4,9 @@
 > (`/correo`, Settings → Correo, `sql/2026-11-asistente-fase6-correo.sql`;
 > ver `asistente.md` § 6). Estas vistas y n8n siguen vivos solo hasta que lo
 > nuevo clasifique bien; después se apagan (asistente.md § 6b, paso 7).
+> Desde los ajustes 6b (3 nov 2026) **`/chelsea` y las listas del bot ya
+> leen la tabla `correos`**, no `im_triaje`; solo `/inbox` y `/rules` siguen
+> aquí.
 
 Adds three views to GabbyHQ for operating the n8n email-triage system:
 `/inbox` (triage feed), `/chelsea` (Chelsea's daily list), `/rules` (rules engine).

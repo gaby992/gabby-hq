@@ -9,6 +9,7 @@
 import { createServerClient } from '@/lib/supabase-server'
 import { cancunDayBounds, cancunYmd } from './cancun'
 import { allowedChatIds, sendTelegram } from './telegram'
+import { redactar } from '@/lib/errores'
 
 export type OpenAIErrorKind = 'model_not_found' | 'auth' | 'quota' | 'other'
 
@@ -25,7 +26,7 @@ export class OpenAIError extends Error {
 /** Turns an OpenAI error response into something the callers can act on. */
 export function clasificarErrorOpenAI(status: number, json: unknown): OpenAIError {
   const err = (json as { error?: { message?: string; code?: string; type?: string } } | null)?.error
-  const message = err?.message ?? `OpenAI HTTP ${status}`
+  const message = redactar(err?.message ?? `OpenAI HTTP ${status}`)
   const code = `${err?.code ?? ''} ${err?.type ?? ''}`.toLowerCase()
 
   if (status === 404 || code.includes('model_not_found') || /model .*(not found|does not exist|has been deprecated)/i.test(message)) {

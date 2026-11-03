@@ -159,6 +159,10 @@ export interface Correo {
   telegram_chat_id: number | null
   telegram_message_id: number | null
   task_id: string | null
+  /** Ajuste 6-6: sender on the VIP list; "respondido" stays 48 h in the lists. */
+  vip: boolean
+  /** Ajuste 6-6: when the autoresolver saw the reply (kept even if Gabby later makes it a task). */
+  respondido_en: string | null
   created_at: string
 }
 

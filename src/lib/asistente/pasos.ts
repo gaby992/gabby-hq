@@ -8,6 +8,7 @@ import type { Subtask } from '@/types'
 import { COLS_SIN_NOTAS, type TaskRow } from './acciones'
 import { cargarConfig, personaPrompt } from './config'
 import { llmConfig, preguntarLlm } from './llm'
+import { motivoParaUsuario } from '@/lib/errores'
 
 const MAX_PASOS = 5
 const MIN_PASOS = 3
@@ -55,7 +56,7 @@ export async function dividirTarea(taskId: string): Promise<string> {
   try {
     pasos = await proponerPasos(t.text, t.company?.name ?? null)
   } catch (err) {
-    return `Se me trabó dividiendo «${t.text}» (${err instanceof Error ? err.message : String(err)}). Dime tú el primer paso y lo apunto: "nota en ${t.text.split(' ')[0]}: primer paso …".`
+    return `Se me trabó dividiendo «${t.text}» (${motivoParaUsuario(err)}). Dime tú el primer paso y lo apunto: "nota en ${t.text.split(' ')[0]}: primer paso …".`
   }
   const db = createServerClient()
   for (const texto of pasos) {

@@ -28,6 +28,10 @@ import { dividirTarea, siguientePaso } from '@/lib/asistente/pasos'
 import { aplicarCorreccion, fusionarCorreccion, leerCorreccion, renderCorreccion, type Resultado } from '@/lib/asistente/correcciones'
 import { accionDeBoton } from '@/lib/correo/alertas'
 import { decidirCorreo } from '@/lib/correo/decisiones'
+import { cuentaPorTexto, enviarListaCorreos } from '@/lib/correo/listas'
+import { cargarCuentas, cuentaPorId } from '@/lib/correo/cuentas'
+import { ultimaAlarma } from '@/lib/asistente/registro-listas'
+import { mensajeError, motivoParaUsuario } from '@/lib/errores'
 import { tareasRecientes } from '@/lib/asistente/conversacion'
 import {
   HORAS_BOTONES,
@@ -357,6 +361,18 @@ async function handleText(chatId: number, text: string, prefix: string | null) {
       if (prefix) await reply(chatId, prefix)
       await enviarLista(chatId, parsed.tipo, parsed.empresa ?? null)
       return
+    case 'correos': {
+      // Ajuste 6-2: the live mail list of one account (or all), numbered and recorded (tipo 'correos').
+      if (prefix) await reply(chatId, prefix)
+      const cuenta = parsed.cuenta ? await cuentaPorTexto(parsed.cuenta) : null
+      if (parsed.cuenta && !cuenta) {
+        const nombres = (await cargarCuentas().catch(() => [])).map((c) => `${c.nombre}${c.duena ? ` (${c.duena})` : ''}`)
+        await reply(chatId, `No tengo una cuenta de correo «${parsed.cuenta}».${nombres.length ? ` Las que hay: ${nombres.join(', ')}.` : ''} Di solo "correos" para ver todas.`)
+        return
+      }
+      await enviarListaCorreos(chatId, cuenta)
+      return
+    }
     case 'que_sigue':
       // Fase 4b: ordered in code, same HTML style as the 8:00 list, numbered like an alarm.
       if (prefix) await reply(chatId, prefix)
@@ -443,10 +459,10 @@ async function ponerPasos(chatId: number, termino: string, prefix: string | null
   await reply(chatId, joinLines(prefix, await dividirTarea(hits[0].id)))
 }
 
-/** The task id behind "listo 3": number 3 of the last numbered list. */
+/** The task id behind "listo 3": number 3 of the last numbered list (of any type). */
 async function idDeNumero(n: string): Promise<string | null> {
-  const { data } = await dbCliente().from('bot_alarmas').select('items').order('enviada_en', { ascending: false }).limit(1).maybeSingle<{ items: { n: number; task_id: string }[] }>()
-  return data?.items?.find((i) => i.n === Number(n))?.task_id ?? null
+  const alarma = await ultimaAlarma().catch(() => null)
+  return alarma?.items.find((i) => i.n === Number(n))?.task_id ?? null
 }
 
 // ── Fase 4: free text → interpreter → plan ───────────────────────────────
@@ -691,12 +707,25 @@ async function handleCallback(cq: CallbackQuery) {
     const accion = accionDeBoton(mm[2])
     if (!accion) return
     try {
-      await removeInlineKeyboard(chatId, messageId)
-      const d = await decidirCorreo(mm[1], accion)
+      const d = await decidirCorreo(mm[1], accion, { desdeBoton: true })
+      // The alert itself is rewritten by decidirCorreo; a tap elsewhere (old message) just loses its buttons.
+      if (Number(d.correo.telegram_message_id) !== messageId) await removeInlineKeyboard(chatId, messageId)
       await reply(chatId, d.texto)
     } catch (err) {
-      console.error('[bot] callback correo error:', err)
-      await reply(chatId, `⚠️ No pude: ${err instanceof Error ? err.message : String(err)}`)
+      console.error(`[bot] callback correo error: ${mensajeError(err)}`)
+      await reply(chatId, `⚠️ No pude: ${motivoParaUsuario(err)}`)
+    }
+    return
+  }
+
+  // ── Ajuste 6-2: [📋 Correos de <cuenta>] under an alert → the account's whole pending list ──
+  const ml = data.match(/^ml:([0-9a-f-]{36})$/)
+  if (ml) {
+    try {
+      await enviarListaCorreos(chatId, await cuentaPorId(ml[1]))
+    } catch (err) {
+      console.error(`[bot] callback lista correos: ${mensajeError(err)}`)
+      await reply(chatId, ERROR_GENERICO)
     }
     return
   }

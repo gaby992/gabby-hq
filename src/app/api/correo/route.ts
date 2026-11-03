@@ -3,6 +3,7 @@ import { isValidSession } from '@/lib/session'
 import { createServerClient } from '@/lib/supabase-server'
 import { decidirCorreo } from '@/lib/correo/decisiones'
 import { CORREO_URGENCIA_ORDER, type Correo, type CorreoAccion, type CorreoUrgencia } from '@/types'
+import { mensajeError } from '@/lib/errores'
 
 // Fase 6-G: the /correo feed and its four actions. Session-guarded (the
 // middleware lets /api/* through). The body of a mail never leaves here
@@ -65,7 +66,7 @@ export async function PATCH(request: Request) {
       const d = await decidirCorreo(id, accion)
       out.push({ id, texto: d.texto })
     } catch (err) {
-      out.push({ id, error: err instanceof Error ? err.message : String(err) })
+      out.push({ id, error: mensajeError(err) })
     }
   }
   return NextResponse.json(out)

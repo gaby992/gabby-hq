@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { isValidSession } from '@/lib/session'
 import { conectarConCodigo } from '@/lib/google/oauth'
+import { mensajeError } from '@/lib/errores'
 
 // Google sends the browser back here with ?code=…&state=…. We trade the code
 // for tokens, store the refresh token encrypted, and go back to Settings.
@@ -30,7 +31,7 @@ export async function GET(request: Request) {
     console.log(`[google] cuenta conectada: ${email}`)
     return volver(request, `conectado=${encodeURIComponent(email)}`)
   } catch (err) {
-    const motivo = err instanceof Error ? err.message : String(err)
+    const motivo = mensajeError(err)
     console.error(`[google] callback: ${motivo}`)
     return volver(request, `error=${encodeURIComponent(motivo)}`)
   }

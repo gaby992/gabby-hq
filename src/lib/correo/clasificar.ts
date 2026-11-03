@@ -14,6 +14,7 @@
 import type { CorreoEstado, CorreoTipo, CorreoUrgencia, CuentaCorreo } from '@/types'
 import { llamarLlm, llmConfigCorreo, nombreModelo, type LlmTarget } from '@/lib/asistente/llm'
 import { coincideLista, reglaQueAplica } from './cuentas'
+import { mensajeError } from '@/lib/errores'
 
 export interface EntradaCorreo {
   de_nombre: string | null
@@ -40,6 +41,8 @@ export interface Resultado {
   estado: CorreoEstado
   /** VIP or a rule with `alerta`: alert whatever the urgency says. */
   alertaForzada: boolean
+  /** Ajuste 6-6: the sender is on the VIP list (or a VIP rule) — stored on the row, the lists keep its "respondido" 48 h. */
+  vip: boolean
   /** Which model answered, or null when no model was needed. */
   modelo: string | null
   tokensIn: number
@@ -62,6 +65,7 @@ interface Regla {
   sinLlm: boolean
   alerta: boolean
   razon: string
+  vip?: boolean
 }
 
 /** What the lists and rules decide before any model. Null → nothing deterministic. */
@@ -69,12 +73,12 @@ export function clasificarPorReglas(c: EntradaCorreo, cuenta: Pick<CuentaCorreo,
   const ruido = coincideLista(cuenta.ruido, c.de_email)
   if (ruido) return { fija: { urgencia: 'baja', tipo: 'notificacion', categoria: 'informativo', confianza: 1 }, estado: 'registrado', sinLlm: true, alerta: false, razon: `ruido: ${ruido}` }
   const vip = coincideLista(cuenta.vip, c.de_email)
-  if (vip) return { fija: { urgencia: 'alta', confianza: 1 }, sinLlm: false, alerta: true, razon: `VIP: ${vip}` }
+  if (vip) return { fija: { urgencia: 'alta', confianza: 1 }, sinLlm: false, alerta: true, vip: true, razon: `VIP: ${vip}` }
   const regla = reglaQueAplica(cuenta.reglas, { de_email: c.de_email, asunto: c.asunto })
   if (regla) {
     switch (regla.accion) {
       case 'vip':
-        return { fija: { urgencia: 'alta', confianza: 1 }, sinLlm: false, alerta: true, razon: `regla VIP: ${regla.match}` }
+        return { fija: { urgencia: 'alta', confianza: 1 }, sinLlm: false, alerta: true, vip: true, razon: `regla VIP: ${regla.match}` }
       case 'ruido':
         return { fija: { urgencia: 'baja', tipo: 'notificacion', categoria: 'informativo', confianza: 1 }, estado: 'registrado', sinLlm: true, alerta: false, razon: `regla ruido: ${regla.match}` }
       case 'para_chelsea':
@@ -176,25 +180,40 @@ export async function clasificar(c: EntradaCorreo, cuenta: Pick<CuentaCorreo, 'v
   const asunto = c.asunto ?? '(sin asunto)'
   const regla = clasificarPorReglas(c, cuenta)
   const base: Clasificacion = { urgencia: 'media', tipo: 'fyi', categoria: 'informativo', confianza: 0, resumen: asunto, razon: '' }
+  const vip = regla?.vip === true
   if (regla?.sinLlm) {
-    return { clas: { ...base, ...regla.fija, razon: regla.razon }, estado: regla.estado ?? 'nuevo', alertaForzada: regla.alerta, modelo: null, tokensIn: 0, tokensOut: 0, ms: 0 }
+    return { clas: { ...base, ...regla.fija, razon: regla.razon }, estado: regla.estado ?? 'nuevo', alertaForzada: regla.alerta, vip, modelo: null, tokensIn: 0, tokensOut: 0, ms: 0 }
   }
   try {
     const llm = await clasificarConLlm(c, target)
     const { modelo, tokensIn, tokensOut, ms, ...clas } = llm
     const final: Clasificacion = regla ? { ...clas, ...regla.fija, razon: `${regla.razon} · ${clas.razon}` } : clas
-    return { clas: final, estado: regla?.estado ?? 'nuevo', alertaForzada: regla?.alerta ?? false, modelo, tokensIn, tokensOut, ms }
+    return { clas: final, estado: regla?.estado ?? 'nuevo', alertaForzada: regla?.alerta ?? false, vip, modelo, tokensIn, tokensOut, ms }
   } catch (err) {
-    const motivo = err instanceof Error ? err.message : String(err)
-    console.error(`[correo] clasificar falló (${asunto.slice(0, 40)}): ${motivo}`)
-    const final: Clasificacion = { ...base, ...(regla?.fija ?? {}), razon: `${regla ? `${regla.razon} · ` : ''}modelo falló: ${motivo.slice(0, 120)}` }
-    return { clas: final, estado: regla?.estado ?? 'nuevo', alertaForzada: regla?.alerta ?? false, modelo: null, tokensIn: 0, tokensOut: 0, ms: 0 }
+    // Ajuste 6-1: the row (and the alert built from it) gets a generic
+    // reason by KIND, never the provider's text — a key once travelled that way.
+    console.error(`[correo] clasificar falló (${asunto.slice(0, 40)}): ${mensajeError(err)}`)
+    const final: Clasificacion = { ...base, ...(regla?.fija ?? {}), razon: `${regla ? `${regla.razon} · ` : ''}⚠️ clasificador no disponible (${tipoDeFallo(err)})` }
+    return { clas: final, estado: regla?.estado ?? 'nuevo', alertaForzada: regla?.alerta ?? false, vip, modelo: null, tokensIn: 0, tokensOut: 0, ms: 0 }
   }
 }
 
-/** Fase 6-F: alert only for these. Within the account's hours; otherwise the 8:00 list carries them. */
+/** "config" (env vars), "timeout", "respuesta" (no JSON) or "proveedor" (HTTP error) — nothing else leaves the server. */
+export function tipoDeFallo(err: unknown): string {
+  const m = err instanceof Error ? err.message : String(err)
+  if (/no está definida|inválid[oa]/i.test(m)) return 'config'
+  if (/timeout/i.test(m)) return 'timeout'
+  if (/JSON/i.test(m)) return 'respuesta'
+  return 'proveedor'
+}
+
+/**
+ * Fase 6-F / ajuste 6-4: an individual alert ONLY for VIP (or a rule that
+ * asks for it) and urgencia alta. Everything else waits in the lists
+ * ("correos", the 8:00 and the 6:00 pm). Within the account's hours.
+ */
 export function mereceAlerta(r: Pick<Resultado, 'clas' | 'alertaForzada' | 'estado'>): boolean {
   if (r.estado === 'registrado' || r.estado === 'archivado') return false
   if (r.alertaForzada) return true
-  return r.clas.urgencia === 'alta' || r.clas.tipo === 'necesita_respuesta' || r.clas.tipo === 'pedido_de_tarea'
+  return r.clas.urgencia === 'alta'
 }

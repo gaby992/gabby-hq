@@ -3,6 +3,7 @@ import { isValidSession } from '@/lib/session'
 import { guardarVeredicto } from '@/lib/correo/evaluar'
 import { TIPOS, URGENCIAS } from '@/lib/correo/clasificar'
 import type { CorreoTipo, CorreoUrgencia } from '@/types'
+import { mensajeError } from '@/lib/errores'
 
 // Fase 6-E: Gabby's verdict on one mail — what it should have been.
 export const dynamic = 'force-dynamic'
@@ -19,6 +20,6 @@ export async function POST(request: Request) {
     await guardarVeredicto(id, { urgencia, tipo })
     return NextResponse.json({ ok: true })
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 })
+    return NextResponse.json({ error: mensajeError(err) }, { status: 500 })
   }
 }

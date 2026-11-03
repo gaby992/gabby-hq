@@ -27,6 +27,7 @@ import { textoListaPagos } from './pagos'
 import { dividirTarea, siguientePaso } from './pasos'
 import { buscarParecida, claveComun, emparejarParecidas, nombradaEn, similitud } from './similitud'
 import { SIMBOLO } from './alarmas'
+import { mensajeError } from '@/lib/errores'
 
 export interface TareaRef {
   id: string
@@ -80,7 +81,13 @@ function resolverRef(ref: string, ctx: ContextoInterprete, anterior: TareaRef | 
   const key = num ? `#${num[1]}` : r.match(/^t\d+$/i) ? r.toLowerCase() : null
   if (key) {
     const t = ctx.porRef.get(key)
-    return t ? { tarea: lite(t) } : { error: `no encontré ${key.startsWith('#') ? `el ${key.slice(1)} en la última alarma` : `la tarea ${key}`}` }
+    if (t) return { tarea: lite(t) }
+    // Ajuste 6-0: a number of the list that is a mail is never a task ("15 listo" → how to decide it).
+    if (key.startsWith('#') && ctx.porRefCorreo.has(key)) {
+      const n = key.slice(1)
+      return { error: `el ${n} es un correo: dime "el ${n} lo hago yo", "el ${n} para Chelsea" o "archiva el ${n}"` }
+    }
+    return { error: `no encontré ${key.startsWith('#') ? `el ${key.slice(1)} en la última lista` : `la tarea ${key}`}` }
   }
   const hits = buscarEnAbiertas(ctx.abiertas, r)
   if (hits.length === 1) return { tarea: lite(hits[0]) }
@@ -638,7 +645,7 @@ export async function ejecutarUna(chatId: number, a: AccionResuelta): Promise<st
         try {
           out.push((await decidirCorreo(c.id, a.accion)).texto)
         } catch (err) {
-          out.push(`⚠️ «${corto(c.asunto ?? '', 40)}»: ${err instanceof Error ? err.message : String(err)}`)
+          out.push(`⚠️ «${corto(c.asunto ?? '', 40)}»: ${mensajeError(err)}`)
         }
       }
       return out.join('\n') || '📧 ningún correo'
@@ -655,7 +662,7 @@ export async function ejecutarPlan(chatId: number, acciones: AccionResuelta[]): 
     try {
       lines.push(await ejecutarUna(chatId, a))
     } catch (err) {
-      const motivo = err instanceof Error ? err.message : String(err)
+      const motivo = mensajeError(err)
       console.error(`[plan] ${a.tipo} falló: ${motivo}`)
       lines.push(`⚠️ ${frase(a, cancunYmd(), true)}: falló (${motivo})`)
     }

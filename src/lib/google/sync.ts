@@ -9,6 +9,7 @@ import type { Priority } from '@/types'
 import { formatFechaHoraEs, formatVenceEs, cancunInstant } from '@/lib/asistente/cancun'
 import { actualizarEvento, borrarEvento, crearEvento, type TareaEvento } from './calendar'
 import { googleConfigurado } from './oauth'
+import { mensajeError } from '@/lib/errores'
 
 interface Row {
   id: string
@@ -37,7 +38,7 @@ const SIN_CAMBIO: ResultadoSync = { estado: 'sin_cambio' }
 export const COLS_SYNC = 'id, text, priority, importante, due_date, due_time, done, gcal_event_id, company:companies(name)'
 
 function errorMsg(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
+  return mensajeError(err)
 }
 
 function aviso(err: unknown): ResultadoSync {

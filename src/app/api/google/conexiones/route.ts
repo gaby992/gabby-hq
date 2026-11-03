@@ -3,6 +3,7 @@ import { isValidSession } from '@/lib/session'
 import { createServerClient } from '@/lib/supabase-server'
 import { cambiarRoles, desconectar, googleConfigurado } from '@/lib/google/oauth'
 import type { ConexionGoogle } from '@/types'
+import { mensajeError } from '@/lib/errores'
 
 // What the Settings card shows: never the token, only who and when.
 export const dynamic = 'force-dynamic'
@@ -26,7 +27,7 @@ export async function DELETE(request: Request) {
     await desconectar(id)
     return NextResponse.json({ ok: true })
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 })
+    return NextResponse.json({ error: mensajeError(err) }, { status: 500 })
   }
 }
 
@@ -45,6 +46,6 @@ export async function PATCH(request: Request) {
     await cambiarRoles(b.id, roles)
     return NextResponse.json({ ok: true })
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 })
+    return NextResponse.json({ error: mensajeError(err) }, { status: 500 })
   }
 }

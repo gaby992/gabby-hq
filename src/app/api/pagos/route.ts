@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { isValidSession } from '@/lib/session'
 import { cambiarPago, crearPago, listarPagos, quitarPago, sincronizarPago } from '@/lib/asistente/pagos'
+import { mensajeError } from '@/lib/errores'
 
 // Settings → Pagos recurrentes (fase 5-C). The browser goes through here,
 // not straight to Supabase, so Calendar stays in step with every change.
@@ -8,7 +9,7 @@ export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 function fallo(err: unknown) {
-  return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 })
+  return NextResponse.json({ error: mensajeError(err) }, { status: 500 })
 }
 
 export async function GET(request: Request) {

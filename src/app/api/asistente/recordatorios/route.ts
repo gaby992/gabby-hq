@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { isCronAuthorized } from '@/lib/asistente/cron-auth'
 import { enviarRecordatoriosVencidos } from '@/lib/asistente/recordatorios'
+import { mensajeError } from '@/lib/errores'
 
 // Vercel Cron → GET here every 5 minutes (see vercel.json): sends Gabby's own
 // alarms whose time has come. Same CRON_SECRET as the two daily alarms. No
@@ -18,7 +19,7 @@ export async function GET(request: Request) {
     if (r.vencidos > 0) console.log(`[recordatorios] vencidos ${r.vencidos} · enviados ${r.enviados} · fallidos ${r.fallidos}`)
     return NextResponse.json({ ok: r.fallidos === 0, ...r }, { status: r.fallidos === 0 ? 200 : 500 })
   } catch (err) {
-    const error = err instanceof Error ? err.message : String(err)
+    const error = mensajeError(err)
     console.error(`[recordatorios] error: ${error}`)
     return NextResponse.json({ ok: false, error }, { status: 500 })
   }
