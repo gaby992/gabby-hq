@@ -14,8 +14,9 @@ import { enviarLista } from './alarmas'
 import { addDays, cancunHm, cancunYmd, formatFechaHoraEs, formatHoraEs, formatVenceEs } from './cancun'
 import { buscarEnAbiertas, type AccionLlm, type ContextoInterprete, type FiltroCorreo, type TareaLite } from './interprete'
 import { decidirCorreo } from '@/lib/correo/decisiones'
+import { aprenderNivel } from '@/lib/correo/niveles'
 import { quienCorto, type CorreoLite } from '@/lib/correo/pendientes'
-import { CORREO_ACCION_LABELS, CORREO_TIPO_LABELS } from '@/types'
+import { CORREO_ACCION_LABELS, CORREO_TIPO_LABELS, NIVEL_REMITENTE_EMOJI, NIVEL_REMITENTE_LABELS } from '@/types'
 import { normalizar } from './acciones'
 import { ejecutarNota } from './notas-bot'
 import { responderPregunta } from './pregunta'
@@ -271,7 +272,7 @@ function frase(a: AccionResuelta, today: string, conTarea: boolean): string {
     case 'dividir': return `Dividir en pasos${tt}`
     case 'siguiente_paso': return `Siguiente paso${tt}`
     case 'correo': {
-      const que = CORREO_ACCION_LABELS[a.accion]
+      const que = [a.accion ? CORREO_ACCION_LABELS[a.accion] : null, a.nivel ? `${NIVEL_REMITENTE_EMOJI[a.nivel]} remitente → ${NIVEL_REMITENTE_LABELS[a.nivel]}` : null].filter(Boolean).join(' + ')
       const cs = a.correos ?? []
       if (cs.length === 1) return `${que}: «${corto(cs[0].asunto ?? '(sin asunto)', 40)}» de ${quienCorto(cs[0])}`
       const filtro = a.filtro ? [a.filtro.tipo ? CORREO_TIPO_LABELS[a.filtro.tipo].toLowerCase() : null, a.filtro.urgencia, a.filtro.de ? `de ${a.filtro.de}` : null, a.filtro.hoy ? 'de hoy' : null].filter(Boolean).join(' ') : ''
@@ -641,9 +642,16 @@ export async function ejecutarUna(chatId: number, a: AccionResuelta): Promise<st
       return textoListaPagos(a.empresa_ref?.id ?? null, a.empresa_ref?.name.trim() ?? null, { semana: a.semana === true })
     case 'correo': {
       const out: string[] = []
+      const aprendidas = new Set<string>()
       for (const c of a.correos ?? []) {
         try {
-          out.push((await decidirCorreo(c.id, a.accion)).texto)
+          if (a.accion) out.push((await decidirCorreo(c.id, a.accion)).texto)
+          if (a.nivel) {
+            // Ajuste 6c: the sender goes on the list once, even if several of its mails were named.
+            const r = await aprenderNivel(c.id, a.nivel)
+            if (!r.clave || !aprendidas.has(r.clave)) out.push(r.texto)
+            if (r.clave) aprendidas.add(r.clave)
+          }
         } catch (err) {
           out.push(`⚠️ «${corto(c.asunto ?? '', 40)}»: ${mensajeError(err)}`)
         }

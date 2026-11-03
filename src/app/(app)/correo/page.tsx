@@ -148,7 +148,7 @@ export default function CorreoPage() {
 
       <div className="flex flex-wrap items-center gap-2">
         <select value={estado} onChange={(e) => setEstado(e.target.value as CorreoEstado | 'all')} className={sel}>
-          {ESTADOS.map((e) => <option key={e} value={e}>{e === 'all' ? 'Todos los estados' : CORREO_ESTADO_LABELS[e]}</option>)}
+          {ESTADOS.map((e) => <option key={e} value={e}>{e === 'all' ? 'Todos (sin silencio)' : CORREO_ESTADO_LABELS[e]}</option>)}
         </select>
         <select value={cuenta} onChange={(e) => setCuenta(e.target.value)} className={sel}>
           <option value="">Todas las cuentas</option>

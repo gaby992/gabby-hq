@@ -5,9 +5,10 @@ import Link from 'next/link'
 import { REGLA_CORREO_ACCION_LABELS, type ConexionGoogle, type CuentaCorreo, type ReglaCorreo, type ReglaCorreoAccion } from '@/types'
 
 /**
- * Settings → Correo (fase 6-B): one card per mail account with its VIP and
- * noise lists (one email or domain per line), the rules, the chat and hours
- * of the alerts, and "Importar de n8n" (paste the JSON). Nothing here
+ * Settings → Correo (fase 6-B): one card per mail account with its three
+ * sender lists (ajuste 6c: 🔇 Silencio · 📋 Solo app · 🔔 Alerta, one email
+ * or domain per line), the rules, the chat and hours of the alerts,
+ * "Reaplicar reglas" and "Importar de n8n" (paste the JSON). Nothing here
  * touches Gmail; it only decides how the classifier and the alerts behave.
  */
 export default function CorreoSettingsPage() {
@@ -86,7 +87,11 @@ export default function CorreoSettingsPage() {
       <p className="text-sm text-[#888888]">
         Cada 15 minutos el asistente lee el Gmail de las cuentas con 📧 Correo encendido en{' '}
         <Link href="/settings/conexiones" className="text-[#7F77DD] hover:underline">Conexiones</Link>, clasifica cada correo
-        (primero reglas, luego el modelo) y avisa por Telegram solo lo que importa: urgencia alta, VIP, necesita respuesta o pide una tarea.
+        (primero las listas y reglas, luego el modelo) y avisa por Telegram solo lo que importa. Tres niveles por remitente:
+        🔇 <b>Silencio</b> se registra y no aparece en ningún lado (solo en /correo con el filtro &quot;Silencio&quot;) ·
+        📋 <b>Solo app</b> entra a /correo y a la lista &quot;correos&quot; del bot, nunca suena en Telegram ·
+        🔔 <b>Alerta</b> suena al momento con botones y sale en la lista de las 8.
+        Se evalúan en ese orden; lo que no está en ninguna lista lo decide el modelo (alta → alerta, lo demás → solo app).
       </p>
 
       {aviso && <p className="text-sm text-emerald-400">{aviso}</p>}
@@ -128,6 +133,8 @@ function TarjetaCuenta({ cuenta, onSaved, onError, onAviso }: { cuenta: CuentaCo
   const [alertar, setAlertar] = useState(cuenta.alertar)
   const [vip, setVip] = useState(cuenta.vip.join('\n'))
   const [ruido, setRuido] = useState(cuenta.ruido.join('\n'))
+  const [soloApp, setSoloApp] = useState(cuenta.solo_app.join('\n'))
+  const [reaplicando, setReaplicando] = useState(false)
   const [reglas, setReglas] = useState<ReglaCorreo[]>(cuenta.reglas)
   const [chat, setChat] = useState(cuenta.chat_id_alertas ? String(cuenta.chat_id_alertas) : '')
   const [horario, setHorario] = useState(cuenta.horario_alertas)
@@ -139,6 +146,7 @@ function TarjetaCuenta({ cuenta, onSaved, onError, onAviso }: { cuenta: CuentaCo
   useEffect(() => {
     setVip(cuenta.vip.join('\n'))
     setRuido(cuenta.ruido.join('\n'))
+    setSoloApp(cuenta.solo_app.join('\n'))
     setReglas(cuenta.reglas)
   }, [cuenta])
 
@@ -149,7 +157,7 @@ function TarjetaCuenta({ cuenta, onSaved, onError, onAviso }: { cuenta: CuentaCo
       const res = await fetch('/api/correo/cuentas', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: cuenta.id, nombre, duena, activa, alertar, vip, ruido, reglas, chat_id_alertas: chat.trim() || null, horario_alertas: horario, ...extra }),
+        body: JSON.stringify({ id: cuenta.id, nombre, duena, activa, alertar, vip, ruido, solo_app: soloApp, reglas, chat_id_alertas: chat.trim() || null, horario_alertas: horario, ...extra }),
       })
       const j = await res.json().catch(() => null)
       if (!res.ok) throw new Error(j?.error ?? `HTTP ${res.status}`)
@@ -181,6 +189,21 @@ function TarjetaCuenta({ cuenta, onSaved, onError, onAviso }: { cuenta: CuentaCo
       onError(err instanceof Error ? err.message : String(err))
     } finally {
       setImportando(false)
+    }
+  }
+
+  async function reaplicar() {
+    setReaplicando(true)
+    onError(null)
+    try {
+      const res = await fetch('/api/correo/reaplicar-reglas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cuenta_id: cuenta.id }) })
+      const j = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(j?.error ?? `HTTP ${res.status}`)
+      onAviso(`Reaplicado en ${cuenta.nombre}: ${j.texto ?? ''}`)
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setReaplicando(false)
     }
   }
 
@@ -216,20 +239,27 @@ function TarjetaCuenta({ cuenta, onSaved, onError, onAviso }: { cuenta: CuentaCo
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-3">
         <label className="block space-y-1">
-          <span className="text-xs font-semibold text-[#888888] uppercase tracking-wider">VIP (alta + alerta)</span>
-          <textarea value={vip} onChange={(e) => setVip(e.target.value)} rows={6} placeholder={'un email o dominio por línea\ntottatl.com\nm@blessoproperties.com'} className={`${inputCls} w-full font-mono text-xs`} />
+          <span className="text-xs font-semibold text-[#888888] uppercase tracking-wider">🔇 Silencio</span>
+          <textarea value={ruido} onChange={(e) => setRuido(e.target.value)} rows={8} placeholder={'un email o dominio por línea\nbankofamerica.com\nzoom.us'} className={`${inputCls} w-full font-mono text-xs`} />
+          <span className="text-[11px] text-[#555555]">Se registra y no aparece: ni Telegram, ni &quot;correos&quot;, ni /correo (solo con el filtro Silencio).</span>
         </label>
         <label className="block space-y-1">
-          <span className="text-xs font-semibold text-[#888888] uppercase tracking-wider">Ruido (se registra, sin IA ni alerta)</span>
-          <textarea value={ruido} onChange={(e) => setRuido(e.target.value)} rows={6} placeholder={'un email o dominio por línea\nbankofamerica.com'} className={`${inputCls} w-full font-mono text-xs`} />
+          <span className="text-xs font-semibold text-[#888888] uppercase tracking-wider">📋 Solo app</span>
+          <textarea value={soloApp} onChange={(e) => setSoloApp(e.target.value)} rows={8} placeholder={'un email o dominio por línea\ngabrielarangel169@gmail.com'} className={`${inputCls} w-full font-mono text-xs`} />
+          <span className="text-[11px] text-[#555555]">Entra a /correo y a la lista &quot;correos&quot;; NUNCA alerta en Telegram aunque el modelo diga alta.</span>
+        </label>
+        <label className="block space-y-1">
+          <span className="text-xs font-semibold text-[#888888] uppercase tracking-wider">🔔 Alerta</span>
+          <textarea value={vip} onChange={(e) => setVip(e.target.value)} rows={8} placeholder={'un email o dominio por línea\ntottatl.com\nm@blessoproperties.com'} className={`${inputCls} w-full font-mono text-xs`} />
+          <span className="text-[11px] text-[#555555]">Telegram inmediato con botones + lista de las 8. Orden: Silencio &gt; Alerta &gt; Solo app &gt; modelo.</span>
         </label>
       </div>
 
       <div className="space-y-2">
         <span className="text-xs font-semibold text-[#888888] uppercase tracking-wider">Reglas</span>
-        {reglas.length === 0 && <p className="text-xs text-[#555555]">Sin reglas. Las de n8n se importan abajo; las de VIP y ruido ya están en las listas.</p>}
+        {reglas.length === 0 && <p className="text-xs text-[#555555]">Sin reglas. Las de n8n se importan abajo; remitentes enteros van en las tres listas de arriba.</p>}
         {reglas.map((r, i) => (
           <div key={`${r.match}-${i}`} className="flex flex-wrap items-center gap-2 text-xs">
             <code className="text-[#e8e8e8] bg-[#111111] px-2 py-1 rounded">{r.match}</code>
@@ -265,6 +295,9 @@ function TarjetaCuenta({ cuenta, onSaved, onError, onAviso }: { cuenta: CuentaCo
         <button onClick={() => guardar()} disabled={saving} className="px-3 py-1.5 text-sm font-medium rounded-md bg-[#7F77DD] text-white hover:bg-[#6c64d0] transition-colors disabled:opacity-50">
           {saving ? 'Guardando…' : 'Guardar'}
         </button>
+        <button onClick={reaplicar} disabled={reaplicando || saving} title="Vuelve a leer las tres listas sobre los correos ya leídos que siguen pendientes (guarda primero)" className="px-3 py-1.5 text-xs rounded-md bg-[#2a2a2a] text-[#e8e8e8] hover:bg-[#333333] disabled:opacity-50">
+          {reaplicando ? 'Reaplicando…' : '🔁 Reaplicar reglas'}
+        </button>
         <button onClick={() => guardar({ reiniciar_cursor: true })} disabled={saving} title="La próxima lectura trae los últimos 3 días otra vez (no duplica)" className="px-3 py-1.5 text-xs rounded-md text-[#888888] hover:text-[#e8e8e8] hover:bg-[#2a2a2a]">
           Reiniciar cursor de Gmail
         </button>
@@ -276,7 +309,7 @@ function TarjetaCuenta({ cuenta, onSaved, onError, onAviso }: { cuenta: CuentaCo
         <div className="mt-2 space-y-2">
           <p className="text-xs text-[#555555]">
             Exporta las filas de <code>im_reglas</code> (o un objeto {'{ vip: [...], ruido: [...], reglas: [...] }'}) y pégalo aquí. Se suma a lo que ya hay;
-            nada se borra. auto_chelsea → Para Chelsea · auto_gabby → Gabby · auto_archivar → archivar · solo_registrar → registrar; remitentes con alerta → VIP.
+            nada se borra. auto_chelsea → Para Chelsea · auto_gabby → Gabby · auto_archivar → archivar · solo_registrar → registrar; remitentes con alerta → 🔔 Alerta.
           </p>
           <textarea value={json} onChange={(e) => setJson(e.target.value)} rows={6} placeholder='[{"match_tipo":"dominio","match_valor":"tottatl.com","accion":"auto_gabby","alerta":true}]' className={`${inputCls} w-full font-mono text-xs`} />
           <button onClick={importar} disabled={importando || !json.trim()} className="px-3 py-1.5 text-sm rounded-md bg-[#2a2a2a] text-[#e8e8e8] hover:bg-[#333333] disabled:opacity-50">

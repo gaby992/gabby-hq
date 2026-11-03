@@ -124,8 +124,12 @@ export interface CuentaCorreo {
   nombre: string
   duena: string | null
   activa: boolean
+  /** 🔔 Alerta: Telegram inmediato + lista de las 8 (column `vip`). */
   vip: string[]
+  /** 🔇 Silencio: only recorded, never shown (column `ruido`). */
   ruido: string[]
+  /** 📋 Solo app: /correo and the "correos" list, never a Telegram alert (ajuste 6c). */
+  solo_app: string[]
   reglas: ReglaCorreo[]
   chat_id_alertas: number | null
   alertar: boolean
@@ -210,7 +214,7 @@ export const CORREO_ESTADO_LABELS: Record<CorreoEstado, string> = {
   tarea: 'Tarea',
   archivado: 'Archivado',
   respondido: 'Respondido',
-  registrado: 'Registrado',
+  registrado: 'Silencio (registrado)',
 }
 
 export const CORREO_ACCION_LABELS: Record<CorreoAccion, string> = {
@@ -220,9 +224,19 @@ export const CORREO_ACCION_LABELS: Record<CorreoAccion, string> = {
   archivar: 'Archivar',
 }
 
+/**
+ * Ajuste 6c: the three levels a sender can be on, per account. Evaluation
+ * order: silencio > alerta > solo_app > the model (alta → alerta, else solo app).
+ */
+export type NivelRemitente = 'silencio' | 'solo_app' | 'alerta'
+
+export const NIVEL_REMITENTE_EMOJI: Record<NivelRemitente, string> = { silencio: '🔇', solo_app: '📋', alerta: '🔔' }
+
+export const NIVEL_REMITENTE_LABELS: Record<NivelRemitente, string> = { silencio: 'Silencio', solo_app: 'Solo app', alerta: 'Alerta' }
+
 export const REGLA_CORREO_ACCION_LABELS: Record<ReglaCorreoAccion, string> = {
-  vip: 'VIP (alta + alerta)',
-  ruido: 'Ruido (solo registrar, sin IA)',
+  vip: '🔔 Alerta (alta + Telegram)',
+  ruido: '🔇 Silencio (solo registrar, sin IA)',
   para_chelsea: 'Auto → Chelsea',
   lo_hago_yo: 'Auto → Gabby (tarea)',
   archivar: 'Auto archivar',

@@ -18,6 +18,7 @@ sección y **no se empieza una fase hasta validar la anterior**.
 | 5 | Conexión de Google en Settings + Calendar (solo a pedido) + pagos recurrentes | ✅ Construida — pendiente de validar |
 | 6 | Correo dentro de GabbyHQ: Gmail, clasificador, alertas, evaluación de modelos (reemplaza n8n) | ✅ Construida — pendiente de validar |
 | 6b | Ajustes del correo: listas desde `correos`, lista viva "correos", tachado en sitio, alertas solo VIP/alta, seguridad de mensajes, bug del cierre | ✅ Construida — pendiente de validar (correr el SQL 6b) |
+| 6c | Correo: tres niveles por remitente (🔇 Silencio · 📋 Solo app · 🔔 Alerta), "Reaplicar reglas", aprender desde el bot ("el 5 es silencio") | ✅ Construida — pendiente de validar (correr el SQL 6c) |
 | 7 | De comandos a conversación: memoria, sugerencias, "organízame", personalidad | ✅ Construida — pendiente de validar |
 
 ---
@@ -167,6 +168,7 @@ Archivos del asistente dentro del repo:
 | `sql/2026-11-asistente-fase5c.sql` | Migración de la fase 5-C: `pagos_recurrentes` |
 | `sql/2026-11-asistente-fase6-correo.sql` | Migración de la fase 6: roles por cuenta en `conexiones_google` + `cuentas_correo`, `correos`, `correo_evaluaciones`, `correo_veredictos` |
 | `sql/2026-11-asistente-fase6b-ajustes.sql` | Ajustes 6b: `bot_alarmas.tipo` admite `lista` y `correos` + columnas `chat_id`, `message_id`, `texto`; `correos.vip` y `correos.respondido_en` |
+| `sql/2026-11-asistente-fase6c-niveles.sql` | Ajustes 6c: `cuentas_correo.solo_app` (la lista 📋 Solo app) + precarga de Silencio y Solo app en IM Chelsea |
 | `sql/2026-11-duplicadas-select.sql` | Solo lectura (ajuste 6b-8): tareas con el mismo título donde una está cerrada y otra abierta, para revisar antes de borrar |
 | `sql/2026-11-asistente-fase7.sql` | Migración de la fase 7: `bot_conversacion` + `asistente_config` |
 | `src/lib/asistente/pagos.ts` | Fase 5-C: pagos recurrentes (fila + evento mensual en Calendar) |
@@ -1548,8 +1550,10 @@ reciente, para que nada se rompa. Defaults del SQL: Gabby = calendar on,
 correo off; Chelsea = calendar off, correo on.
 
 **B) Config de correo por cuenta** (`cuentas_correo`, Settings → **Correo**).
-Una tarjeta por cuenta: nombre ("IM Chelsea"), dueña, activa, alertar; **VIP**
-y **ruido** (un email o dominio por línea; un dominio cubre sus subdominios);
+Una tarjeta por cuenta: nombre ("IM Chelsea"), dueña, activa, alertar; las
+**tres listas por remitente** 🔇 Silencio · 📋 Solo app · 🔔 Alerta (§ 6g;
+un email o dominio por línea; un dominio cubre sus subdominios; en la base
+siguen siendo las columnas `ruido`, `solo_app` y `vip`);
 **reglas** `{match, accion, alerta}` donde `match` es email, dominio o texto
 del asunto y `accion` ∈ vip · ruido · para_chelsea · lo_hago_yo · archivar ·
 registrar; **chat de alertas** (vacío = `ALLOWED_CHAT_IDS`); **horario**
@@ -1897,6 +1901,79 @@ y el inicio de las notas, para decidir a ojo. No borra ni actualiza nada.
 8. `/chelsea` muestra los `para_chelsea` de `correos`; la casilla archiva.
 
 ---
+
+### 6g. Ajustes 6c (3 nov 2026) — tres niveles por remitente, reaplicar, aprender desde el bot
+
+SQL: `sql/2026-11-asistente-fase6c-niveles.sql` (agrega la columna
+`cuentas_correo.solo_app` y precarga IM Chelsea). Sin correrlo, la app sigue
+funcionando con dos listas y avisa en los logs al guardar Solo app.
+
+**1) Tres niveles explícitos.** En Settings → Correo cada cuenta tiene tres
+listas (email o dominio, uno por línea). "Ruido" pasó a llamarse Silencio y
+"VIP" a Alerta; Solo app es nueva. Las columnas de la base conservan el
+nombre viejo.
+
+| Nivel | Columna | Qué pasa con el correo | Telegram | Lista "correos" del bot y lista de las 8 | /correo |
+| --- | --- | --- | --- | --- | --- |
+| 🔇 **Silencio** | `ruido` | `registrado`, baja, sin IA. `razon` = "silencio: dominio" | Nunca | No sale | Solo con el filtro "Silencio (registrado)"; "Todos" lo excluye |
+| 📋 **Solo app** | `solo_app` | El modelo lo clasifica (urgencia, tipo, resumen) pero `soloApp` apaga la alerta | **Nunca**, aunque el modelo diga alta | Sí (numerado, como cualquier pendiente) | Sí |
+| 🔔 **Alerta** | `vip` | Urgencia **alta** fija, `vip = true`; el modelo pone tipo y resumen | Inmediato, con botones (dentro del horario) | Sí, y respondido queda 48 h en cursiva | Sí |
+
+Orden de evaluación en `clasificarPorReglas` (`nivelDe`): **Silencio >
+Alerta > Solo app** > reglas importadas de n8n > pago fallido / AMEX >
+modelo. Lo que no está en ninguna lista lo decide el modelo: alta → suena
+como Alerta; lo demás se comporta como Solo app (listas y /correo, sin
+sonar). El SQL precarga en IM Chelsea, además de los bancos: `zoom.us`,
+`fathom.video`, `fireflies.ai`, `read.ai`, `otter.ai`, `trustpilotmail.com`,
+`gusto.com`, `calendar-notification@google.com` en Silencio, y
+`gabrielarangel169@gmail.com` en Solo app (lo que Gabby le manda a Chelsea
+no es pendiente de ella).
+
+**2) Reaplicar reglas a lo ya ingerido.** Botón "🔁 Reaplicar reglas" en la
+tarjeta de cada cuenta (guarda primero: lee las listas de la base) y ruta
+`/api/correo/reaplicar-reglas` (`GET` con `Authorization: Bearer
+$CRON_SECRET`, `?cuenta=<id>` para una sola; `POST {cuenta_id}` con la sesión
+web). Recorre los correos de los últimos 30 días con estado `nuevo` o
+`para_chelsea` (máx 500 por cuenta) y, si el remitente coincide con una
+lista, aplica el nivel: Silencio → `registrado` (y tacha su línea en la
+última lista con 🔇); Alerta → urgencia alta + `vip`; Solo app → `alertado =
+false` (no vuelve a sonar, no se borra la alerta vieja). Un correo con
+tarea creada (`task_id`) es decisión a mano y no se toca. Responde "N a
+silencio · M a alerta · K a solo app" por cuenta. No manda alertas nuevas.
+
+```
+curl -H "Authorization: Bearer $CRON_SECRET" https://gabby-hq.vercel.app/api/correo/reaplicar-reglas
+→ {"ok":true,"texto":"IM Chelsea: 4 a silencio · 0 a alerta · 2 a solo app", …}
+```
+
+**3) Aprender desde el bot** (`aprenderNivel` en `src/lib/correo/niveles.ts`;
+el intérprete manda `{"tipo":"correo","nivel":"silencio|solo_app|alerta"}`,
+con `accion` o sin ella). Sobre un "📧" numerado de la última lista o un
+correo reciente por remitente/asunto:
+
+| Dices | Hace |
+| --- | --- |
+| `el 5 es silencio` | Dominio del remitente → 🔇 Silencio de esa cuenta; el correo pasa a registrado. Confirma `🔇 zoom.us → Silencio en IM Chelsea` |
+| `el 5 es solo app` / `que no me avise, solo en la app` | Dominio → 📋 Solo app; el correo deja de contar como alertado |
+| `el 5 es alerta` / `avísame siempre de TOTT` | Dominio → 🔔 Alerta; el correo queda alta y `vip` |
+| `archiva el 5 y márcalo como silencio` | Las dos cosas: archiva (saca del inbox de Gmail) y aprende el dominio |
+| `el correo de Juan (gmail) es silencio` | En buzones genéricos (gmail, outlook, hotmail, yahoo, icloud, proton…) aprende el **email completo**, no el dominio |
+
+Si el dominio ya estaba en otra lista, lo mueve y lo dice: `🔔 tottatl.com →
+Alerta en IM Chelsea (estaba en Solo app)`. Varios correos del mismo
+remitente en una orden ("archiva el 3 y el 4 y márcalos como silencio")
+aprenden el dominio una sola vez. En `/ayuda todo` está el ejemplo.
+
+**Cómo probar**
+
+1. Corre el SQL 6c → Settings → Correo muestra tres columnas; IM Chelsea
+   tiene `zoom.us` en Silencio y `gabrielarangel169@gmail.com` en Solo app.
+2. "🔁 Reaplicar reglas" → aviso "N a silencio · …"; en /correo con "Todos"
+   ya no salen los de Zoom; con "Silencio (registrado)" sí.
+3. Mándate un correo desde tu Gmail a la de Chelsea → entra a /correo y a
+   `correos`, sin alerta en Telegram aunque diga "urgente".
+4. `correos` → `el 2 es silencio` → confirma con el dominio; su línea queda
+   tachada con 🔇 y Settings → Correo lo muestra en Silencio.
 
 ## 7. Fase 7 — De comandos a conversación
 

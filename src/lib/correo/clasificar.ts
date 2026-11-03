@@ -1,8 +1,9 @@
 // Fase 6-D: the classifier v2 — where the n8n triage failed.
 //
-//   1. Deterministic rules first, no model: VIP sender → alta + alert;
-//      noise sender → registrado, never shown; failed payment / AMEX → alta
-//      + pago; a rule imported from n8n → its action.
+//   1. Deterministic rules first, no model (ajuste 6c, in this order):
+//      🔇 silencio → registrado, never shown; 🔔 alerta → alta + Telegram;
+//      📋 solo app → the model classifies it but it never alerts; a rule
+//      imported from n8n → its action; failed payment / AMEX → alta + pago.
 //   2. The LLM only for what the rules did not settle: urgency, type,
 //      category, confidence, a ONE-line summary (in a thread: only what is
 //      new, the previous summaries are given) and the reason.
@@ -13,7 +14,7 @@
 
 import type { CorreoEstado, CorreoTipo, CorreoUrgencia, CuentaCorreo } from '@/types'
 import { llamarLlm, llmConfigCorreo, nombreModelo, type LlmTarget } from '@/lib/asistente/llm'
-import { coincideLista, reglaQueAplica } from './cuentas'
+import { nivelDe, reglaQueAplica } from './cuentas'
 import { mensajeError } from '@/lib/errores'
 
 export interface EntradaCorreo {
@@ -41,8 +42,10 @@ export interface Resultado {
   estado: CorreoEstado
   /** VIP or a rule with `alerta`: alert whatever the urgency says. */
   alertaForzada: boolean
-  /** Ajuste 6-6: the sender is on the VIP list (or a VIP rule) — stored on the row, the lists keep its "respondido" 48 h. */
+  /** Ajuste 6-6: the sender is on the 🔔 alerta list (or a VIP rule) — stored on the row, the lists keep its "respondido" 48 h. */
   vip: boolean
+  /** Ajuste 6c: the sender is on the 📋 solo app list — never a Telegram alert, whatever the urgency. */
+  soloApp: boolean
   /** Which model answered, or null when no model was needed. */
   modelo: string | null
   tokensIn: number
@@ -66,14 +69,15 @@ interface Regla {
   alerta: boolean
   razon: string
   vip?: boolean
+  soloApp?: boolean
 }
 
 /** What the lists and rules decide before any model. Null → nothing deterministic. */
-export function clasificarPorReglas(c: EntradaCorreo, cuenta: Pick<CuentaCorreo, 'vip' | 'ruido' | 'reglas'>): Regla | null {
-  const ruido = coincideLista(cuenta.ruido, c.de_email)
-  if (ruido) return { fija: { urgencia: 'baja', tipo: 'notificacion', categoria: 'informativo', confianza: 1 }, estado: 'registrado', sinLlm: true, alerta: false, razon: `ruido: ${ruido}` }
-  const vip = coincideLista(cuenta.vip, c.de_email)
-  if (vip) return { fija: { urgencia: 'alta', confianza: 1 }, sinLlm: false, alerta: true, vip: true, razon: `VIP: ${vip}` }
+export function clasificarPorReglas(c: EntradaCorreo, cuenta: Pick<CuentaCorreo, 'vip' | 'ruido' | 'solo_app' | 'reglas'>): Regla | null {
+  const nivel = nivelDe(cuenta, c.de_email)
+  if (nivel?.nivel === 'silencio') return { fija: { urgencia: 'baja', tipo: 'notificacion', categoria: 'informativo', confianza: 1 }, estado: 'registrado', sinLlm: true, alerta: false, razon: `silencio: ${nivel.match}` }
+  if (nivel?.nivel === 'alerta') return { fija: { urgencia: 'alta', confianza: 1 }, sinLlm: false, alerta: true, vip: true, razon: `alerta: ${nivel.match}` }
+  if (nivel?.nivel === 'solo_app') return { fija: {}, sinLlm: false, alerta: false, soloApp: true, razon: `solo app: ${nivel.match}` }
   const regla = reglaQueAplica(cuenta.reglas, { de_email: c.de_email, asunto: c.asunto })
   if (regla) {
     switch (regla.accion) {
@@ -176,25 +180,26 @@ export async function clasificarConLlm(c: EntradaCorreo, target: LlmTarget = llm
  * yields urgencia media / fyi with the failure in `razon`, so the mail
  * still shows up in the feed (and a VIP still alerts).
  */
-export async function clasificar(c: EntradaCorreo, cuenta: Pick<CuentaCorreo, 'vip' | 'ruido' | 'reglas'>, target?: LlmTarget): Promise<Resultado> {
+export async function clasificar(c: EntradaCorreo, cuenta: Pick<CuentaCorreo, 'vip' | 'ruido' | 'solo_app' | 'reglas'>, target?: LlmTarget): Promise<Resultado> {
   const asunto = c.asunto ?? '(sin asunto)'
   const regla = clasificarPorReglas(c, cuenta)
   const base: Clasificacion = { urgencia: 'media', tipo: 'fyi', categoria: 'informativo', confianza: 0, resumen: asunto, razon: '' }
   const vip = regla?.vip === true
+  const soloApp = regla?.soloApp === true
   if (regla?.sinLlm) {
-    return { clas: { ...base, ...regla.fija, razon: regla.razon }, estado: regla.estado ?? 'nuevo', alertaForzada: regla.alerta, vip, modelo: null, tokensIn: 0, tokensOut: 0, ms: 0 }
+    return { clas: { ...base, ...regla.fija, razon: regla.razon }, estado: regla.estado ?? 'nuevo', alertaForzada: regla.alerta, vip, soloApp, modelo: null, tokensIn: 0, tokensOut: 0, ms: 0 }
   }
   try {
     const llm = await clasificarConLlm(c, target)
     const { modelo, tokensIn, tokensOut, ms, ...clas } = llm
     const final: Clasificacion = regla ? { ...clas, ...regla.fija, razon: `${regla.razon} · ${clas.razon}` } : clas
-    return { clas: final, estado: regla?.estado ?? 'nuevo', alertaForzada: regla?.alerta ?? false, vip, modelo, tokensIn, tokensOut, ms }
+    return { clas: final, estado: regla?.estado ?? 'nuevo', alertaForzada: regla?.alerta ?? false, vip, soloApp, modelo, tokensIn, tokensOut, ms }
   } catch (err) {
     // Ajuste 6-1: the row (and the alert built from it) gets a generic
     // reason by KIND, never the provider's text — a key once travelled that way.
     console.error(`[correo] clasificar falló (${asunto.slice(0, 40)}): ${mensajeError(err)}`)
     const final: Clasificacion = { ...base, ...(regla?.fija ?? {}), razon: `${regla ? `${regla.razon} · ` : ''}⚠️ clasificador no disponible (${tipoDeFallo(err)})` }
-    return { clas: final, estado: regla?.estado ?? 'nuevo', alertaForzada: regla?.alerta ?? false, vip, modelo: null, tokensIn: 0, tokensOut: 0, ms: 0 }
+    return { clas: final, estado: regla?.estado ?? 'nuevo', alertaForzada: regla?.alerta ?? false, vip, soloApp, modelo: null, tokensIn: 0, tokensOut: 0, ms: 0 }
   }
 }
 
@@ -208,12 +213,14 @@ export function tipoDeFallo(err: unknown): string {
 }
 
 /**
- * Fase 6-F / ajuste 6-4: an individual alert ONLY for VIP (or a rule that
- * asks for it) and urgencia alta. Everything else waits in the lists
+ * Fase 6-F / ajuste 6-4: an individual alert ONLY for 🔔 alerta (or a rule
+ * that asks for it) and urgencia alta. Everything else waits in the lists
  * ("correos", the 8:00 and the 6:00 pm). Within the account's hours.
+ * Ajuste 6c: a 📋 solo app sender never alerts, even when the model says alta.
  */
-export function mereceAlerta(r: Pick<Resultado, 'clas' | 'alertaForzada' | 'estado'>): boolean {
+export function mereceAlerta(r: Pick<Resultado, 'clas' | 'alertaForzada' | 'estado'> & { soloApp?: boolean }): boolean {
   if (r.estado === 'registrado' || r.estado === 'archivado') return false
+  if (r.soloApp) return false
   if (r.alertaForzada) return true
   return r.clas.urgencia === 'alta'
 }

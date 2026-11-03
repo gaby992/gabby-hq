@@ -17,7 +17,8 @@ import { llmConfig, preguntarLlm } from './llm'
 import { cargarConfig, personaPrompt, type AsistenteConfig } from './config'
 import { historial, renderHistorial, tareasRecientes } from './conversacion'
 import { correosRecientes, quienCorto, type CorreoLite } from '@/lib/correo/pendientes'
-import type { CorreoAccion, CorreoTipo, CorreoUrgencia } from '@/types'
+import type { CorreoAccion, CorreoTipo, CorreoUrgencia, NivelRemitente } from '@/types'
+import { esNivel } from '@/lib/correo/niveles'
 import { mensajeError } from '@/lib/errores'
 
 export const MAX_TOKENS = 900
@@ -46,8 +47,11 @@ export type AccionLlm =
   | { tipo: 'pregunta'; texto: string }
   | { tipo: 'que_sigue'; empresa?: string; solo_urgentes?: boolean; solo_vencer?: boolean }
   | { tipo: 'lista'; lista: 'manana' | 'tarde' | 'pendientes'; empresa?: string }
-  /** Fase 6: a decision on mail — one ("el correo de Andrew lo hago yo") or a set ("archiva los de marketing de hoy"). */
-  | { tipo: 'correo'; accion: CorreoAccion; ref?: string; filtro?: FiltroCorreo }
+  /**
+   * Fase 6: a decision on mail — one ("el correo de Andrew lo hago yo") or a set ("archiva los de marketing de hoy").
+   * Ajuste 6c: `nivel` learns the sender ("el 5 es silencio"); with `accion` too ("archiva el 5 y márcalo como silencio").
+   */
+  | { tipo: 'correo'; accion?: CorreoAccion; nivel?: NivelRemitente; ref?: string; filtro?: FiltroCorreo }
   | { tipo: 'desconocido'; texto: string }
 
 export interface FiltroCorreo {
@@ -256,10 +260,12 @@ export function systemPrompt(today: string, cfg: AsistenteConfig = { nombre_pers
       'Esto NO es que_sigue (que_sigue es corto y ordenado; lista es todo)',
     '- {"tipo":"dividir","ref":REF}  → "me da flojera X", "no sé por dónde empezar con X", "divide X", "paso a paso X": partir una tarea en pasos',
     '- {"tipo":"siguiente_paso",("ref":REF)}  → "siguiente paso", "el que sigue" (sin ref = la última tarea dividida)',
-    '- {"tipo":"correo","accion":"chelsea|yo|tarea|archivar",("ref":"c3"|"#15"|"texto del remitente o asunto"),("filtro":{("tipo":"marketing|notificacion|fyi|necesita_respuesta|pedido_de_tarea|reunion|pago"),("urgencia":"alta|media|baja"),("hoy":true),("de":"…")})}  → ' +
+    '- {"tipo":"correo",("accion":"chelsea|yo|tarea|archivar"),("nivel":"silencio|solo_app|alerta"),("ref":"c3"|"#15"|"texto del remitente o asunto"),("filtro":{("tipo":"marketing|notificacion|fyi|necesita_respuesta|pedido_de_tarea|reunion|pago"),("urgencia":"alta|media|baja"),("hoy":true),("de":"…")})}  → ' +
       'decisiones sobre CORREOS (los de CORREOS RECIENTES o los "📧" numerados de la última lista): "el correo de Andrew lo hago yo" → accion yo, ref "Andrew"; "el 15 para Chelsea" → accion chelsea, ref "#15"; ' +
       '"archiva los de marketing de hoy" → accion archivar, filtro {tipo:"marketing", hoy:true}; "el de TOTT es tarea" → accion tarea. "lo hago yo"/"yo lo contesto" = yo; "pásaselo a Chelsea" = chelsea; "archívalo"/"bórralo" sobre un correo = archivar (un correo nunca se borra). ' +
-      'Un número de la última lista que es "📧 correo" NUNCA es completar/posponer: es "correo".',
+      'Un número de la última lista que es "📧 correo" NUNCA es completar/posponer: es "correo". ' +
+      'NIVEL = aprender el remitente para siempre (va con accion o solo): "el 5 es silencio"/"silencia a zoom"/"ese remitente es ruido" → nivel silencio; "el 5 es solo app"/"que no me avise, solo en la app" → nivel solo_app; "el 5 es alerta"/"ese remitente es VIP"/"avísame siempre de TOTT" → nivel alerta; ' +
+      '"archiva el 5 y márcalo como silencio" → accion archivar + nivel silencio. Va al menos accion o nivel.',
     '- {"tipo":"desconocido","texto":"…"}  → saludos, comentarios o algo que no es ninguna de las anteriores',
     '',
     'REF = a qué tarea se refiere: el id entre corchetes del contexto ("#3" = número de la última alarma, "t12" = otra tarea abierta), ' +
@@ -486,7 +492,10 @@ export function validarAcciones(raw: unknown): AccionLlm[] {
           de: str(f.de),
         }
         const hayFiltro = Object.values(filtro).some((v) => v !== undefined)
-        if (ACCIONES_CORREO.includes(accion) && (ref || hayFiltro)) out.push({ tipo, accion, ref, filtro: hayFiltro ? filtro : undefined })
+        const nivelRaw = str(a.nivel)?.toLowerCase().replace(/[\s-]+/g, '_')
+        const nivel = esNivel(nivelRaw) ? nivelRaw : undefined
+        const accionOk = ACCIONES_CORREO.includes(accion) ? accion : undefined
+        if ((accionOk || nivel) && (ref || hayFiltro)) out.push({ tipo, accion: accionOk, nivel, ref, filtro: hayFiltro ? filtro : undefined })
         else out.push({ tipo: 'desconocido', texto: texto || 'correo: no sé cuál' })
         break
       }

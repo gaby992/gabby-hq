@@ -37,8 +37,10 @@ export async function GET(request: Request) {
     .gte('recibido_en', new Date(Date.now() - (Number.isFinite(dias) ? dias : 14) * 86_400_000).toISOString())
     .order('recibido_en', { ascending: false })
     .limit(400)
-  if (estado && estado !== 'all') q = q.in('estado', estado.split(','))
-  else if (!estado) q = q.in('estado', DEFAULT_ESTADOS)
+  // Ajuste 6c: 🔇 silencio (registrado) only shows up when asked for by name.
+  if (estado === 'all') q = q.neq('estado', 'registrado')
+  else if (estado) q = q.in('estado', estado.split(','))
+  else q = q.in('estado', DEFAULT_ESTADOS)
   if (cuenta) q = q.eq('cuenta_id', cuenta)
   if (urgencia) q = q.eq('urgencia', urgencia)
   if (tipo) q = q.eq('tipo', tipo)

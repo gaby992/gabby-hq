@@ -16,6 +16,7 @@ Es lo mismo que manda el bot con `/ayuda todo`. La guía técnica está en [asis
 - `qué sigue de IM` — lo mismo, pero solo de esa empresa
 - `/pendientes IM` — todo lo abierto de IM, numerado
 - `correos · correos de Chelsea` — todos los correos pendientes de esa cuenta (o de todas), numerados por urgencia; luego "el 3 lo hago yo", "el 2 para Chelsea", "archiva el 5". La línea se tacha sola cuando se resuelve
+- `el 5 es silencio · el 5 es solo app · el 5 es alerta` — aprende ese remitente (su dominio, o el email si es gmail/outlook) en la lista de esa cuenta y aplica el nivel al correo; "archiva el 5 y márcalo como silencio" hace las dos cosas. Si ya estaba en otra lista, lo mueve y te lo dice
 - `¿qué cerré ayer?` — pregunta libre: te contesta con tus tareas y notas (también "? qué tengo hoy")
 - `mis alarmas` — tus alarmas pendientes, numeradas
 - `pagos de IM` — los pagos recurrentes de esa empresa; "qué pagos hay esta semana" filtra

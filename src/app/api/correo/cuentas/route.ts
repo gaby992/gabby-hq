@@ -39,6 +39,7 @@ export async function PUT(request: Request) {
   if (typeof b.alertar === 'boolean') cambios.alertar = b.alertar
   if (typeof b.vip === 'string' || Array.isArray(b.vip)) cambios.vip = normalizarLista(b.vip)
   if (typeof b.ruido === 'string' || Array.isArray(b.ruido)) cambios.ruido = normalizarLista(b.ruido)
+  if (typeof b.solo_app === 'string' || Array.isArray(b.solo_app)) cambios.solo_app = normalizarLista(b.solo_app)
   if (Array.isArray(b.reglas)) cambios.reglas = normalizarReglas(b.reglas)
   if (b.chat_id_alertas === null || b.chat_id_alertas === '') cambios.chat_id_alertas = null
   else if (b.chat_id_alertas !== undefined && Number.isFinite(Number(b.chat_id_alertas))) cambios.chat_id_alertas = Number(b.chat_id_alertas)
