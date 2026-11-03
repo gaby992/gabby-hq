@@ -18,7 +18,7 @@ sección y **no se empieza una fase hasta validar la anterior**.
 | 5 | Conexión de Google en Settings + Calendar (solo a pedido) + pagos recurrentes | ✅ Construida — pendiente de validar |
 | 6 | Correo dentro de GabbyHQ: Gmail, clasificador, alertas, evaluación de modelos (reemplaza n8n) | ✅ Construida — pendiente de validar |
 | 6b | Ajustes del correo: listas desde `correos`, lista viva "correos", tachado en sitio, alertas solo VIP/alta, seguridad de mensajes, bug del cierre | ✅ Construida — pendiente de validar (correr el SQL 6b) |
-| 6c | Correo: tres niveles por remitente (🔇 Silencio · 📋 Solo app · 🔔 Alerta), "Reaplicar reglas", aprender desde el bot ("el 5 es silencio"), "Reclasificar sin modelo", regla `^asunto` → Solo app | ✅ Construida — pendiente de validar (correr el SQL 6c) |
+| 6c | Correo: tres niveles por remitente (🔇 Silencio · 📋 Solo app · 🔔 Alerta), "Reaplicar reglas", aprender desde el bot ("el 5 es silencio"), "Reclasificar sin modelo", regla `^asunto` → Solo app, idioma por cuenta | ✅ Construida — pendiente de validar (correr el SQL 6c) |
 | 7 | De comandos a conversación: memoria, sugerencias, "organízame", personalidad | ✅ Construida — pendiente de validar |
 
 ---
@@ -168,7 +168,7 @@ Archivos del asistente dentro del repo:
 | `sql/2026-11-asistente-fase5c.sql` | Migración de la fase 5-C: `pagos_recurrentes` |
 | `sql/2026-11-asistente-fase6-correo.sql` | Migración de la fase 6: roles por cuenta en `conexiones_google` + `cuentas_correo`, `correos`, `correo_evaluaciones`, `correo_veredictos` |
 | `sql/2026-11-asistente-fase6b-ajustes.sql` | Ajustes 6b: `bot_alarmas.tipo` admite `lista` y `correos` + columnas `chat_id`, `message_id`, `texto`; `correos.vip` y `correos.respondido_en` |
-| `sql/2026-11-asistente-fase6c-niveles.sql` | Ajustes 6c: `cuentas_correo.solo_app` (la lista 📋 Solo app) + precarga de Silencio, Solo app y las reglas `^accepted:` / `^declined:` en IM Chelsea (idempotente: se repite si se amplía) |
+| `sql/2026-11-asistente-fase6c-niveles.sql` | Ajustes 6c: `cuentas_correo.solo_app` (la lista 📋 Solo app) y `cuentas_correo.idioma` ('es' / 'en') + precarga de Silencio, Solo app, las reglas `^accepted:` / `^declined:` / `^tentative:` e idioma 'en' en IM Chelsea (idempotente: se repite si se amplía) |
 | `sql/2026-11-duplicadas-select.sql` | Solo lectura (ajuste 6b-8): tareas con el mismo título donde una está cerrada y otra abierta, para revisar antes de borrar |
 | `sql/2026-11-asistente-fase7.sql` | Migración de la fase 7: `bot_conversacion` + `asistente_config` |
 | `src/lib/asistente/pagos.ts` | Fase 5-C: pagos recurrentes (fila + evento mensual en Calendar) |
@@ -1928,7 +1928,7 @@ sonar). El SQL precarga en IM Chelsea, además de los bancos: `zoom.us`,
 `gusto.com`, `calendar-notification@google.com`, `slack.com` en Silencio, y
 `gabrielarangel169@gmail.com` en Solo app (lo que Gabby le manda a Chelsea
 no es pendiente de ella). Las respuestas de calendario ("Accepted: …",
-"Declined: …") no llegan de un remitente fijo sino de quien acepta, así que
+"Declined: …", "Tentative: …") no llegan de un remitente fijo sino de quien acepta, así que
 van como **regla por asunto** con la acción nueva `📋 Solo app`: una regla
 cuyo `match` empieza con `^` aplica cuando el asunto **empieza** por ese
 texto (`^accepted:`); sin `^` basta con que lo contenga. Las reglas se
@@ -1992,11 +1992,34 @@ curl -H "Authorization: Bearer $CRON_SECRET" https://gabby-hq.vercel.app/api/cor
 → {"ok":true,"texto":"IM Chelsea: 23 reclasificados", …}
 ```
 
+**5) Idioma por cuenta** (`cuentas_correo.idioma`, `'es'` | `'en'`, default
+`'es'`; selector junto al nombre en Settings → Correo; IM Chelsea → `en`).
+Lo que está pensado para la dueña del buzón sale en su idioma, para
+copiarlo y pegárselo tal cual: el **resumen y la razón** del clasificador
+(el prompt agrega una línea "escribe resumen y razon en inglés"; con `es`
+el prompt no cambia ni una letra, así las evaluaciones siguen siendo
+comparables), la **alerta de Telegram** (cabecera "📧 IM Chelsea · ✴️ high ·
+needs a reply · From: Andrew (TOTT)", "(no subject)", "5 min ago"), la
+edición "✅ Chelsea replied", la **lista "correos"** de esa cuenta (título
+"Mail · IM Chelsea (7)", grupos "✴️ High / ✉️ Need a reply / Rest", "+3 more
+→ /correo", "Nothing pending 🎉") y las líneas de esa cuenta en la **sección
+📧 de la lista de las 8 y de las 6**. Con "correos" de todas las cuentas el
+título va en español y cada línea en el idioma de su cuenta. Todo lo demás
+sigue en español: las tareas, "qué sigue", las notas, los botones de la
+alerta, los títulos tras decidir ("📨 Para Chelsea", "➕ Tarea creada") y el
+pie "Para decidir: el 5 lo hago yo…". Los correos ya clasificados no
+cambian de idioma solos: "🤖 Reclasificar sin modelo" solo rehace los que
+quedaron sin clasificar. Implementación: `src/lib/correo/idioma.ts`
+(`textos(idioma)`), `instruccionIdioma` en el prompt; las listas toman el
+idioma de `cargarCuentas()`, no de un join, para seguir funcionando antes de
+correr el SQL.
+
 **Cómo probar**
 
 1. Corre el SQL 6c → Settings → Correo muestra tres columnas; IM Chelsea
    tiene `zoom.us` y `slack.com` en Silencio, `gabrielarangel169@gmail.com`
-   en Solo app y dos reglas `^accepted:` / `^declined:` → 📋 Solo app.
+   en Solo app, tres reglas `^accepted:` / `^declined:` / `^tentative:` → 📋
+   Solo app, e idioma 🇺🇸 English.
 2. "🔁 Reaplicar reglas" → aviso "N a silencio · …"; en /correo con "Todos"
    ya no salen los de Zoom; con "Silencio (registrado)" sí.
 3. Mándate un correo desde tu Gmail a la de Chelsea → entra a /correo y a
@@ -2004,8 +2027,13 @@ curl -H "Authorization: Bearer $CRON_SECRET" https://gabby-hq.vercel.app/api/cor
 4. `correos` → `el 2 es silencio` → confirma con el dominio; su línea queda
    tachada con 🔇 y Settings → Correo lo muestra en Silencio.
 5. "🤖 Reclasificar sin modelo" → aviso "N reclasificados"; en /correo los
-   del 2 nov ya traen resumen propio y confianza > 0, y Settings →
-   Asistente cuenta esas llamadas como `correo:<modelo>`.
+   del 2 nov ya traen resumen propio y confianza > 0 (en inglés en IM
+   Chelsea), y Settings → Asistente cuenta esas llamadas como
+   `correo:<modelo>`.
+6. `correos de Chelsea` → "📧 Mail · IM Chelsea (N)" con "✴️ High" y "3h
+   ago"; `correos` (todas) → título en español, las líneas de IM Chelsea en
+   inglés. La siguiente alerta de un remitente en Alerta llega con "From:"
+   y la razón en inglés; los botones siguen en español.
 
 ## 7. Fase 7 — De comandos a conversación
 

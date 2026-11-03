@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
-import { REGLA_CORREO_ACCION_LABELS, type ConexionGoogle, type CuentaCorreo, type ReglaCorreo, type ReglaCorreoAccion } from '@/types'
+import { IDIOMA_CORREO_LABELS, REGLA_CORREO_ACCION_LABELS, type ConexionGoogle, type CuentaCorreo, type IdiomaCorreo, type ReglaCorreo, type ReglaCorreoAccion } from '@/types'
 
 /**
  * Settings → Correo (fase 6-B): one card per mail account with its three
@@ -93,6 +93,7 @@ export default function CorreoSettingsPage() {
         📋 <b>Solo app</b> entra a /correo y a la lista &quot;correos&quot; del bot, nunca suena en Telegram ·
         🔔 <b>Alerta</b> suena al momento con botones y sale en la lista de las 8.
         Se evalúan en ese orden; lo que no está en ninguna lista lo decide el modelo (alta → alerta, lo demás → solo app).
+        El <b>idioma</b> de cada cuenta es el de su dueña: resumen, razón, alertas y listas de correo salen así, para copiar y pegar; el resto del bot sigue en español.
       </p>
 
       {aviso && <p className="text-sm text-emerald-400">{aviso}</p>}
@@ -140,6 +141,7 @@ function TarjetaCuenta({ cuenta, onSaved, onError, onAviso }: { cuenta: CuentaCo
   const [reglas, setReglas] = useState<ReglaCorreo[]>(cuenta.reglas)
   const [chat, setChat] = useState(cuenta.chat_id_alertas ? String(cuenta.chat_id_alertas) : '')
   const [horario, setHorario] = useState(cuenta.horario_alertas)
+  const [idioma, setIdioma] = useState<IdiomaCorreo>(cuenta.idioma ?? 'es')
   const [json, setJson] = useState('')
   const [importando, setImportando] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -159,7 +161,7 @@ function TarjetaCuenta({ cuenta, onSaved, onError, onAviso }: { cuenta: CuentaCo
       const res = await fetch('/api/correo/cuentas', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: cuenta.id, nombre, duena, activa, alertar, vip, ruido, solo_app: soloApp, reglas, chat_id_alertas: chat.trim() || null, horario_alertas: horario, ...extra }),
+        body: JSON.stringify({ id: cuenta.id, nombre, duena, activa, alertar, vip, ruido, solo_app: soloApp, reglas, chat_id_alertas: chat.trim() || null, horario_alertas: horario, idioma, ...extra }),
       })
       const j = await res.json().catch(() => null)
       if (!res.ok) throw new Error(j?.error ?? `HTTP ${res.status}`)
@@ -242,6 +244,9 @@ function TarjetaCuenta({ cuenta, onSaved, onError, onAviso }: { cuenta: CuentaCo
             <option value="">¿De quién?</option>
             <option value="Gabby">Gabby</option>
             <option value="Chelsea">Chelsea</option>
+          </select>
+          <select value={idioma} onChange={(e) => setIdioma(e.target.value as IdiomaCorreo)} title="Idioma de la dueña: el resumen, la razón, las alertas y las listas de correo salen así (para copiar y pegar)" className={inputCls}>
+            {(Object.keys(IDIOMA_CORREO_LABELS) as IdiomaCorreo[]).map((i) => <option key={i} value={i}>{IDIOMA_CORREO_LABELS[i]}</option>)}
           </select>
           <span className="text-xs text-[#888888]">{cuenta.conexion?.email ?? 'sin conexión'}</span>
           {!cuenta.conexion?.usa_gmail && <span className="text-xs text-amber-400">📧 Correo está apagado en Conexiones</span>}

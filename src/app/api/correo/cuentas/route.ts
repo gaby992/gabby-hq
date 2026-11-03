@@ -44,6 +44,7 @@ export async function PUT(request: Request) {
   if (b.chat_id_alertas === null || b.chat_id_alertas === '') cambios.chat_id_alertas = null
   else if (b.chat_id_alertas !== undefined && Number.isFinite(Number(b.chat_id_alertas))) cambios.chat_id_alertas = Number(b.chat_id_alertas)
   if (typeof b.horario_alertas === 'string') cambios.horario_alertas = b.horario_alertas.trim()
+  if (b.idioma === 'es' || b.idioma === 'en') cambios.idioma = b.idioma
   if (b.reiniciar_cursor === true) cambios.ultimo_history_id = null
   try {
     await guardarCuenta(b.id, cambios)

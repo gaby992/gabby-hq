@@ -118,6 +118,11 @@ export interface ReglaCorreo {
   alerta?: boolean
 }
 
+/** Ajuste 6c: the language of a mail account's owner. */
+export type IdiomaCorreo = 'es' | 'en'
+
+export const IDIOMA_CORREO_LABELS: Record<IdiomaCorreo, string> = { es: '🇲🇽 Español', en: '🇺🇸 English' }
+
 export interface CuentaCorreo {
   id: string
   conexion_id: string
@@ -135,6 +140,8 @@ export interface CuentaCorreo {
   alertar: boolean
   /** "07:00-21:00" in Cancún time. */
   horario_alertas: string
+  /** Ajuste 6c: the language of what is meant for the owner (summary, reason, alert, lists). */
+  idioma: IdiomaCorreo
   ultimo_history_id: string | null
   created_at: string
   /** Joined for the UI. */

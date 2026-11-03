@@ -11,7 +11,8 @@
 // like "listo 3". The "correos" command sends the WHOLE pending list of one
 // account grouped by urgency and records it (tipo 'correos').
 
-import { CORREO_URGENCIA_EMOJI, type CuentaCorreo } from '@/types'
+import { CORREO_URGENCIA_EMOJI, type CuentaCorreo, type IdiomaCorreo } from '@/types'
+import { textos } from './idioma'
 import { TELEGRAM_MAX, editMessageText, escapeHtml, sendTelegram } from '@/lib/asistente/telegram'
 import { actualizarTextoAlarma, guardarAlarma, ultimaListaCon, type AlarmaItem } from '@/lib/asistente/registro-listas'
 import { mensajeError } from '@/lib/errores'
@@ -31,17 +32,19 @@ function linkCorreo(texto = 'correos'): string {
   return `<a href="${appUrl()}/correo">${texto}</a>`
 }
 
-/** "📧 15. ✴️ Andrew (TOTT) · Landing page changes · hace 3h · 📨 Chelsea" */
-export function lineaCorreo(n: number, c: CorreoLite, now: Date = new Date()): string {
+/** "📧 15. ✴️ Andrew (TOTT) · Landing page changes · hace 3h · 📨 Chelsea" (ajuste 6c: in the account's language). */
+export function lineaCorreo(n: number, c: CorreoLite, now: Date = new Date(), idioma: IdiomaCorreo = 'es'): string {
+  const t = textos(idioma)
   const alta = c.urgencia === 'alta' ? `${CORREO_URGENCIA_EMOJI.alta} ` : ''
-  const edad = haceCuanto(c.recibido_en, now)
+  const edad = haceCuanto(c.recibido_en, now, idioma)
   const chelsea = c.estado === 'para_chelsea' ? ' · 📨 Chelsea' : ''
-  return `📧 ${n}. ${alta}${escapeHtml(quienCorto(c))} · ${escapeHtml(c.asunto ?? '(sin asunto)')}${edad ? ` · ${edad}` : ''}${chelsea}`
+  return `📧 ${n}. ${alta}${escapeHtml(quienCorto(c))} · ${escapeHtml(c.asunto ?? t.sinAsunto)}${edad ? ` · ${edad}` : ''}${chelsea}`
 }
 
 /** "✅ respondido · Lion's Gate (TOTT) · Proposal" — greyed (italic): not numbered, nothing to decide. */
-export function lineaRespondido(c: CorreoLite, quien: string | null): string {
-  return `<i>✅ ${quien ? `${escapeHtml(quien)} respondió` : 'respondido'} · ${escapeHtml(quienCorto(c))} · ${escapeHtml(c.asunto ?? '(sin asunto)')}</i>`
+export function lineaRespondido(c: CorreoLite, quien: string | null, idioma: IdiomaCorreo = 'es'): string {
+  const t = textos(idioma)
+  return `<i>✅ ${escapeHtml(t.respondio(quien))} · ${escapeHtml(quienCorto(c))} · ${escapeHtml(c.asunto ?? t.sinAsunto)}</i>`
 }
 
 export function pieDecidir(n: number): string {
@@ -73,20 +76,22 @@ export async function seccionCorreosDiaria(desde: number, items: AlarmaItem[], n
   const [pendientes, respondidos, cuentas] = await Promise.all([correosPendientes({ dias: 7 }), correosRespondidosVip(), cargarCuentasSinFallar()])
   if (pendientes.length === 0 && respondidos.length === 0) return '📧 Sin correos pendientes'
   const duena = (cuentaId: string) => cuentas.find((c) => c.id === cuentaId)?.duena ?? null
+  const idiomaDe = (cuentaId: string): IdiomaCorreo => cuentas.find((c) => c.id === cuentaId)?.idioma ?? 'es'
   const grupos = porCuenta(pendientes)
   for (const r of respondidos) if (!grupos.has(r.cuenta_id)) grupos.set(r.cuenta_id, { nombre: r.cuenta, rows: [] })
   const bloques: string[] = []
   let n = desde
   const primero = desde + 1
   for (const [cuentaId, g] of Array.from(grupos.entries())) {
+    const idioma = idiomaDe(cuentaId)
     const lines = [`📧 <b>${escapeHtml(g.nombre)} (${g.rows.length})</b>`]
     for (const c of g.rows.slice(0, MAX_EN_LISTA_DIARIA)) {
       n += 1
       items.push({ n, correo_id: c.id })
-      lines.push(lineaCorreo(n, c, now))
+      lines.push(lineaCorreo(n, c, now, idioma))
     }
-    if (g.rows.length > MAX_EN_LISTA_DIARIA) lines.push(`· +${g.rows.length - MAX_EN_LISTA_DIARIA} más → ${linkCorreo()}`)
-    for (const r of respondidos.filter((x) => x.cuenta_id === cuentaId)) lines.push(lineaRespondido(r, duena(cuentaId)))
+    if (g.rows.length > MAX_EN_LISTA_DIARIA) lines.push(`· ${textos(idioma).mas(g.rows.length - MAX_EN_LISTA_DIARIA, linkCorreo())}`)
+    for (const r of respondidos.filter((x) => x.cuenta_id === cuentaId)) lines.push(lineaRespondido(r, duena(cuentaId), idioma))
     bloques.push(lines.join('\n'))
   }
   if (n > desde) bloques.push(pieDecidir(primero))
@@ -113,8 +118,6 @@ export async function cuentaPorTexto(texto: string | null | undefined): Promise<
     ?? null
 }
 
-const TITULO_GRUPO: Record<GrupoCorreo, string> = { alta: '✴️ Alta', respuesta: '✉️ Necesitan respuesta', resto: 'Resto' }
-
 /**
  * Ajuste 6-2: the "correos" list — EVERY pending mail of the account (or of
  * all accounts), numbered, grouped alta / necesita respuesta / resto, with
@@ -126,28 +129,33 @@ export async function construirListaCorreos(cuenta: CuentaCorreo | null, now: Da
     correosRespondidosVip({ cuentaId: cuenta?.id ?? null }),
     cargarCuentasSinFallar(),
   ])
-  const nombre = cuenta ? escapeHtml(cuenta.nombre) : 'todas las cuentas'
+  // One account → its language; every account → Spanish headers, each line in its account's language.
+  const idioma: IdiomaCorreo = cuenta?.idioma ?? 'es'
+  const t = textos(idioma)
+  const idiomaDe = (cuentaId: string): IdiomaCorreo => cuenta?.idioma ?? cuentas.find((c) => c.id === cuentaId)?.idioma ?? 'es'
+  const duenaDe = (cuentaId: string) => cuentas.find((c) => c.id === cuentaId)?.duena ?? null
+  const nombre = cuenta ? escapeHtml(cuenta.nombre) : t.todasLasCuentas
   const items: AlarmaItem[] = []
   if (pendientes.length === 0) {
-    const cola = respondidos.length > 0 ? '\n' + respondidos.map((r) => lineaRespondido(r, cuentas.find((c) => c.id === r.cuenta_id)?.duena ?? null)).join('\n') : ''
-    return { html: `📧 <b>Correos · ${nombre} (0)</b>\nNada pendiente 🎉 · ${linkCorreo('/correo')}${cola}`, items, total: 0 }
+    const cola = respondidos.length > 0 ? '\n' + respondidos.map((r) => lineaRespondido(r, duenaDe(r.cuenta_id), idiomaDe(r.cuenta_id))).join('\n') : ''
+    return { html: `📧 <b>${t.correos} · ${nombre} (0)</b>\n${t.nadaPendiente} · ${linkCorreo('/correo')}${cola}`, items, total: 0 }
   }
-  const bloques = [`📧 <b>Correos · ${nombre} (${pendientes.length})</b>`]
+  const bloques = [`📧 <b>${t.correos} · ${nombre} (${pendientes.length})</b>`]
   const mostrados = pendientes.slice(0, MAX_EN_LISTA_CORREOS)
   let n = 0
   for (const grupo of ['alta', 'respuesta', 'resto'] as GrupoCorreo[]) {
     const del = mostrados.filter((c) => grupoDe(c) === grupo)
     if (del.length === 0) continue
-    const lines = [`<b>${TITULO_GRUPO[grupo]}</b>`]
+    const lines = [`<b>${t.grupos[grupo]}</b>`]
     for (const c of del) {
       n += 1
       items.push({ n, correo_id: c.id })
-      lines.push(cuenta ? lineaCorreo(n, c, now) : `${lineaCorreo(n, c, now)} · ${escapeHtml(c.cuenta)}`)
+      lines.push(cuenta ? lineaCorreo(n, c, now, idioma) : `${lineaCorreo(n, c, now, idiomaDe(c.cuenta_id))} · ${escapeHtml(c.cuenta)}`)
     }
     bloques.push(lines.join('\n'))
   }
-  if (pendientes.length > MAX_EN_LISTA_CORREOS) bloques.push(`· +${pendientes.length - MAX_EN_LISTA_CORREOS} más → ${linkCorreo('/correo')}`)
-  if (respondidos.length > 0) bloques.push(respondidos.map((r) => lineaRespondido(r, cuentas.find((c) => c.id === r.cuenta_id)?.duena ?? null)).join('\n'))
+  if (pendientes.length > MAX_EN_LISTA_CORREOS) bloques.push(`· ${t.mas(pendientes.length - MAX_EN_LISTA_CORREOS, linkCorreo('/correo'))}`)
+  if (respondidos.length > 0) bloques.push(respondidos.map((r) => lineaRespondido(r, duenaDe(r.cuenta_id), idiomaDe(r.cuenta_id))).join('\n'))
   bloques.push(pieDecidir(1))
   return { html: bloques.join('\n\n'), items, total: pendientes.length }
 }

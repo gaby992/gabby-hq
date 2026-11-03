@@ -5,7 +5,7 @@
 // and where/when to alert in Telegram.
 
 import { createServerClient } from '@/lib/supabase-server'
-import type { CuentaCorreo, NivelRemitente, ReglaCorreo, ReglaCorreoAccion } from '@/types'
+import type { CuentaCorreo, IdiomaCorreo, NivelRemitente, ReglaCorreo, ReglaCorreoAccion } from '@/types'
 import { cancunHm } from '@/lib/asistente/cancun'
 
 const COLS = '*, conexion:conexiones_google(email, usa_gmail, activa, company_id)'
@@ -20,6 +20,7 @@ function fila(r: Record<string, unknown>): CuentaCorreo {
     solo_app: normalizarLista(Array.isArray(r.solo_app) ? (r.solo_app as string[]) : []),
     reglas: normalizarReglas(Array.isArray(r.reglas) ? (r.reglas as unknown[]) : []),
     horario_alertas: typeof r.horario_alertas === 'string' && r.horario_alertas ? r.horario_alertas : '07:00-21:00',
+    idioma: r.idioma === 'en' ? 'en' : 'es',
   }
 }
 
@@ -41,7 +42,7 @@ export async function cuentaPorId(id: string): Promise<CuentaCorreo | null> {
   return data ? fila(data) : null
 }
 
-export type CambiosCuenta = Partial<Pick<CuentaCorreo, 'nombre' | 'duena' | 'activa' | 'vip' | 'ruido' | 'solo_app' | 'reglas' | 'chat_id_alertas' | 'alertar' | 'horario_alertas' | 'ultimo_history_id'>>
+export type CambiosCuenta = Partial<Pick<CuentaCorreo, 'nombre' | 'duena' | 'activa' | 'vip' | 'ruido' | 'solo_app' | 'reglas' | 'chat_id_alertas' | 'alertar' | 'horario_alertas' | 'idioma' | 'ultimo_history_id'>>
 
 export async function guardarCuenta(id: string, cambios: CambiosCuenta): Promise<void> {
   const update: Record<string, unknown> = { ...cambios }
@@ -50,12 +51,15 @@ export async function guardarCuenta(id: string, cambios: CambiosCuenta): Promise
   if (cambios.solo_app) update.solo_app = normalizarLista(cambios.solo_app)
   if (cambios.reglas) update.reglas = normalizarReglas(cambios.reglas)
   if (cambios.horario_alertas !== undefined && !/^\d{2}:\d{2}-\d{2}:\d{2}$/.test(cambios.horario_alertas)) update.horario_alertas = '07:00-21:00'
+  if (cambios.idioma !== undefined) update.idioma = (['es', 'en'] as IdiomaCorreo[]).includes(cambios.idioma) ? cambios.idioma : 'es'
   let { error } = await createServerClient().from('cuentas_correo').update(update).eq('id', id)
-  if (error && update.solo_app !== undefined && /solo_app/.test(error.message)) {
-    // Before sql/2026-11-asistente-fase6c-niveles.sql: the column is not there yet.
-    console.warn(`[cuentas_correo] sin migración 6c (${error.message}); guardo sin solo_app`)
-    delete update.solo_app
-    ;({ error } = await createServerClient().from('cuentas_correo').update(update).eq('id', id))
+  // Before sql/2026-11-asistente-fase6c-niveles.sql: `solo_app` / `idioma` are not there yet.
+  for (const col of ['solo_app', 'idioma'] as const) {
+    if (error && update[col] !== undefined && new RegExp(col).test(error.message)) {
+      console.warn(`[cuentas_correo] sin migración 6c (${error.message}); guardo sin ${col}`)
+      delete update[col]
+      ;({ error } = await createServerClient().from('cuentas_correo').update(update).eq('id', id))
+    }
   }
   if (error) throw new Error(`Supabase cuentas_correo: ${error.message}`)
 }

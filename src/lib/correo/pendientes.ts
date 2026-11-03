@@ -7,7 +7,8 @@
 // inbox-IM's `im_triaje`. "Pending" = estado nuevo or para_chelsea.
 
 import { createServerClient } from '@/lib/supabase-server'
-import type { Correo, CorreoEstado } from '@/types'
+import type { Correo, CorreoEstado, IdiomaCorreo } from '@/types'
+import { textos } from './idioma'
 
 /** A mail as the lists and the interpreter see it: no body. */
 export type CorreoLite = Pick<Correo, 'id' | 'cuenta_id' | 'de_nombre' | 'de_email' | 'asunto' | 'resumen' | 'recibido_en' | 'urgencia' | 'tipo' | 'estado' | 'alertado' | 'gmail_thread_id' | 'vip' | 'respondido_en'> & {
@@ -108,12 +109,9 @@ export function quienCorto(c: Pick<CorreoLite, 'de_nombre' | 'de_email'>): strin
   return c.de_email ?? '(sin remitente)'
 }
 
-/** "hace 5 min" · "hace 3h" · "hace 2d" — how old a mail is, for a list line. */
-export function haceCuanto(iso: string | null | undefined, now: Date = new Date()): string {
+/** "hace 5 min" · "hace 3h" · "hace 2d" (or "5 min ago" for an English account) — how old a mail is, for a list line. */
+export function haceCuanto(iso: string | null | undefined, now: Date = new Date(), idioma: IdiomaCorreo = 'es'): string {
   if (!iso) return ''
   const min = Math.max(0, Math.round((now.getTime() - new Date(iso).getTime()) / 60_000))
-  if (min < 60) return `hace ${min} min`
-  const h = Math.round(min / 60)
-  if (h < 24) return `hace ${h}h`
-  return `hace ${Math.round(h / 24)}d`
+  return textos(idioma).hace(min)
 }

@@ -99,7 +99,7 @@ export async function decidirCorreo(correoId: string, accion: CorreoAccion, opts
   void (async () => {
     const { editarAlertaTrasDecision } = await import('./alertas')
     const { tacharCorreoEnLista } = await import('./listas')
-    await editarAlertaTrasDecision(data, accion, { eraRespondido, duena: cuenta?.duena ?? null })
+    await editarAlertaTrasDecision(data, accion, { eraRespondido, duena: cuenta?.duena ?? null, idioma: cuenta?.idioma })
     await tacharCorreoEnLista(c.id, eraRespondido ? `✅ ${MARCA[accion]}` : MARCA[accion])
   })().catch((err) => console.error(`[correo] tras decidir: ${mensajeError(err)}`))
   const quien = remitenteCorto(c)

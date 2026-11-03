@@ -12,7 +12,8 @@
 // Output: { urgencia, tipo, categoria, confianza, resumen, razon } plus the
 // state the rules decided (if any) and whether the alert is forced.
 
-import type { CorreoEstado, CorreoTipo, CorreoUrgencia, CuentaCorreo } from '@/types'
+import type { CorreoEstado, CorreoTipo, CorreoUrgencia, CuentaCorreo, IdiomaCorreo } from '@/types'
+import { instruccionIdioma } from './idioma'
 import { llamarLlm, llmConfigCorreo, nombreModelo, type LlmTarget } from '@/lib/asistente/llm'
 import { nivelDe, reglaQueAplica } from './cuentas'
 import { mensajeError } from '@/lib/errores'
@@ -105,7 +106,8 @@ export function clasificarPorReglas(c: EntradaCorreo, cuenta: Pick<CuentaCorreo,
 
 // ── LLM ──────────────────────────────────────────────────────────────────
 
-export function systemPromptClasificador(): string {
+export function systemPromptClasificador(idioma: IdiomaCorreo = 'es'): string {
+  const extra = instruccionIdioma(idioma)
   return [
     'Eres el clasificador de correo de una agencia de marketing (Interactive Marketing, Cancún) que atiende clientes en EE. UU. Lees UN correo y respondes SOLO un JSON, nada más.',
     '',
@@ -124,6 +126,7 @@ export function systemPromptClasificador(): string {
     'RAZON: una frase corta de por qué esa urgencia y ese tipo.',
     'CONFIANZA: 0.9+ si es obvio; 0.5 o menos si dudas entre dos opciones.',
     'No inventes nada que no esté en el correo.',
+    ...(extra ? ['', extra] : []),
   ].join('\n')
 }
 
@@ -172,8 +175,8 @@ export function userPromptClasificador(c: EntradaCorreo): string {
   return lines.join('\n')
 }
 
-export async function clasificarConLlm(c: EntradaCorreo, target: LlmTarget = llmConfigCorreo()): Promise<Clasificacion & { modelo: string; tokensIn: number; tokensOut: number; ms: number }> {
-  const r = await llamarLlm(target, systemPromptClasificador(), userPromptClasificador(c), { maxTokens: MAX_TOKENS, timeoutMs: TIMEOUT_MS, json: true })
+export async function clasificarConLlm(c: EntradaCorreo, target: LlmTarget = llmConfigCorreo(), idioma: IdiomaCorreo = 'es'): Promise<Clasificacion & { modelo: string; tokensIn: number; tokensOut: number; ms: number }> {
+  const r = await llamarLlm(target, systemPromptClasificador(idioma), userPromptClasificador(c), { maxTokens: MAX_TOKENS, timeoutMs: TIMEOUT_MS, json: true })
   const clas = validarClasificacion(extraerJson(r.text), c.asunto ?? '(sin asunto)')
   return { ...clas, modelo: nombreModelo(target), tokensIn: r.tokensIn, tokensOut: r.tokensOut, ms: r.ms }
 }
@@ -183,7 +186,7 @@ export async function clasificarConLlm(c: EntradaCorreo, target: LlmTarget = llm
  * yields urgencia media / fyi with the failure in `razon`, so the mail
  * still shows up in the feed (and a VIP still alerts).
  */
-export async function clasificar(c: EntradaCorreo, cuenta: Pick<CuentaCorreo, 'vip' | 'ruido' | 'solo_app' | 'reglas'>, target?: LlmTarget): Promise<Resultado> {
+export async function clasificar(c: EntradaCorreo, cuenta: Pick<CuentaCorreo, 'vip' | 'ruido' | 'solo_app' | 'reglas'> & { idioma?: IdiomaCorreo }, target?: LlmTarget): Promise<Resultado> {
   const asunto = c.asunto ?? '(sin asunto)'
   const regla = clasificarPorReglas(c, cuenta)
   const base: Clasificacion = { urgencia: 'media', tipo: 'fyi', categoria: 'informativo', confianza: 0, resumen: asunto, razon: '' }
@@ -193,7 +196,7 @@ export async function clasificar(c: EntradaCorreo, cuenta: Pick<CuentaCorreo, 'v
     return { clas: { ...base, ...regla.fija, razon: regla.razon }, estado: regla.estado ?? 'nuevo', alertaForzada: regla.alerta, vip, soloApp, modelo: null, tokensIn: 0, tokensOut: 0, ms: 0 }
   }
   try {
-    const llm = await clasificarConLlm(c, target)
+    const llm = await clasificarConLlm(c, target, cuenta.idioma ?? 'es')
     const { modelo, tokensIn, tokensOut, ms, ...clas } = llm
     const final: Clasificacion = regla ? { ...clas, ...regla.fija, razon: `${regla.razon} · ${clas.razon}` } : clas
     return { clas: final, estado: regla?.estado ?? 'nuevo', alertaForzada: regla?.alerta ?? false, vip, soloApp, modelo, tokensIn, tokensOut, ms }

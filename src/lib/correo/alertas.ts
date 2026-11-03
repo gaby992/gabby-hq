@@ -15,7 +15,8 @@
 // (answered is not closed for Gabby); "📨 Para Chelsea" keeps [Lo hago yo].
 
 import { createServerClient } from '@/lib/supabase-server'
-import { CORREO_URGENCIA_EMOJI, CORREO_TIPO_LABELS, type Correo, type CorreoAccion, type CuentaCorreo } from '@/types'
+import { CORREO_URGENCIA_EMOJI, type Correo, type CorreoAccion, type CuentaCorreo, type IdiomaCorreo } from '@/types'
+import { textos } from './idioma'
 import { allowedChatIds, editMessageText, escapeHtml, inlineKeyboard, sendTelegram, type InlineButton } from '@/lib/asistente/telegram'
 import { mensajeError } from '@/lib/errores'
 import { remitenteCorto } from './decisiones'
@@ -60,10 +61,12 @@ export function botonesTrasEstado(c: Pick<Correo, 'id' | 'estado'>) {
 /** Hours those leftover buttons stay valid. */
 export const HORAS_BOTON_TRAS_ESTADO = HORAS_RESPONDIDO_VISIBLE
 
-export function textoAlerta(c: Correo, cuenta: Pick<CuentaCorreo, 'nombre'>): string {
+/** The alert's body, in the account's language (ajuste 6c) so it can be pasted to the owner; the buttons stay in Spanish. */
+export function textoAlerta(c: Correo, cuenta: Pick<CuentaCorreo, 'nombre'> & { idioma?: IdiomaCorreo }): string {
+  const t = textos(cuenta.idioma)
   const u = c.urgencia ?? 'media'
-  const cabecera = `📧 <b>${escapeHtml(cuenta.nombre)}</b> · ${CORREO_URGENCIA_EMOJI[u]} ${u}${c.tipo ? ` · ${escapeHtml(CORREO_TIPO_LABELS[c.tipo].toLowerCase())}` : ''} · De: ${escapeHtml(remitenteCorto(c))}`
-  const lines = [cabecera, `<b>${escapeHtml(c.asunto ?? '(sin asunto)')}</b>`]
+  const cabecera = `📧 <b>${escapeHtml(cuenta.nombre)}</b> · ${CORREO_URGENCIA_EMOJI[u]} ${t.urgencia(u)}${c.tipo ? ` · ${escapeHtml(t.tipo(c.tipo))}` : ''} · ${t.de} ${escapeHtml(remitenteCorto(c))}`
+  const lines = [cabecera, `<b>${escapeHtml(c.asunto ?? t.sinAsunto)}</b>`]
   if (c.resumen && c.resumen !== c.asunto) lines.push(escapeHtml(c.resumen))
   if (c.razon) lines.push(`<i>${escapeHtml(c.razon)}</i>`)
   return lines.join('\n')
@@ -102,17 +105,19 @@ export async function enviarAlerta(c: Correo, cuenta: CuentaCorreo): Promise<boo
 }
 
 /** "✅ Chelsea respondió · Asunto · De: …" (or "✅ Respondido" when the account has no owner name). */
-export function textoRespondido(c: Pick<Correo, 'asunto' | 'de_nombre' | 'de_email'>, quien: string | null, cola = ''): string {
-  return `✅ <b>${quien ? `${escapeHtml(quien)} respondió` : 'Respondido'}</b>${cola} · ${escapeHtml(c.asunto ?? '(sin asunto)')} · De: ${escapeHtml(remitenteCorto(c))}`
+export function textoRespondido(c: Pick<Correo, 'asunto' | 'de_nombre' | 'de_email'>, quien: string | null, cola = '', idioma: IdiomaCorreo = 'es'): string {
+  const t = textos(idioma)
+  const titulo = t.respondio(quien)
+  return `✅ <b>${escapeHtml(titulo.charAt(0).toUpperCase() + titulo.slice(1))}</b>${cola} · ${escapeHtml(c.asunto ?? t.sinAsunto)} · ${t.de} ${escapeHtml(remitenteCorto(c))}`
 }
 
 /**
  * The autoresolver saw a reply: the alert becomes "✅ Chelsea respondió" but
  * KEEPS [Lo hago yo] [Tarea] (ajuste 6-6): answered is not closed for Gabby.
  */
-export async function marcarRespondidoEnTelegram(c: Correo, cuenta: Pick<CuentaCorreo, 'duena'> | null): Promise<void> {
+export async function marcarRespondidoEnTelegram(c: Correo, cuenta: (Pick<CuentaCorreo, 'duena'> & { idioma?: IdiomaCorreo }) | null): Promise<void> {
   if (!c.telegram_chat_id || !c.telegram_message_id) return
-  await editMessageText(Number(c.telegram_chat_id), Number(c.telegram_message_id), textoRespondido(c, cuenta?.duena ?? null), {
+  await editMessageText(Number(c.telegram_chat_id), Number(c.telegram_message_id), textoRespondido(c, cuenta?.duena ?? null, '', cuenta?.idioma ?? 'es'), {
     html: true,
     replyMarkup: botonesTrasEstado({ id: c.id, estado: 'respondido' }),
   })
@@ -125,10 +130,10 @@ const TITULO: Record<CorreoAccion, string> = { chelsea: '📨 Para Chelsea', yo:
  * subject, and the buttons that still make sense for its new state.
  * `eraRespondido`: it had been answered → "✅ Respondido · 📝 tarea creada".
  */
-export async function editarAlertaTrasDecision(c: Correo, accion: CorreoAccion, opts: { eraRespondido: boolean; duena: string | null }): Promise<void> {
+export async function editarAlertaTrasDecision(c: Correo, accion: CorreoAccion, opts: { eraRespondido: boolean; duena: string | null; idioma?: IdiomaCorreo }): Promise<void> {
   if (!c.telegram_chat_id || !c.telegram_message_id) return
   const texto = opts.eraRespondido && (accion === 'yo' || accion === 'tarea')
-    ? textoRespondido(c, opts.duena, ' · 📝 tarea creada')
+    ? textoRespondido(c, opts.duena, ' · 📝 tarea creada', opts.idioma ?? 'es')
     : `${TITULO[accion]} · ${escapeHtml(c.asunto ?? '(sin asunto)')} · De: ${escapeHtml(remitenteCorto(c))}`
   await editMessageText(Number(c.telegram_chat_id), Number(c.telegram_message_id), texto, { html: true, replyMarkup: botonesTrasEstado(c) })
 }

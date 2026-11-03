@@ -7,12 +7,17 @@
 --     🔔 Alerta    → columna `vip`      (Telegram inmediato con botones + lista de las 8)
 --   Las columnas conservan su nombre viejo; la app las muestra con los nombres nuevos.
 
--- ── 1. La lista nueva ─────────────────────────────────────────────────────
+-- ── 1. Columnas nuevas ────────────────────────────────────────────────────
 alter table cuentas_correo add column if not exists solo_app jsonb not null default '[]'::jsonb;
+-- Idioma de la dueña ('es' | 'en'): resumen, razón, alertas y listas de correo salen así.
+alter table cuentas_correo add column if not exists idioma text not null default 'es';
+alter table cuentas_correo drop constraint if exists cuentas_correo_idioma_check;
+alter table cuentas_correo add constraint cuentas_correo_idioma_check check (idioma in ('es', 'en'));
 
 -- ── 2. Precarga en IM Chelsea (se suma a lo que haya; sin duplicados) ────────
 --   3 nov (segunda tanda): slack.com en Silencio; las respuestas de calendario
---   ("Accepted: …" / "Declined: …") en Solo app por asunto (regla `^accepted:`).
+--   ("Accepted: …" / "Declined: …" / "Tentative: …") en Solo app por asunto
+--   (regla `^accepted:` = el asunto empieza por eso). Idioma de IM Chelsea → 'en'.
 update cuentas_correo
    set ruido = (
      select coalesce(jsonb_agg(distinct x), '[]'::jsonb)
@@ -22,9 +27,10 @@ update cuentas_correo
    ),
        reglas = reglas || coalesce((
      select jsonb_agg(n)
-       from jsonb_array_elements('[{"match":"^accepted:","accion":"solo_app","alerta":false},{"match":"^declined:","accion":"solo_app","alerta":false}]'::jsonb) as n
+       from jsonb_array_elements('[{"match":"^accepted:","accion":"solo_app","alerta":false},{"match":"^declined:","accion":"solo_app","alerta":false},{"match":"^tentative:","accion":"solo_app","alerta":false}]'::jsonb) as n
       where not exists (select 1 from jsonb_array_elements(reglas) as e where e->>'match' = n->>'match')
    ), '[]'::jsonb),
+       idioma = 'en',
        solo_app = (
      select coalesce(jsonb_agg(distinct x), '[]'::jsonb)
        from jsonb_array_elements_text(solo_app || '["gabrielarangel169@gmail.com"]'::jsonb) as t(x)
@@ -32,5 +38,5 @@ update cuentas_correo
  where nombre = 'IM Chelsea';
 
 -- ── Verificación ──────────────────────────────────────────────────────────
--- Esperado: IM Chelsea con ≥ 15 en silencio, 1 en solo_app y 2 reglas `^accepted:` / `^declined:` → solo_app.
-select nombre, jsonb_array_length(ruido) silencio, jsonb_array_length(solo_app) solo_app, jsonb_array_length(vip) alerta, jsonb_array_length(reglas) reglas from cuentas_correo;
+-- Esperado: IM Chelsea con idioma 'en', ≥ 15 en silencio, 1 en solo_app y 3 reglas `^accepted:` / `^declined:` / `^tentative:` → solo_app.
+select nombre, idioma, jsonb_array_length(ruido) silencio, jsonb_array_length(solo_app) solo_app, jsonb_array_length(vip) alerta, jsonb_array_length(reglas) reglas from cuentas_correo;
