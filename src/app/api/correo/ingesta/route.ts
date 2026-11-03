@@ -9,6 +9,8 @@ import { mensajeError } from '@/lib/errores'
 // CRON_SECRET as the alarms. A logged-in browser may also trigger it
 // ("Leer ahora" in Settings → Correo). Long enough for 50 mails.
 export const dynamic = 'force-dynamic'
+// GET-only handler: without this, Next 14 caches every fetch (Supabase, Google) in its Data Cache.
+export const fetchCache = 'force-no-store'
 export const runtime = 'nodejs'
 export const maxDuration = 120
 

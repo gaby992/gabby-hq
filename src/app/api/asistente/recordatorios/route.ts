@@ -7,6 +7,8 @@ import { mensajeError } from '@/lib/errores'
 // alarms whose time has come. Same CRON_SECRET as the two daily alarms. No
 // retry loop: whatever fails stays pending and the next run picks it up.
 export const dynamic = 'force-dynamic'
+// GET-only handler: without this, Next 14 caches every fetch (Supabase, Google) in its Data Cache.
+export const fetchCache = 'force-no-store'
 export const runtime = 'nodejs'
 export const maxDuration = 60
 

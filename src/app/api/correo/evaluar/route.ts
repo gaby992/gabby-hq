@@ -9,6 +9,8 @@ import { mensajeError } from '@/lib/errores'
 // without changing any state, and stores the answers. `cuenta=` and
 // `dias=` (default 7) scope both.
 export const dynamic = 'force-dynamic'
+// GET-only handler: without this, Next 14 caches every fetch (Supabase, Google) in its Data Cache.
+export const fetchCache = 'force-no-store'
 export const runtime = 'nodejs'
 export const maxDuration = 120
 

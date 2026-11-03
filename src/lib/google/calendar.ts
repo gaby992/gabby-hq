@@ -92,6 +92,7 @@ async function llamar(method: string, path: string, body?: unknown): Promise<Rec
   const token = await accessToken(conn)
   const res = await fetch(`${BASE}${path}`, {
     method,
+    cache: 'no-store',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
   })

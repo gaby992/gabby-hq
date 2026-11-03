@@ -8,6 +8,8 @@ import { mensajeError } from '@/lib/errores'
 // through, so the check lives here). Nothing is recorded: the numbers only
 // matter in Telegram.
 export const dynamic = 'force-dynamic'
+// GET-only handler: without this, Next 14 caches every fetch (Supabase, Google) in its Data Cache.
+export const fetchCache = 'force-no-store'
 export const runtime = 'nodejs'
 export const maxDuration = 30
 

@@ -7,6 +7,8 @@ import { mensajeError } from '@/lib/errores'
 // `?test=1` and the same Bearer header. Never cached, and long enough to
 // survive the 30 s retry.
 export const dynamic = 'force-dynamic'
+// GET-only handler: without this, Next 14 caches every fetch (Supabase, Google) in its Data Cache.
+export const fetchCache = 'force-no-store'
 export const runtime = 'nodejs'
 export const maxDuration = 120
 

@@ -437,6 +437,7 @@ Para ver las corridas del Cron: **Settings → Cron Jobs**; cada job muestra la
 | Chelsea sale con "Correos: no se pudo consultar inbox-IM" | El proyecto Supabase de inbox-IM no respondió. El resto de la alarma sí sale. | Revisa `SUPABASE_INBOXIM_*` y el estado del proyecto. |
 | El mensaje llega "cortado" | Pasó de 4000 caracteres: se manda en varias partes, es normal. | Nada. |
 | Llega a la hora equivocada | Vercel Cron es UTC. 13:00 UTC = 8:00 Cancún; 23:00 UTC = 6:00 pm Cancún. | Verifica `vercel.json`. |
+| La lista de las 8 (o el cierre) trae tareas ya cerradas y no trae las nuevas, pero "dame la lista" en el bot sí está bien | **Bug del 3 nov 2026.** Next.js 14 cachea para siempre las respuestas de Supabase dentro de una ruta que solo exporta `GET` (los crons), aunque lleve `dynamic = 'force-dynamic'`: ese ajuste solo evita el render estático y leer `request.headers` no marca la ruta como dinámica. La lista NO venía de `bot_alarmas` (esa tabla solo guarda la numeración); venía de una copia vieja de la consulta `tasks?done=eq.false`. La ruta del bot (`POST`) nunca cacheó, por eso el bot sí veía lo real. | Arreglado: `createServerClient()` manda todo con `cache: 'no-store'` y las rutas GET llevan `fetchCache = 'force-no-store'`. Si vuelve a pasar, revisa que ningún `fetch` nuevo a Supabase/Google se haga sin el cliente de `supabase-server.ts` o sin `cache: 'no-store'`. |
 
 **Comportamientos que conviene saber**
 

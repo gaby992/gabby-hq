@@ -98,6 +98,7 @@ export async function conectarConCodigo(code: string): Promise<string> {
     throw new GoogleError('Google no devolvió refresh_token. Quita el acceso en myaccount.google.com/permissions y vuelve a conectar.')
   }
   const info = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+    cache: 'no-store',
     headers: { Authorization: `Bearer ${tokens.access_token}` },
   })
   const perfil = await info.json().catch(() => null)

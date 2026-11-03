@@ -7,6 +7,8 @@ import { mensajeError } from '@/lib/errores'
 // Google sends the browser back here with ?code=…&state=…. We trade the code
 // for tokens, store the refresh token encrypted, and go back to Settings.
 export const dynamic = 'force-dynamic'
+// GET-only handler: without this, Next 14 caches every fetch (Supabase, Google) in its Data Cache.
+export const fetchCache = 'force-no-store'
 export const runtime = 'nodejs'
 
 function volver(request: Request, q: string): NextResponse {
