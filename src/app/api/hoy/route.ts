@@ -5,6 +5,7 @@ import { ejecutarAccion } from '@/lib/asistente/acciones'
 import { correoAHorizonte, esHorizonte, limpiarQuien, moverTarea } from '@/lib/asistente/esperando'
 import { correosRecientes } from '@/lib/correo/pendientes'
 import { cargarCuentas } from '@/lib/correo/cuentas'
+import { listarPagos } from '@/lib/asistente/pagos'
 import { mensajeError } from '@/lib/errores'
 import type { Company, NotaEmpresa, RadarItem, Task } from '@/types'
 
@@ -23,7 +24,7 @@ export async function GET() {
   if (!(await isValidSession())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
     const db = createServerClient()
-    const [tasksRes, companiesRes, notasRes, radarRes, cuentas, correos] = await Promise.all([
+    const [tasksRes, companiesRes, notasRes, radarRes, cuentas, correos, pagos] = await Promise.all([
       db.from('tasks').select('*, company:companies(*), subtasks(*)').eq('done', false).order('created_at', { ascending: false }),
       db.from('companies').select('*').order('name'),
       db.from('notas_empresa').select('*'),
@@ -34,6 +35,11 @@ export async function GET() {
       }),
       // Pending = waiting on Gabby (nuevo) or handed to Chelsea. Never the body.
       correosRecientes({ estados: ['nuevo', 'para_chelsea'], dias: 14, max: 200 }),
+      // Fase 9b: active recurring payments, painted on their day in the Calendario view.
+      listarPagos().catch((err) => {
+        console.error(`[hoy] pagos: ${mensajeError(err)}`)
+        return []
+      }),
     ])
     if (tasksRes.error) throw new Error(`Supabase tasks: ${tasksRes.error.message}`)
     if (companiesRes.error) throw new Error(`Supabase companies: ${companiesRes.error.message}`)
@@ -49,6 +55,7 @@ export async function GET() {
       notas_error: notasRes.error?.message ?? null,
       correos: correos.filter((c) => activas.has(c.cuenta_id)),
       cuentas: cuentas.map((c) => ({ id: c.id, nombre: c.nombre, duena: c.duena, activa: c.activa, company_id: c.conexion?.company_id ?? null })),
+      pagos,
     })
   } catch (err) {
     const error = mensajeError(err)
@@ -73,6 +80,24 @@ export async function POST(request: Request) {
       if (!taskId) return NextResponse.json({ error: 'task_id requerido' }, { status: 400 })
       // "listo": done = true, the Calendar event goes, same wording as the bot.
       const texto = await ejecutarAccion({ accion: 'listo' }, [taskId])
+      return NextResponse.json({ ok: true, texto })
+    }
+    if (accion === 'fecha') {
+      // Fase 9b: a task dragged to a day in the calendar. Same edit the bot runs for "paypal para el viernes": the hour stays.
+      const taskId = typeof b.task_id === 'string' ? b.task_id : ''
+      const fecha = typeof b.fecha === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(b.fecha) ? b.fecha : ''
+      if (!taskId || !fecha) return NextResponse.json({ error: 'task_id y fecha (YYYY-MM-DD) requeridos' }, { status: 400 })
+      const texto = await ejecutarAccion({ accion: 'editar', cambios: { due_date: fecha } }, [taskId])
+      return NextResponse.json({ ok: true, texto })
+    }
+    if (accion === 'empresa') {
+      // Fase 9b: the "sin empresa" badge. Same edit as "la 5 es de PD".
+      const taskId = typeof b.task_id === 'string' ? b.task_id : ''
+      const companyId = typeof b.company_id === 'string' ? b.company_id : ''
+      if (!taskId || !companyId) return NextResponse.json({ error: 'task_id y company_id requeridos' }, { status: 400 })
+      const { data: c } = await createServerClient().from('companies').select('id, name').eq('id', companyId).maybeSingle<{ id: string; name: string }>()
+      if (!c) return NextResponse.json({ error: 'empresa no encontrada' }, { status: 404 })
+      const texto = await ejecutarAccion({ accion: 'editar', cambios: { company_id: c.id, company_name: c.name.trim() } }, [taskId])
       return NextResponse.json({ ok: true, texto })
     }
     if (accion === 'correo') {

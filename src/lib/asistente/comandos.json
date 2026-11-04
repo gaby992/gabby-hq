@@ -51,6 +51,7 @@
         { "ejemplo": "borra 3", "que": "la elimina de verdad, siempre con botón de confirmación (también \"bórrala\")" },
         { "ejemplo": "11 se llama URo pendiente", "que": "le cambia el título" },
         { "ejemplo": "paypal urgente", "que": "cambia la urgencia; \"paypal para el viernes\" la fecha; \"paypal es de PD\" la empresa; \"paypal mañana 3pm\" fecha y hora" },
+        { "ejemplo": "la 5 es de PD", "que": "le pone empresa a una tarea \"sin empresa\" (o se la cambia) por su número de la última lista; en la web, el badge gris \"sin empresa\" de la tarjeta abre el selector" },
         { "ejemplo": "pon en calendar la de TOTT", "que": "crea el evento de una tarea que ya existe" },
         { "ejemplo": "la de TOTT está esperando a Andrew", "que": "la deja en ⏳ Esperando con \"de quién\" (también \"la 3 esperando a Juan\"); \"la de TOTT ya no espera\" / \"la 3 vuelve a mí\" la retoma" },
         { "ejemplo": "la anterior es urgente", "que": "\"la anterior\" = la última tarea de la que hablaste" },

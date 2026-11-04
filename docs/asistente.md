@@ -21,6 +21,7 @@ sección y **no se empieza una fase hasta validar la anterior**.
 | 6c | Correo: tres niveles por remitente (🔇 Silencio · 📋 Solo app · 🔔 Alerta), "Reaplicar reglas", aprender desde el bot ("el 5 es silencio"), "Reclasificar sin modelo", regla `^asunto` → Solo app, idioma por cuenta | ✅ Construida — pendiente de validar (correr el SQL 6c) |
 | 7 | De comandos a conversación: memoria, sugerencias, "organízame", personalidad | ✅ Construida — pendiente de validar |
 | 9 | Tablero por horizonte en /hoy (Hoy sí o sí · Mañana · Esta semana · Esperando · Después · Correos), arrastrar tarjetas, estado "esperando", alarma de las 8 reordenada | ✅ Construida — pendiente de validar (correr el SQL 9) |
+| 9b | Tablero: franja de KPIs, vista Calendario (semana / mes, pagos recurrentes, arrastrar a un día), badge "sin empresa" editable, "la 5 es de PD" | ✅ Construida — pendiente de validar |
 
 ---
 
@@ -2440,6 +2441,68 @@ no cambia (sigue siendo la lista completa de una empresa).
 En tablet, 3 columnas por fila; en pantallas anchas (≥ 1536 px) las 6 en
 una fila, más ancho que el resto de la página.
 
+**H) Franja de KPIs (9b).** Debajo de los chips, cuatro números grandes:
+🔥 Hoy sí o sí · 🔺 Vencidas · ⏳ Esperando · 📧 Correos. Se calculan con
+la misma regla de columnas (`horizonteDe` / `columnaCorreo`) sobre lo que
+el chip de empresa deja pasar, así que coinciden siempre con los
+contadores de las columnas: "Vencidas" es la parte de 🔥 con fecha
+pasada; "Esperando" suma tareas y correos "Para Chelsea"; "Correos" es la
+columna 📧. Click en un KPI pasa a la vista Tablero, hace scroll a esa
+columna y la resalta un momento (Vencidas → 🔥).
+
+**I) Vista Calendario (9b).** Cuarta pestaña del toggle (Tablero |
+Prioridad | Empresas | Calendario), con sub-toggle **Semana | Mes**
+recordado en `localStorage` (`hoy.calendario`) junto a la vista
+(`hoy.vista`). Flechas ‹ › y "hoy" para moverse.
+
+| | Semana | Mes |
+| --- | --- | --- |
+| Forma | 7 columnas lun–dom, hoy resaltado en morado; en el teléfono se deslizan de lado | cuadrícula lun–dom; los días de otro mes atenuados |
+| Tarea | en su `due_date`: hora si tiene `due_time`, título, ★, badge de empresa; vencidas con borde rojo | hasta **3 chips por día** (una línea cada uno) y "+N"; **click en el día abre un panel lateral** con la lista completa de ese día (también acepta soltar) |
+| Esperando | en su fecha, con ⏳ y atenuada | igual |
+| Completadas | no salen | no salen |
+
+Arriba, la franja **📦 Sin fecha · N** plegada con el contador; al abrirla
+lista las tareas sin fecha para arrastrarlas a su día. **Arrastrar una
+tarea a otro día cambia `due_date` y conserva `due_time`**: va por
+`POST /api/hoy` con `accion: 'fecha'`, que ejecuta el mismo "editar" del
+bot (`paypal para el viernes`), con su sincronización de Calendar. En el
+teléfono, ⋯ en el chip abre un **selector de fecha** nativo. Click en un
+chip abre el panel de edición.
+
+Los **pagos recurrentes** (`pagos_recurrentes`, Settings → Pagos
+recurrentes) se pintan en su día como chip `💳 [IM] Vercel $20`, verde,
+punteado y **no arrastrable** (el día del pago se cambia en Settings; en
+meses cortos el día 31 cae en el último día, como en Calendar). Los chips
+respetan el chip de empresa. **Los eventos de Google Calendar NO se leen**:
+Calendar sigue siendo solo a pedido (regla de la fase 5).
+
+**J) Tareas sin empresa (9b).** Las tareas que llegan de un correo de una
+cuenta sin empresa, o del botón de inbox-IM, nacen sin empresa. En el
+panel de edición el selector **Empresa** ya era editable; en el tablero y
+el calendario la tarjeta muestra un badge gris **"sin empresa"** que, al
+click, se convierte en el selector directo (`POST /api/hoy` con
+`accion: 'empresa'`, el mismo "editar" del bot). En el bot: `la 5 es de PD`
+/ `el 3 es de IM` → el parser clásico lo lee como edición **por número de la
+última lista** (antes buscaba "la 5" en los títulos y, sin modelo, creaba
+una tarea "la 5 es de"); `quickbooks es de PD` / `la de quickbooks es de PD`
+por palabra del título; cualquier otra forma la entiende el intérprete con
+`cambiar` + `empresa`, que ya existía.
+
+**K) Franja "Por dónde iba" — regla (9b).** En producción la franja mostró 3
+notas y luego 2 sin que se editara ninguna. La franja ahora se construye
+**desde las notas** (`notas_empresa`, toda fila con texto), no desde las
+empresas: una nota cuya empresa ya no existe sale como "(empresa
+borrada)" en vez de desaparecer, y **ningún** filtro de edad, vista o
+refetch la oculta; solo un chip de empresa activo la reduce a esa empresa.
+Si una nota deja de aparecer, es que la fila ya no está (o quedó vacía):
+las notas reemplazadas o archivadas viven en `notas_historial`
+(`select company_id, nota, escrita_en, archivada_en from notas_historial
+order by archivada_en desc limit 10`); las formas de archivar son el
+botón **archivar** (notas de > 3 días, en la franja abierta y en
+Empresas), la sugerencia del bot "¿La archivo?" (notas de ≥ 20 días, fase
+7-B) y `nota PD:` sin texto (borra) o `nota PD: …` (reemplaza) desde el bot.
+
 ### 9b. Lo que hay que hacer a mano
 
 1. **Antes del deploy**: Supabase → SQL Editor →
@@ -2483,6 +2546,18 @@ Ninguna.
 6. **Móvil**: en el teléfono, /hoy desliza de columna en columna; en cada
    tarjeta ⋯ → "Mover a…" lista los destinos con la fecha a la que caen.
 7. **Vista recordada**: toca Prioridad, recarga: sigue en Prioridad.
+8. **(9b) Calendario → Semana**: arrastra **"Marketing Team"** al jueves.
+   El chip cambia de columna, conserva su hora si tenía, arriba sale
+   "✏️ «Marketing Team» … → vence jue …", y en /tasks la fecha es el
+   jueves. En Mes, click en ese jueves abre el panel con la tarea.
+9. **(9b) Badge "sin empresa"**: en el tablero, en la tarjeta **"Your
+   QuickBooks Line of Credit"** toca el badge gris "sin empresa", elige
+   **PD**. La tarjeta muestra el badge de PD; el chip PD la filtra. Desde
+   el bot, `la 5 es de PD` (número de la última lista) hace lo mismo.
+10. **(9b) KPIs**: con el chip IM, los cuatro números son solo de IM; click
+    en 🔺 Vencidas lleva a la columna 🔥 resaltada.
+11. **(9b) Pagos**: con un pago recurrente del día 15, en Calendario → Mes
+    ese día muestra `💳 [IM] Vercel …`; no se puede arrastrar.
 
 ### 9e. Qué puede fallar y dónde verlo
 
@@ -2495,6 +2570,9 @@ Ninguna.
 | La tarea de un correo no sale en 🔥 | La cuenta no tiene empresa y el chip filtra por empresa | Chip "Todas" (o "Sin empresa"). |
 | Una tarea vencida no aparece en 🔥 | Está en esperando (⏳) o es de la empresa Chelsea | Es la regla; "la 3 ya no espera" la regresa. |
 | El tablero no cambia después de arrastrar | `POST /api/hoy` devolvió error (línea roja arriba del tablero) | Logs de Vercel: `[hoy] POST mover: …`. |
+| Una nota desapareció de la franja | La fila ya no está en `notas_empresa` (archivada, reemplazada o borrada desde el bot) o hay un chip de empresa activo | Chip "Todas"; `notas_historial` conserva el texto (ver 9a-K). |
+| En Calendario no sale ningún pago | `pagos_recurrentes` vacía o todos inactivos, o la tabla no existe (SQL 5c) | Settings → Pagos recurrentes; logs `[hoy] pagos: …`. |
+| Al arrastrar a un día la hora se perdió | No debería: `accion: 'fecha'` solo toca `due_date` | Si pasa, logs `[hoy] POST fecha: …` y /tasks → la tarea. |
 
 ---
 

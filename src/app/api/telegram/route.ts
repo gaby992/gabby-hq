@@ -298,8 +298,8 @@ async function handleText(chatId: number, text: string, prefix: string | null) {
     case 'accion': {
       // "listo …" / "pasa …" / "borra …": by alarm number, "todo", or a word
       // of the title.
-      const r = await responderAccion(chatId, text, { accion: parsed.accion }, (nonce) =>
-        manejarAccion({ accion: parsed.accion }, parsed.arg, nonce), prefix)
+      const params: AccionParams = { accion: parsed.accion, cambios: parsed.cambios }
+      const r = await responderAccion(chatId, text, params, (nonce) => manejarAccion(params, parsed.arg, nonce), prefix)
       // Fase 7-B: after closing ONE task directly, propose the next one.
       if (parsed.accion === 'listo' && r && !r.candidatos?.length && !r.confirmar?.length && /^[\d\s,;]+$/.test(parsed.arg.trim()) && !parsed.arg.includes(',')) {
         const id = r.text.startsWith('✅') ? await idDeNumero(parsed.arg.trim()) : null

@@ -109,7 +109,8 @@ export type Parsed =
   | { kind: 'pregunta'; texto: string }
   | { kind: 'radar'; titulo: string }
   | { kind: 'nota'; nota: NotaParsed }
-  | { kind: 'accion'; accion: Accion; arg: string }
+  /** `cambios` (fase 9b): "la 5 es de PD" / "el 3 urgente" — an edit by list number, no title search. */
+  | { kind: 'accion'; accion: Accion; arg: string; cambios?: Cambios }
   | { kind: 'nota_tarea'; termino: string; texto: string }
   /** Title + trailing modifier(s). If no open task matches `termino`, `fallback` is the new task to create. */
   | { kind: 'edicion'; termino: string; cambios: Cambios; fallback: TareaParsed }
@@ -592,7 +593,14 @@ export function parseMensaje(raw: string, companies: CompanyRef[], today: string
     due_time: d.due_date ? h.due_time : null,
     calendar: cal.calendar,
   }
-  if (edicion) return { kind: 'edicion', termino: edicion.termino, cambios: edicion.cambios, fallback: tarea }
+  if (edicion) {
+    // Fase 9b: "la 5 es de PD", "el 3 para el viernes" name a line of the last list, not a title.
+    const num = edicion.termino.match(/^(?:el|la|los|las)?\s*(\d+)$/i)
+    if (num) return { kind: 'accion', accion: 'editar', arg: num[1], cambios: edicion.cambios }
+    // "la de quickbooks es de PD" → the title word is "quickbooks".
+    const termino = edicion.termino.replace(/^(?:la\s+(?:tarea\s+)?(?:de|del)|lo\s+de|el\s+de|la|el)\s+/i, '')
+    return { kind: 'edicion', termino: termino || edicion.termino, cambios: edicion.cambios, fallback: tarea }
+  }
   return { kind: 'tarea', tarea }
 }
 

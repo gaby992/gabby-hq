@@ -8,22 +8,26 @@ import TaskCard from '@/components/TaskCard'
 import CompanyNote from '@/components/CompanyNote'
 import EisenhowerMatrix from '@/components/EisenhowerMatrix'
 import QueSigueCard from '@/components/QueSigueCard'
-import Tablero from '@/components/Tablero'
+import Tablero, { idColumna, type Columna } from '@/components/Tablero'
+import Calendario, { type ModoCalendario, type PagoCalendario } from '@/components/Calendario'
 import { daysSince, relativeDaysEs, todayYmd } from '@/lib/dates'
 import { edadNota } from '@/lib/notas'
 import { findChelseaCompany } from '@/lib/chelsea'
-import { estaEsperando } from '@/lib/horizonte'
+import { columnaCorreo, estaEsperando, horizonteDe } from '@/lib/horizonte'
 
 const MAX_TASKS_PER_BLOCK = 5
 
 /** Fase 9: the three ways to look at the same data. The last one used is remembered. */
-type Vista = 'tablero' | 'prioridad' | 'empresas'
+type Vista = 'tablero' | 'prioridad' | 'empresas' | 'calendario'
 const VISTAS: { id: Vista; label: string }[] = [
   { id: 'tablero', label: 'Tablero' },
   { id: 'prioridad', label: 'Prioridad' },
   { id: 'empresas', label: 'Empresas' },
+  { id: 'calendario', label: 'Calendario' },
 ]
 const VISTA_KEY = 'hoy.vista'
+/** Fase 9b: Semana | Mes inside the Calendario view, remembered next to the view. */
+const MODO_CAL_KEY = 'hoy.calendario'
 
 interface CuentaLite {
   id: string
@@ -41,6 +45,7 @@ interface Datos {
   notas_error: string | null
   correos: CorreoLite[]
   cuentas: CuentaLite[]
+  pagos: PagoCalendario[]
 }
 
 interface Block {
@@ -55,11 +60,20 @@ interface Block {
 function leerVista(): Vista {
   try {
     const v = localStorage.getItem(VISTA_KEY)
-    if (v === 'tablero' || v === 'prioridad' || v === 'empresas') return v
+    if (v === 'tablero' || v === 'prioridad' || v === 'empresas' || v === 'calendario') return v
   } catch {
     /* private mode */
   }
   return 'tablero'
+}
+
+function leerModoCalendario(): ModoCalendario {
+  try {
+    if (localStorage.getItem(MODO_CAL_KEY) === 'mes') return 'mes'
+  } catch {
+    /* private mode */
+  }
+  return 'semana'
 }
 
 /**
@@ -72,6 +86,9 @@ export default function HoyPage() {
   const [error, setError] = useState<string | null>(null)
   const [inboxCount, setInboxCount] = useState<number | null>(null)
   const [vista, setVista] = useState<Vista>('tablero')
+  const [modoCal, setModoCal] = useState<ModoCalendario>('semana')
+  // Fase 9b: the column a KPI click points at, for a moment.
+  const [resaltada, setResaltada] = useState<Columna | null>(null)
   const [filtro, setFiltro] = useState<string>('all')
   const [notasAbiertas, setNotasAbiertas] = useState<Set<string>>(new Set())
   const [franjaAbierta, setFranjaAbierta] = useState(true)
@@ -81,7 +98,7 @@ export default function HoyPage() {
 
   const today = todayYmd()
 
-  useEffect(() => { setVista(leerVista()) }, [])
+  useEffect(() => { setVista(leerVista()); setModoCal(leerModoCalendario()) }, [])
 
   function cambiarVista(v: Vista) {
     setVista(v)
@@ -90,6 +107,25 @@ export default function HoyPage() {
     } catch {
       /* private mode */
     }
+  }
+
+  function cambiarModoCal(m: ModoCalendario) {
+    setModoCal(m)
+    try {
+      localStorage.setItem(MODO_CAL_KEY, m)
+    } catch {
+      /* private mode */
+    }
+  }
+
+  /** A KPI click: the board, scrolled to that column, with a ring for a moment. */
+  function irAColumna(col: Columna) {
+    cambiarVista('tablero')
+    setResaltada(col)
+    requestAnimationFrame(() => {
+      document.getElementById(idColumna(col))?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
+    })
+    window.setTimeout(() => setResaltada((r) => (r === col ? null : r)), 1600)
   }
 
   const fetchData = useCallback(async () => {
@@ -199,13 +235,43 @@ export default function HoyPage() {
 
   const tareaAbierta = abierta ? tasks.find((t) => t.id === abierta) ?? null : null
 
+  // ── Fase 9b: the four numbers, under the chips, on the filtered data ──
+  const kpis = useMemo(() => {
+    let hoy = 0
+    let vencidas = 0
+    let esperando = 0
+    for (const t of tareasFiltradas) {
+      const h = horizonteDe(t, today, chelseaId)
+      if (h === 'hoy') {
+        hoy += 1
+        if (t.due_date && t.due_date < today) vencidas += 1
+      } else if (h === 'esperando') esperando += 1
+    }
+    let correos = 0
+    for (const c of correosFiltrados) {
+      const col = columnaCorreo(c)
+      if (col === 'correos') correos += 1
+      else if (col === 'esperando') esperando += 1
+    }
+    return [
+      { col: 'hoy' as Columna, emoji: '🔥', label: 'Hoy sí o sí', n: hoy, color: 'text-red-400' },
+      { col: 'hoy' as Columna, emoji: '🔺', label: 'Vencidas', n: vencidas, color: vencidas > 0 ? 'text-red-400' : 'text-[#888888]' },
+      { col: 'esperando' as Columna, emoji: '⏳', label: 'Esperando', n: esperando, color: 'text-[#7F77DD]' },
+      { col: 'correos' as Columna, emoji: '📧', label: 'Correos', n: correos, color: 'text-[#1D9E75]' },
+    ]
+  }, [tareasFiltradas, correosFiltrados, today, chelseaId])
+
   if (!datos && !error) {
     return <div className="text-sm text-[#888888] py-8 text-center">Loading...</div>
   }
 
-  const notasConTexto = companies
-    .map((c) => ({ company: c, nota: notas.find((n) => n.company_id === c.id) ?? null }))
-    .filter((x): x is { company: Company; nota: NotaEmpresa } => !!x.nota && x.nota.nota.trim().length > 0)
+  // Fase 9b: EVERY non-empty note shows, in company order; only an active
+  // company chip narrows it. Never hidden by age, view or refetch.
+  const orden = new Map(companies.map((c, i) => [c.id, i]))
+  const notasConTexto = notas
+    .filter((n) => n.nota.trim().length > 0 && (filtro === 'all' || n.company_id === filtro))
+    .map((nota) => ({ nota, company: companies.find((c) => c.id === nota.company_id) ?? null }))
+    .sort((a, b) => (orden.get(a.nota.company_id) ?? 99) - (orden.get(b.nota.company_id) ?? 99))
 
   return (
     <div className="space-y-4">
@@ -239,6 +305,21 @@ export default function HoyPage() {
         </div>
       </div>
 
+      {/* ── Fase 9b: KPIs — the filtered numbers; click = that column on the board ── */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        {kpis.map((k) => (
+          <button
+            key={k.label}
+            onClick={() => irAColumna(k.col)}
+            title={`Ir a ${k.label}`}
+            className="bg-[#1c1c1c] border border-[#2a2a2a] rounded-lg px-3 py-2 text-left hover:border-[#555555] transition-colors"
+          >
+            <p className="text-[11px] text-[#888888]">{k.emoji} {k.label}</p>
+            <p className={`text-2xl font-semibold leading-tight ${k.n === 0 ? 'text-[#555555]' : k.color}`}>{k.n}</p>
+          </button>
+        ))}
+      </div>
+
       {/* ── Fase 4b: "¿Qué sigue?" — the one thing to do now, on demand ── */}
       <QueSigueCard />
 
@@ -252,24 +333,25 @@ export default function HoyPage() {
           {franjaAbierta && (
             <div className="mt-2 space-y-1">
               {notasConTexto.map(({ company, nota }) => {
-                const color = COMPANY_COLORS[company.color] ?? '#888780'
+                const color = company ? COMPANY_COLORS[company.color] ?? '#888780' : '#888780'
                 const edad = edadNota(nota)
-                const open = notasAbiertas.has(company.id)
+                const cid = nota.company_id
+                const open = notasAbiertas.has(cid)
                 const primera = nota.nota.trim().split('\n')[0]
                 return (
-                  <div key={company.id}>
+                  <div key={cid}>
                     <button
-                      onClick={() => setNotasAbiertas((prev) => { const n = new Set(prev); if (n.has(company.id)) n.delete(company.id); else n.add(company.id); return n })}
+                      onClick={() => setNotasAbiertas((prev) => { const n = new Set(prev); if (n.has(cid)) n.delete(cid); else n.add(cid); return n })}
                       className="w-full flex items-center gap-2 text-left text-xs leading-5 hover:bg-[#222222] rounded px-1 -mx-1 transition-colors"
                       title={`escrita ${relativeDaysEs(nota.updated_at)}`}
                     >
-                      <span className="flex-shrink-0 font-semibold" style={{ color }}>{company.name}</span>
+                      <span className="flex-shrink-0 font-semibold" style={{ color }}>{company?.name ?? '(empresa borrada)'}</span>
                       {!open && <span className={`min-w-0 flex-1 truncate ${edad === 'fresca' ? 'text-[#7F77DD]' : 'text-[#6a6a6a]'}`}>{primera}</span>}
                       {!open && edad !== 'fresca' && <span className="flex-shrink-0 text-[10px] text-[#555555]">{daysSince(nota.updated_at)} d</span>}
                     </button>
                     {open && (
                       <div className="pl-3 pb-2">
-                        <CompanyNote companyId={company.id} nota={nota} onSaved={upsertNota} onArchived={removeNota} />
+                        <CompanyNote companyId={cid} nota={nota} onSaved={upsertNota} onArchived={removeNota} />
                       </div>
                     )}
                   </div>
@@ -291,6 +373,23 @@ export default function HoyPage() {
             companies={companies}
             correos={correosFiltrados}
             today={today}
+            onChanged={fetchData}
+            onOpenTask={(t) => setAbierta(t.id)}
+            resaltada={resaltada}
+          />
+        </div>
+      )}
+
+      {/* ── Fase 9b: Calendario — week lanes or the month grid; payments on their day ── */}
+      {vista === 'calendario' && datos && (
+        <div className="relative md:left-1/2 md:-translate-x-1/2 md:w-[min(100vw_-_3rem,1500px)]">
+          <Calendario
+            tasks={tareasFiltradas}
+            companies={companies}
+            pagos={(datos.pagos ?? []).filter((p) => filtro === 'all' || p.company_id === filtro)}
+            today={today}
+            modo={modoCal}
+            onModo={cambiarModoCal}
             onChanged={fetchData}
             onOpenTask={(t) => setAbierta(t.id)}
           />

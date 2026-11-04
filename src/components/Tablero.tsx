@@ -23,8 +23,13 @@ import CompanyBadge from './CompanyBadge'
 /** Cards shown per column before "ver N más". */
 const MAX_VISIBLES = 8
 
-type Columna = Horizonte | 'correos'
+export type Columna = Horizonte | 'correos'
 const COLUMNAS: Columna[] = [...HORIZONTES, 'correos']
+
+/** DOM id of a column, so the KPI strip can scroll to it. */
+export function idColumna(col: Columna): string {
+  return `col-${col}`
+}
 
 /** Where a task may be dropped, and where a mail may. */
 const DESTINOS_TAREA: Horizonte[] = ['hoy', 'manana', 'semana', 'esperando', 'despues']
@@ -90,6 +95,8 @@ export interface TableroProps {
   onChanged: () => void
   /** Click on a task card → the edit panel. */
   onOpenTask: (task: Task) => void
+  /** Fase 9b: the column a KPI click points at (a ring for a moment). */
+  resaltada?: Columna | null
 }
 
 /**
@@ -98,8 +105,10 @@ export interface TableroProps {
  * fallback. Every action goes through POST /api/hoy (the bot's functions),
  * never to Supabase from here.
  */
-export default function Tablero({ tasks, companies, correos, today, onChanged, onOpenTask }: TableroProps) {
+export default function Tablero({ tasks, companies, correos, today, onChanged, onOpenTask, resaltada = null }: TableroProps) {
   const [sobre, setSobre] = useState<Columna | null>(null)
+  // Fase 9b: the card whose "sin empresa" badge is open as a selector.
+  const [empresaDe, setEmpresaDe] = useState<string | null>(null)
   const [ocupadas, setOcupadas] = useState<Set<string>>(new Set())
   const [abiertas, setAbiertas] = useState<Set<Columna>>(new Set())
   const [menu, setMenu] = useState<string | null>(null)
@@ -175,6 +184,13 @@ export default function Tablero({ tasks, companies, correos, today, onChanged, o
 
   async function completar(t: Task) {
     await post({ accion: 'completar', task_id: t.id }, t.id)
+  }
+
+  /** Fase 9b: the "sin empresa" badge → the same edit as "la 5 es de PD". */
+  async function asignarEmpresa(t: Task, companyId: string) {
+    setEmpresaDe(null)
+    if (!companyId) return
+    await post({ accion: 'empresa', task_id: t.id, company_id: companyId }, t.id)
   }
 
   async function decidirCorreo(c: CorreoLite, accion: CorreoAccion) {
@@ -283,7 +299,31 @@ export default function Tablero({ tasks, companies, correos, today, onChanged, o
           </button>
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-1 pl-6">
-          {t.company && <CompanyBadge company={t.company} size="xs" />}
+          {t.company ? (
+            <CompanyBadge company={t.company} size="xs" />
+          ) : empresaDe === t.id ? (
+            <select
+              autoFocus
+              defaultValue=""
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => void asignarEmpresa(t, e.target.value)}
+              onBlur={() => setEmpresaDe(null)}
+              className="text-[10px] border border-[#7F77DD] rounded px-1 py-0.5 text-[#e8e8e8] bg-[#0f0f0f] focus:outline-none"
+            >
+              <option value="">¿de qué empresa?</option>
+              {companies.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          ) : (
+            <button
+              onClick={(e) => { e.stopPropagation(); setEmpresaDe(t.id) }}
+              title="Asignar empresa"
+              className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-[#2a2a2a] text-[#888888] hover:text-[#e8e8e8] hover:bg-[#333333] transition-colors"
+            >
+              sin empresa
+            </button>
+          )}
           {t.due_time && <span className="text-[10px] text-[#888888]">{hora12(t.due_time.slice(0, 5))}</span>}
           {t.importante && <span className="text-[10px] text-[#EF9F27]" title="Importante">★</span>}
           {vencida && (
@@ -366,11 +406,12 @@ export default function Tablero({ tasks, companies, correos, today, onChanged, o
     return (
       <section
         key={col}
+        id={idColumna(col)}
         onDragOver={(e) => onDragOver(e, col)}
         onDragLeave={() => { if (sobre === col) setSobre(null) }}
         onDrop={(e) => onDrop(e, col)}
-        className={`snap-start flex-shrink-0 w-[82vw] sm:w-[320px] md:w-auto flex flex-col rounded-lg border bg-[#161616] transition-colors ${estilo.borde} ${
-          sobre === col && esDestino ? 'bg-[#1e1e1e] ring-2 ring-[#7F77DD]/60' : ''
+        className={`snap-start flex-shrink-0 w-[82vw] sm:w-[320px] md:w-auto flex flex-col rounded-lg border bg-[#161616] transition-all scroll-mt-20 ${estilo.borde} ${
+          (sobre === col && esDestino) || resaltada === col ? 'bg-[#1e1e1e] ring-2 ring-[#7F77DD]/60' : ''
         }`}
       >
         <header className="flex items-center gap-2 px-3 py-2.5 border-b border-[#2a2a2a]">

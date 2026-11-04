@@ -45,6 +45,7 @@ Es lo mismo que manda el bot con `/ayuda todo`. La guía técnica está en [asis
 - `borra 3` — la elimina de verdad, siempre con botón de confirmación (también "bórrala")
 - `11 se llama URo pendiente` — le cambia el título
 - `paypal urgente` — cambia la urgencia; "paypal para el viernes" la fecha; "paypal es de PD" la empresa; "paypal mañana 3pm" fecha y hora
+- `la 5 es de PD` — le pone empresa a una tarea "sin empresa" (o se la cambia) por su número de la última lista; en la web, el badge gris "sin empresa" de la tarjeta abre el selector
 - `pon en calendar la de TOTT` — crea el evento de una tarea que ya existe
 - `la de TOTT está esperando a Andrew` — la deja en ⏳ Esperando con "de quién" (también "la 3 esperando a Juan"); "la de TOTT ya no espera" / "la 3 vuelve a mí" la retoma
 - `la anterior es urgente` — "la anterior" = la última tarea de la que hablaste
