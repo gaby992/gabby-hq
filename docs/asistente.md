@@ -2671,35 +2671,44 @@ Los bytes se **suben** a Telegram (multipart), no se le da una URL: funciona
 igual en previews y no depende de que Telegram alcance la app. En el chat
 web la foto viaja como `data:image/png` dentro del mensaje.
 
-**C) Alarmas narradas.** La alarma de las 8 abre con **un párrafo** y
-debajo va la lista numerada por secciones como hasta ahora (fase 9). El
-párrafo dice: qué no puede esperar (vencidas con sus días, lo de hoy con su
-hora, urgentes sin fecha), qué lleva **más de un mes** vencido, qué hay
-**mañana**, **a quién** se está esperando (agrupado por persona) y cuántos
-**correos piden respuesta** (y cuántos urgentes). El cierre de las 6 igual:
-qué se cerró hoy (con hasta 3 nombres) y qué queda, luego la lista.
+**C) Alarmas narradas — en líneas (ajuste 9c-2).** La alarma de las 8
+abre con un **resumen en líneas**, nunca un párrafo, y debajo va la lista
+numerada por secciones como hasta ahora (fase 9). Formato fijo, armado en
+código (`narracion.ts`: `resumenMananaFijo` / `resumenTardeFijo`):
 
-Reglas: el párrafo **nombra máximo 3 tareas por punto** («y N más»),
-**nunca repite la lista** y no inventa: se compone en código
-(`narracion.ts`: `parrafoMananaFijo` / `parrafoTardeFijo`) a partir de las
-mismas filas que arman la lista, y el modelo solo lo **reescribe** con su
-voz (`pulir`: máximo 110 palabras, un solo párrafo, debe conservar cada
-«título»; 8 s de tope y si no, va el fijo). La línea del día de la fase 7-E
-queda sustituida por este párrafo.
+- saludo en una línea;
+- **una línea por horizonte**: símbolo + conteo + a lo sumo UN dato corto
+  entre paréntesis — 🔺 vencidas (cuántos días lleva la más vieja) ·
+  🔸 para hoy (la hora de la primera) · ✴️ urgentes sin fecha · 📅 mañana ·
+  ⏳ esperando (a quién) · 📧 correos que piden respuesta (cuántos
+  urgentes). Las líneas con 0 se omiten;
+- última línea 👉 con **una sola recomendación**, por **nombre corto**
+  (las dos o tres primeras palabras del título: «Shift Google Ads»), nunca
+  un título o asunto entre comillas;
+- nada de títulos ni asuntos en el resumen: eso vive en la lista de abajo;
+- máximo 8 líneas antes de la lista.
+
+El modelo solo **pule el fraseo** de cada línea (`pulir`: mismas líneas,
+mismo orden, mismo emoji inicial y mismos números, sin comillas; 8 s de tope
+y si no cumple, van las fijas). El cierre de las 6 igual: «Cerraste N de M
+hoy 👏» (o «Hoy no se cerró nada»), las líneas de lo que queda y un 👉 con
+qué pasar a mañana.
 
 ```
 ☀️ Hoy, miércoles 4 nov
-Buenos días, Gabby. Lo que no puede esperar: 3 vencidas — «pagar luz» (50 días),
-«propuesta TOTT» (45 días) y «paypal statements» (12 días); 2 para hoy — «llamar a
-Juan» (3:00 pm) y «revisar contrato». «pagar luz» y «propuesta TOTT» llevan más de
-un mes vencidas. Mañana tienes 2 cosas: «revisar pagos» (10:00 am) y «correos de
-Chelsea». Esperas a Chelsea por 3 cosas y a Andrew (TOTT) por «landing TOTT».
-2 correos piden respuesta (1 urgente).
+Buenos días, Gabby.
+🔺 2 vencidas (la de Shift Google Ads lleva 9 días)
+🔸 4 para hoy, la primera a las 9 am
+✴️ 3 urgentes sin fecha
+📅 Mañana: 1
+⏳ Chelsea onboarding sigue esperando a PTHO
+📧 9 correos piden respuesta (2 urgentes)
+👉 Empieza por Shift Google Ads.
 
 📝 Por dónde ibas
 …
-🔥 Hoy sí o sí (6)
-🔺 1. pagar luz · Sin empresa · hace 50 días
+🔥 Hoy sí o sí (9)
+🔺 1. Shift Google Ads campaign review · IM · hace 9 días
 …
 ```
 
@@ -2712,15 +2721,18 @@ Si la pregunta llega por el intérprete (otra forma de decirlo), la acción
 `pregunta` pasa primero por aquí; lo que no es ninguna de estas sigue
 yendo al modelo (`/pregunta` de la fase 3, «¿qué cerré ayer?»).
 
-| Pregunta | Qué contesta | Propuesta con que cierra |
+Todas contestan con el **mismo formato en líneas** del punto C (resumen ≤ 8
+líneas con 👉 al final, sin títulos ni comillas) y debajo la lista numerada:
+
+| Pregunta | Líneas del resumen | Lista de abajo · 👉 |
 | --- | --- | --- |
-| «¿qué tengo hoy?» · «qué hay hoy» · «cómo viene el día» · 📋 Hoy | párrafo (no puede esperar · más de un mes · correos) + 🔥 Hoy sí o sí numerada (≤ 8) | «¿Arrancamos con «X»? … «la 1 lista» / «pasa 1 a mañana»» |
-| «¿qué me queda pendiente?» · «qué tengo» · «qué me falta» | total abierto repartido por columna + lo mismo de arriba | igual |
-| «¿qué tengo mañana?» · 📅 Mañana | lo de mañana con horas (y cuánto trae el resto de la semana) + lista | «Si algo de hoy no va a salir, «pasa 2 a mañana»» |
-| «¿qué tengo estancado?» · «qué se me quedó atorado» · «qué está parado» | tareas **sin cambios en 14+ días** y sin fecha futura (`tasks.updated_at` con trigger — SQL 9c —; antes del SQL, `created_at`) + lo que lleva **3+ días esperando**, con días | «¿Las paso a Después, las cancelo o les pongo alarma?» y un **plan** con las de arriba a 📦 Después, con [✅ Hacer todo] [✏️ No, corrijo]; se corrige como cualquier plan («cancela la 2», «la 3 déjala», «olvídalo») |
-| «¿cómo va IM?» · «cómo vamos con PD» · «qué tal DATAVIA» · «qué hay de IM» (cualquier empresa) | abiertas, vencidas (días), hoy, mañana, semana, esperando (de quién), correos pendientes de sus cuentas (urgentes) y la nota «por dónde iba» con su edad, en prosa + lo urgente de esa empresa numerado | «¿Seguimos con «X»?» o «todo lo pendiente de IM» |
-| «¿qué tengo esperando?» · «a quién estoy esperando» · ⏳ Esperando | a quién esperas (agrupado) y desde cuándo (días desde el último cambio), la más vieja, correos pasados a Chelsea + la lista ⏳ numerada | «la 2 ya no espera» · «listo 2» · alarma de seguimiento |
-| «¿qué hay esta semana?» · «cómo viene la semana» | por día, lunes a domingo (los pasados marcados «pasó»), el día más cargado, lo vencido que arrastras | «pasa 3 al viernes» · «la 2 para después» |
+| «¿qué tengo hoy?» · «qué hay hoy» · «cómo viene el día» · 📋 Hoy | 🔺 vencidas · 🔸 para hoy · ✴️ urgentes · 📧 correos | 🔥 Hoy sí o sí (≤ 8) · «👉 Empieza por Shift Google Ads.» |
+| «¿qué me queda pendiente?» · «qué tengo» · «qué me falta» | total abierto + las seis líneas del día | igual |
+| «¿qué tengo mañana?» · 📅 Mañana | 📅 mañana (la primera a las…) · 🗓 resto de la semana | 📅 Mañana · «👉 Si algo de hoy no sale, dime «pasa … a mañana»» |
+| «¿qué tengo estancado?» · «qué se me quedó atorado» · «qué está parado» | 📦 sin moverse en 14+ días y sin fecha futura (`tasks.updated_at`, SQL 9c; antes, `created_at`) · ⏳ 3+ días esperando | 📦 y ⏳ numeradas · «👉 ¿Las paso a Después, las cancelo o les pongo alarma?» + **plan** a 📦 Después con [✅ Hacer todo] [✏️ No, corrijo], corregible («cancela la 2», «la 3 déjala», «olvídalo») |
+| «¿cómo va IM?» · «cómo vamos con PD» · «qué tal DATAVIA» (cualquier empresa) | «IM: N tareas abiertas» + las líneas de esa empresa + 📧 de sus cuentas + 📝 por dónde ibas (≤ 90 caracteres) | 🔥 de la empresa (≤ 6) · «👉 Sigue con …» o «todo lo pendiente de IM» |
+| «¿qué tengo esperando?» · «a quién estoy esperando» · ⏳ Esperando | ⏳ una línea por persona (cuántas, la más vieja) · 📧 con Chelsea | ⏳ numerada con días · «👉 Si X ya respondió, «la 1 ya no espera»» |
+| «¿qué hay esta semana?» · «cómo viene la semana» | 🗓 con fecha (el día más cargado) · 🔺 de antes · ⏳ | por día, lunes a domingo («pasó» los anteriores) · «👉 pasa 3 al viernes» |
 
 Dos acciones nuevas del intérprete acompañan esto: `tablero` («mándame el
 tablero») y `despues` («deja X para después», «quítale la fecha a X» →
@@ -2865,6 +2877,41 @@ encontrar la cuenta la conversación cayó en el intérprete, que leyó
    salida. Revisión de hoy sobre `src/`: solo «No pillé eso» (ahora «No
    entendí bien eso»); el resto estaba limpio. Al agregar un texto nuevo,
    pasar esta lista.
+
+### 9c-g. Ajuste 9c-2 (4 nov 2026) — idioma por cuenta y resumen en líneas
+
+**A) Idioma.** Todo el mensaje de correos sale en el idioma de la cuenta
+(`cuentas_correo.idioma`): el resumen, los encabezados (✴️ High · ✉️ Need a
+reply), los pies («61 low-priority left out», «To decide: …») y las pistas
+de botones. Para IM Chelsea (en) no hay nada en español; para una cuenta en
+es, nada en inglés salvo los **asuntos**, que siempre van tal cual llegaron.
+Las cadenas viven en `src/lib/correo/idioma.ts` (`textos(idioma)`); los
+comandos que el bot lee («el 3 lo hago yo») siguen en español y en inglés
+llevan su etiqueta entre paréntesis («(I'll handle it)»). Con «correos» de
+todas las cuentas, los encabezados van en español y cada línea en el idioma
+de su cuenta, como en 6c.
+
+**B) Resumen en líneas.** El formato del punto C (una línea por horizonte,
+👉 al final, ≤ 8 líneas, sin títulos ni comillas) aplica a la alarma de las
+8, el cierre, «hoy», «lo importante de <cuenta>», «¿cómo va X?», «¿qué tengo
+estancado?» y toda respuesta que traiga lista. Para correos son dos líneas:
+
+```
+📧 IM Chelsea · what matters (6)
+6 that matter: 5 urgent, 1 needs a reply. 61 low-priority left out.
+👉 Start with #1 (TechFin)?
+```
+
+(`resumenCorreos` en `src/lib/correo/listas.ts`; en español: «6 que
+importan: 5 urgentes, 1 pide respuesta. 61 sin prisa fuera.» / «👉
+¿Empezamos por el 1 (TechFin)?»). La recomendación va por el **nombre
+corto** del remitente, nunca por el asunto.
+
+**C) Pruebas.** `npm run pruebas` comprueba el mensaje real de «lo
+importante de Chelsea» (cuenta en inglés → cero palabras en español en el
+texto fijo, los asuntos intactos) y el de «/hoy» (resumen ≤ 8 líneas, una
+por horizonte, sin comillas, nombre corto, 👉 al final), además de cada
+pregunta narrada.
 
 **Pruebas del parser.** `npm run pruebas` (`scripts/pruebas-parser.mjs`,
 sin base de datos, con el loader `scripts/pruebas-loader.mjs`): los cuatro

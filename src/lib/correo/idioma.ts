@@ -39,6 +39,23 @@ export interface TextosCorreo {
   correos: string
   todasLasCuentas: string
   nadaPendiente: string
+  // Ajuste 9c-2: the whole mail message in the account's language — summary lines, footers, hints.
+  /** "lo importante" · "what matters" (list title tail). */
+  loImportante: string
+  /** "6 que importan: 5 urgentes, 1 pide respuesta." · "6 that matter: 5 urgent, 1 needs a reply." */
+  resumen: (o: { total: number; altas: number; respuesta: number; resto: number; chelsea: number; importante: boolean }) => string
+  /** "61 sin prisa fuera." · "61 low-priority left out." */
+  fuera: (n: number) => string
+  /** "El más viejo lleva 3 días (TechFin)." */
+  masViejo: (dias: number, quien: string) => string
+  /** "👉 ¿Empezamos por el 1 (TechFin)?" · "👉 Start with #1 (TechFin)?" */
+  empieza: (n: number, quien: string) => string
+  /** "Nada urgente ni que pida respuesta; 61 sin prisa en …" when the filter leaves nothing. */
+  nadaImportante: (fuera: number, link: string) => string
+  /** "· 61 sin prisa fuera de esta lista: di «correos de X» para verlos todos" */
+  verTodos: (n: number, comando: string) => string
+  /** The decide-by-number hints under the list. The commands stay in Spanish (that is what the bot reads); the labels follow the language. */
+  pie: (n: number, link: string) => string
 }
 
 const ES: TextosCorreo = {
@@ -53,6 +70,23 @@ const ES: TextosCorreo = {
   correos: 'Correos',
   todasLasCuentas: 'todas las cuentas',
   nadaPendiente: 'Nada pendiente 🎉',
+  loImportante: 'lo importante',
+  resumen: ({ total, altas, respuesta, resto, chelsea, importante }) => {
+    const partes = [
+      altas > 0 ? `${altas} ${altas === 1 ? 'urgente' : 'urgentes'}` : null,
+      respuesta > 0 ? `${respuesta} ${respuesta === 1 ? 'pide respuesta' : 'piden respuesta'}` : null,
+      !importante && resto > 0 ? `${resto} solo para enterarte` : null,
+      chelsea > 0 ? `${chelsea} ya con Chelsea` : null,
+    ].filter(Boolean)
+    const cabeza = importante ? `${total} que ${total === 1 ? 'importa' : 'importan'}` : `${total} ${total === 1 ? 'pendiente' : 'pendientes'}`
+    return `${cabeza}${partes.length ? `: ${partes.join(', ')}` : ''}.`
+  },
+  fuera: (n) => `${n} sin prisa fuera.`,
+  masViejo: (d, quien) => `El más viejo lleva ${d} días (${quien}).`,
+  empieza: (n, quien) => `👉 ¿Empezamos por el ${n} (${quien})?`,
+  nadaImportante: (fuera, link) => `Nada urgente ni que pida respuesta; ${fuera === 1 ? 'hay 1 correo' : `hay ${fuera} correos`} sin prisa en ${link}.`,
+  verTodos: (n, comando) => `· ${n === 1 ? '1 correo sin prisa' : `${n} correos sin prisa`} fuera de esta lista: di «${comando}» para verlos todos`,
+  pie: (n, link) => `Para decidir: <code>el ${n} lo hago yo</code> · <code>el ${n} para Chelsea</code> · <code>archiva el ${n}</code> · <code>correos</code> = la lista completa · ${link}`,
 }
 
 const EN: TextosCorreo = {
@@ -67,6 +101,23 @@ const EN: TextosCorreo = {
   correos: 'Mail',
   todasLasCuentas: 'all accounts',
   nadaPendiente: 'Nothing pending 🎉',
+  loImportante: 'what matters',
+  resumen: ({ total, altas, respuesta, resto, chelsea, importante }) => {
+    const partes = [
+      altas > 0 ? `${altas} urgent` : null,
+      respuesta > 0 ? `${respuesta} ${respuesta === 1 ? 'needs' : 'need'} a reply` : null,
+      !importante && resto > 0 ? `${resto} FYI` : null,
+      chelsea > 0 ? `${chelsea} already with Chelsea` : null,
+    ].filter(Boolean)
+    const cabeza = importante ? `${total} that ${total === 1 ? 'matters' : 'matter'}` : `${total} pending`
+    return `${cabeza}${partes.length ? `: ${partes.join(', ')}` : ''}.`
+  },
+  fuera: (n) => `${n} low-priority left out.`,
+  masViejo: (d, quien) => `Oldest is ${d} days old (${quien}).`,
+  empieza: (n, quien) => `👉 Start with #${n} (${quien})?`,
+  nadaImportante: (fuera, link) => `Nothing urgent or waiting for a reply; ${fuera === 1 ? '1 low-priority email' : `${fuera} low-priority emails`} in ${link}.`,
+  verTodos: (n, comando) => `· ${n} low-priority ${n === 1 ? 'email' : 'emails'} left out: say «${comando}» to see them all`,
+  pie: (n, link) => `To decide: <code>el ${n} lo hago yo</code> (I'll handle it) · <code>el ${n} para Chelsea</code> (to Chelsea) · <code>archiva el ${n}</code> (archive) · <code>correos</code> = full list · ${link}`,
 }
 
 /** The strings for one account's language ('es' when unknown). */

@@ -17,7 +17,7 @@ import { cargarConfig } from './config'
 import { seccionCorreosDiaria } from '@/lib/correo/listas'
 import { guardarAlarma, type AlarmaItem, type AlarmaTipo } from './registro-listas'
 import { mensajeError } from '@/lib/errores'
-import { cargarPanorama, parrafoManana, parrafoTarde } from './narracion'
+import { cargarPanorama, resumenManana, resumenTarde } from './narracion'
 import { enviarTablero } from './tablero-imagen'
 import { tecladoMenu } from './menu'
 
@@ -333,9 +333,9 @@ export async function buildManana(today: string = cancunYmd()): Promise<Mensaje>
     return { text: `☀️ No tienes tareas pendientes. Revisa Después en GabbyHQ.\n${link}\n\n${correos}`, items }
   }
 
-  // Fase 9c-C: a short paragraph first — what cannot wait, what is over a month overdue,
-  // what is tomorrow, who we wait on, how many mails ask for an answer — then the list.
-  const saludo = await parrafoManana(cfg, panorama)
+  // Fase 9c-C (ajuste 9c-2): the summary in lines first — greeting, one line per horizon
+  // (vencidas · para hoy · urgentes · mañana · esperando · correos), one 👉 — then the list.
+  const saludo = await resumenManana(cfg, panorama)
   const blocks: string[] = [`☀️ <b>Hoy, ${formatDiaLargoEs(today)}</b>\n${escapeHtml(saludo)}`]
 
   // Fase 4b: only notes of the last 3 days are "por dónde iba"; older ones stay in /hoy, greyed.
@@ -356,8 +356,8 @@ export async function buildTarde(today: string = cancunYmd()): Promise<Mensaje> 
   const { tasks, companies } = panorama
   const items: AlarmaItem[] = []
 
-  // Fase 9c-C: the paragraph first — what got done and what is left — then the list.
-  const balance = await parrafoTarde(cfg, panorama, done.tasks)
+  // Fase 9c-C (ajuste 9c-2): the summary in lines first — what got done, what is left per horizon, one 👉 — then the list.
+  const balance = await resumenTarde(cfg, panorama, done.tasks)
   const blocks: string[] = [`🌙 <b>Cierre del día</b> · ${formatDiaLargoEs(today)}\n${escapeHtml(balance)}`]
 
   // ✅ Hecho hoy — on top, by company, same fixed order, not numbered (nothing to "pasa").

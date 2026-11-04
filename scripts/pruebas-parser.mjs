@@ -113,6 +113,63 @@ ok('/hoy = lista', parse('/hoy').kind === 'lista')
 ok('listo 3', parse('listo 3').kind === 'accion')
 ok('¿qué cerré ayer? → pregunta libre', parse('¿qué cerré ayer?').kind === 'pregunta' && clasificarPregunta('¿qué cerré ayer?', companies) === null)
 
+// ── Ajuste 9c-2: the summary in lines, the mail message in the account's language ──
+{
+  const { panoramaDe, resumenMananaFijo, resumenTardeFijo, narrar, nombreCorto } = await import('@/lib/asistente/narracion')
+  const { resumenCorreos, pieDecidir } = await import('@/lib/correo/listas')
+  const { textos } = await import('@/lib/correo/idioma')
+  const co = { im: { name: 'IM', color: 'teal' }, pd: { name: 'PD', color: 'purple' }, ch: { name: 'Chelsea', color: 'pink' } }
+  const comp = [{ id: 'im', ...co.im }, { id: 'pd', ...co.pd }, { id: 'ch', ...co.ch }]
+  let n = 0
+  const t = (text, cid, extra = {}) => ({ id: `t${++n}`, text, company_id: cid, company: cid ? co[cid] : null, priority: 'normal', importante: false, due_date: null, due_time: null, done: false, notes: null, link_url: null, link_label: null, start_date: null, created_at: '2026-10-01T12:00:00Z', estado: 'abierta', esperando_a: null, ...extra })
+  const tasks = [
+    t('Shift Google Ads campaign review', 'im', { due_date: '2026-10-26' }), t('TechFin proposal', 'pd', { due_date: '2026-11-01' }),
+    t('llamar a Juan', 'pd', { due_date: today, due_time: '09:00:00' }), t('revisar contrato', 'pd', { due_date: today }), t('pagar luz', null, { due_date: today }), t('firmar NDA', 'im', { due_date: today, due_time: '15:00:00' }),
+    t('mandar factura', 'im', { priority: 'urgente', importante: true }), t('probar Notion', 'im', { priority: 'urgente' }), t('cotizar hosting', 'pd', { priority: 'urgente' }),
+    t('correos de Chelsea', 'im', { due_date: '2026-11-05' }),
+    t('Chelsea onboarding', 'ch', { estado: 'esperando', esperando_a: 'PTHO' }),
+  ]
+  const mail = (id, de, asunto, urgencia, tipo, estado = 'nuevo') => ({ id, cuenta_id: 'k1', cuenta: 'IM Chelsea', de_nombre: de, de_email: `${de.toLowerCase()}@x.com`, asunto, resumen: null, recibido_en: '2026-11-01T10:00:00Z', urgencia, tipo, estado, alertado: false, gmail_thread_id: null, vip: false, respondido_en: null })
+  const correos = [
+    mail('c1', 'TechFin', 'Contrato de servicios — revisión', 'alta', 'necesita_respuesta'), mail('c2', 'Andrew', 'Landing page changes', 'alta', 'pedido_de_tarea'), mail('c3', 'Hope', 'Proposal', 'alta', 'necesita_respuesta'),
+    mail('c4', 'Lion', 'Invoice', 'alta', 'necesita_respuesta'), mail('c5', 'Zed', 'Q4 plan', 'alta', 'fyi'), mail('c6', 'Mia', 'Can we talk?', 'media', 'necesita_respuesta'),
+    ...Array.from({ length: 3 }, (_, i) => mail(`r${i}`, 'Zoom', 'Recording', 'baja', 'notificacion')),
+  ]
+  const p = panoramaDe(tasks, comp, [], correos, [{ id: 'k1', nombre: 'IM Chelsea', company_id: 'im' }], today)
+  const cfg = { nombre_persona: 'Gabby', nombre_bot: 'Asistente', tono: 'informal', sugerencias: true }
+
+  // "/hoy": the morning summary — at most 8 lines, no quotes, no full titles, one 👉 line.
+  const m = resumenMananaFijo(cfg, p)
+  ok('9c-2 /hoy ≤ 8 líneas', m.length <= 8, `${m.length}: ${JSON.stringify(m)}`)
+  ok('9c-2 /hoy sin comillas', m.every((l) => !/[«»"]/.test(l)), JSON.stringify(m))
+  ok('9c-2 /hoy termina con 👉', m[m.length - 1].startsWith('👉'), m[m.length - 1])
+  ok('9c-2 /hoy una línea por horizonte', ['🔺', '🔸', '✴️', '📅', '⏳', '📧'].every((e) => m.filter((l) => l.startsWith(e)).length === 1), JSON.stringify(m))
+  ok('9c-2 /hoy nombre corto, no título completo', m.some((l) => l.includes('Shift Google Ads')) && !m.some((l) => l.includes('campaign review')), JSON.stringify(m))
+  ok('9c-2 /hoy "la primera a las 9"', m.some((l) => l.startsWith('🔸') && l.includes('a las 9 am')), JSON.stringify(m))
+  const tarde = resumenTardeFijo(cfg, p, [t('cerrada', 'im')])
+  ok('9c-2 cierre ≤ 8 líneas y 👉', tarde.length <= 8 && tarde[tarde.length - 1].startsWith('👉'), JSON.stringify(tarde))
+  for (const q of [{ tipo: 'hoy' }, { tipo: 'pendiente' }, { tipo: 'manana' }, { tipo: 'estancado' }, { tipo: 'empresa', nombre: 'IM' }, { tipo: 'esperando' }, { tipo: 'semana' }]) {
+    const r = narrar(q, p, cfg)
+    const resumen = r.texto.split('\n\n')[0].split('\n')
+    ok(`9c-2 ${q.tipo}: resumen ≤ 8 líneas con 👉`, resumen.length <= 8 && resumen.some((l) => l.startsWith('👉')), JSON.stringify(resumen))
+    ok(`9c-2 ${q.tipo}: resumen sin comillas`, resumen.every((l) => !/[«»"]/.test(l) || /«(?:la \d|pasa|alarma|todo lo pendiente|qué sigue|la de TOTT|paypal)/.test(l)), JSON.stringify(resumen))
+  }
+  ok('nombreCorto', nombreCorto('Shift Google Ads campaign review for Q4') === 'Shift Google Ads' && nombreCorto('TechFin') === 'TechFin')
+
+  // "lo importante de Chelsea" (account in English): zero Spanish in the fixed text; subjects as they arrived.
+  const importantes = correos.filter((c) => c.urgencia === 'alta' || c.tipo === 'necesita_respuesta' || c.tipo === 'pedido_de_tarea')
+  const en = resumenCorreos(importantes, { importante: true, fuera: correos.length - importantes.length, idioma: 'en', now: new Date('2026-11-04T12:00:00Z') })
+  const textoEn = [...en, pieDecidir(1, 'en'), textos('en').grupos.alta, textos('en').grupos.respuesta, textos('en').loImportante, textos('en').verTodos(61, 'correos de IM Chelsea')].join('\n')
+  const palabrasEs = /\b(que|importan|urgentes?|pide|piden|respuesta|fuera|sin prisa|empezamos|para decidir|lista completa|correo|correos pendientes|alta|necesitan|resto|lo importante|viejo|lleva|días|ya con|solo para|ver|todos|di)\b/i
+  const sinComandos = textoEn.replace(/<code>[^<]*<\/code>/g, '').replace(/<a [^>]*>[^<]*<\/a>/g, '').replace(/«[^»]*»/g, '')
+  ok('9c-2 cuenta en: cero español en el texto fijo', !palabrasEs.test(sinComandos), sinComandos)
+  ok('9c-2 cuenta en: "6 that matter: 5 urgent, 1 needs a reply. 3 low-priority left out."', en[0] === '6 that matter: 5 urgent, 1 needs a reply. 3 low-priority left out. Oldest is 3 days old (TechFin).', en[0])
+  ok('9c-2 cuenta en: 👉 Start with #1 (TechFin)?', en[1] === '👉 Start with #1 (TechFin)?', en[1])
+  const es = resumenCorreos(importantes, { importante: true, fuera: 3, idioma: 'es', now: new Date('2026-11-04T12:00:00Z') })
+  ok('9c-2 cuenta es: resumen en español', /que importan/.test(es[0]) && es[1].startsWith('👉 ¿Empezamos por el 1'), JSON.stringify(es))
+  ok('9c-2 resumen de correos sin asuntos', !textoEn.includes('Contrato de servicios') && !es.join(' ').includes('Contrato de servicios'))
+}
+
 if (fallos > 0) {
   console.error(`\n${fallos} prueba(s) fallaron`)
   process.exit(1)
