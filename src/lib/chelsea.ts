@@ -8,6 +8,11 @@ import type { Company } from '@/types'
  */
 export const CHELSEA_COMPANY_NAME = 'Chelsea'
 
+/** Is this company name the "Chelsea" one? (case-insensitive) */
+export function isChelseaName(name: string): boolean {
+  return name.trim().toLowerCase() === CHELSEA_COMPANY_NAME.toLowerCase()
+}
+
 /** The "Chelsea" company, matched by name case-insensitively. */
 export function findChelseaCompany(companies: Company[]): Company | undefined {
   const target = CHELSEA_COMPANY_NAME.toLowerCase()

@@ -10,6 +10,7 @@ import EisenhowerMatrix from '@/components/EisenhowerMatrix'
 import QueSigueCard from '@/components/QueSigueCard'
 import Tablero, { idColumna, type Columna } from '@/components/Tablero'
 import Calendario, { type ModoCalendario, type PagoCalendario } from '@/components/Calendario'
+import ChatPanel from '@/components/ChatPanel'
 import { daysSince, relativeDaysEs, todayYmd } from '@/lib/dates'
 import { edadNota } from '@/lib/notas'
 import { findChelseaCompany } from '@/lib/chelsea'
@@ -492,6 +493,9 @@ export default function HoyPage() {
             })}
         </div>
       )}
+
+      {/* ── Fase 9c-E: the 💬 chat — the bot's engine, in a side panel; the board refetches after each answer ── */}
+      <ChatPanel onChanged={fetchData} />
 
       {/* ── Fase 9: click on a board card → the existing edit panel, as an overlay ── */}
       {tareaAbierta && (

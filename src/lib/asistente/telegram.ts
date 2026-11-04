@@ -1,6 +1,15 @@
 // Outbound Telegram for the assistant: HTML messages, auto-split, logged.
 // The inbound webhook lives in src/app/api/telegram/route.ts and uses the same
 // helpers, so both directions share one definition of "who is allowed".
+//
+// Fase 9c: every send first asks the current channel (canal.ts). Inside the
+// web chat's request the message is collected instead of sent, so the same
+// engine talks to both; the "edit / remove buttons" calls become no-ops
+// there. The persistent menu (menu.ts) rides on the first plain reply when
+// the request asked for it.
+
+import { esWeb, registrarMensajeWeb, tomarMenuPendiente } from './canal'
+import { tecladoMenu } from './menu'
 
 const API = () => `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`
 
@@ -19,6 +28,15 @@ export function allowedChatIds(): number[] {
 
 export function isAllowedChat(chatId: number): boolean {
   return allowedChatIds().includes(chatId)
+}
+
+/**
+ * Fase 9c-E: the chat id the web chat talks as — Gabby's own Telegram chat
+ * (the first of ALLOWED_CHAT_IDS), so the web and Telegram are ONE thread
+ * and an alarm set from the web rings in Telegram. 0 when none is configured.
+ */
+export function chatIdWeb(): number {
+  return allowedChatIds()[0] ?? 0
 }
 
 /** Escape user-provided text for parse_mode HTML (only these three matter). */
@@ -73,8 +91,15 @@ interface SendOptions {
  * can retry. Every part is logged — ok or error — in the Vercel function logs.
  */
 export async function sendTelegram(chatId: number, text: string, opts: SendOptions = {}): Promise<number | null> {
+  // Fase 9c-E: the web chat gets the message as data; nothing goes to Telegram.
+  if (esWeb()) {
+    registrarMensajeWeb({ texto: text, html: !!opts.html, botones: botonesWeb(opts.replyMarkup) })
+    return null
+  }
   const parts = splitMessage(text)
   const tag = opts.tag ?? 'telegram'
+  // Fase 9c-A: the menu rides on the first reply of the request that has no buttons of its own.
+  const replyMarkup = opts.replyMarkup ?? (tomarMenuPendiente() ? tecladoMenu() : undefined)
   let messageId: number | null = null
   for (let i = 0; i < parts.length; i++) {
     const body: Record<string, unknown> = {
@@ -83,7 +108,7 @@ export async function sendTelegram(chatId: number, text: string, opts: SendOptio
       disable_web_page_preview: true,
     }
     if (opts.html) body.parse_mode = 'HTML'
-    if (opts.replyMarkup && i === parts.length - 1) body.reply_markup = opts.replyMarkup
+    if (replyMarkup && i === parts.length - 1) body.reply_markup = replyMarkup
 
     let res: Response
     try {
@@ -115,19 +140,71 @@ export async function sendTelegram(chatId: number, text: string, opts: SendOptio
   return messageId
 }
 
+/**
+ * Fase 9c-B: one photo (PNG bytes, uploaded as multipart — no public URL
+ * needed) with an optional caption and buttons. Throws on a Telegram error
+ * like sendMessage. In the web chat the picture travels as a data URL.
+ */
+export async function sendPhoto(chatId: number, png: Uint8Array, opts: { caption?: string; html?: boolean; replyMarkup?: unknown; tag?: string } = {}): Promise<number | null> {
+  if (esWeb()) {
+    registrarMensajeWeb({ texto: opts.caption ?? '', html: !!opts.html, botones: botonesWeb(opts.replyMarkup), imagen: `data:image/png;base64,${Buffer.from(png).toString('base64')}` })
+    return null
+  }
+  const tag = opts.tag ?? 'telegram'
+  const form = new FormData()
+  form.append('chat_id', String(chatId))
+  const bytes = png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength) as ArrayBuffer
+  form.append('photo', new Blob([bytes], { type: 'image/png' }), 'tablero.png')
+  if (opts.caption) form.append('caption', opts.caption)
+  if (opts.html) form.append('parse_mode', 'HTML')
+  if (opts.replyMarkup) form.append('reply_markup', JSON.stringify(opts.replyMarkup))
+  let res: Response
+  try {
+    res = await fetch(`${API()}/sendPhoto`, { method: 'POST', body: form })
+  } catch (err) {
+    console.error(`[${tag}] telegram sendPhoto error chat=${chatId}: ${String(err)}`)
+    throw err
+  }
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '')
+    let description = detail
+    try {
+      description = JSON.parse(detail)?.description ?? detail
+    } catch {
+      /* raw body */
+    }
+    console.error(`[${tag}] telegram sendPhoto error chat=${chatId}: ${res.status} ${description}`)
+    throw new TelegramError(res.status, description)
+  }
+  console.log(`[${tag}] telegram sendPhoto ok chat=${chatId} (${png.byteLength} bytes)`)
+  const json = await res.json().catch(() => null)
+  return typeof json?.result?.message_id === 'number' ? json.result.message_id : null
+}
+
 // ── Inline buttons ───────────────────────────────────────────────────────
 
 export interface InlineButton {
   text: string
-  callback_data: string // Telegram caps this at 64 bytes
+  /** Telegram caps this at 64 bytes. Absent on a link button. */
+  callback_data?: string
+  /** Fase 9c: a link button ("🖥 Abrir tablero"). */
+  url?: string
 }
 
 export function inlineKeyboard(rows: InlineButton[][]): { inline_keyboard: InlineButton[][] } {
   return { inline_keyboard: rows }
 }
 
+/** The inline buttons of a reply_markup as the web chat renders them (a reply keyboard has none: the web has its own). */
+function botonesWeb(replyMarkup: unknown): { text: string; data?: string; url?: string }[][] {
+  const rows = (replyMarkup as { inline_keyboard?: InlineButton[][] } | undefined)?.inline_keyboard
+  if (!Array.isArray(rows)) return []
+  return rows.map((fila) => fila.map((b) => ({ text: b.text, data: b.callback_data, url: b.url })))
+}
+
 /** Stops the "loading" spinner on the button the user tapped. Best-effort. */
 export async function answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void> {
+  if (esWeb()) return
   try {
     await fetch(`${API()}/answerCallbackQuery`, {
       method: 'POST',
@@ -141,6 +218,7 @@ export async function answerCallbackQuery(callbackQueryId: string, text?: string
 
 /** Removes the buttons from a question already answered. Best-effort. */
 export async function removeInlineKeyboard(chatId: number, messageId: number): Promise<void> {
+  if (esWeb()) return
   try {
     await fetch(`${API()}/editMessageReplyMarkup`, {
       method: 'POST',
@@ -154,6 +232,7 @@ export async function removeInlineKeyboard(chatId: number, messageId: number): P
 
 /** Rewrites a message the bot sent (fase 6: "✅ Respondido" on a mail alert). Best-effort; drops its buttons. */
 export async function editMessageText(chatId: number, messageId: number, text: string, opts: { html?: boolean; replyMarkup?: unknown } = {}): Promise<boolean> {
+  if (esWeb()) return false
   try {
     const body: Record<string, unknown> = { chat_id: chatId, message_id: messageId, text: text.slice(0, TELEGRAM_MAX), disable_web_page_preview: true }
     if (opts.html) body.parse_mode = 'HTML'

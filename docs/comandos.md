@@ -15,7 +15,13 @@ Es lo mismo que manda el bot con `/ayuda todo`. La guía técnica está en [asis
 - `qué vence esta semana` — solo lo que vence de aquí al domingo
 - `qué sigue de IM` — lo mismo, pero solo de esa empresa
 - `/pendientes IM` — todo lo abierto de IM, numerado
-- `qué tengo esperando` — lo que está en manos de alguien más (la columna ⏳ del tablero), numerado; no entra en "qué sigue" ni en "Hoy sí o sí"
+- `¿qué tengo hoy? · ¿qué me queda pendiente?` — te lo cuenta en un párrafo (qué no puede esperar, qué lleva más de un mes vencido, cuántos correos piden respuesta) y debajo la lista corta numerada; cierra proponiendo por dónde arrancar. También el botón 📋 Hoy del menú
+- `¿qué tengo mañana?` — lo de mañana narrado y numerado (botón 📅 Mañana)
+- `¿qué hay esta semana?` — por día, de lunes a domingo, con lo vencido que arrastras
+- `¿cómo va IM?` — el estado de una empresa en prosa: abiertas, vencidas, esperando, correos pendientes y la nota "por dónde iba"
+- `¿qué tengo estancado?` — tareas sin moverse en 14+ días y lo que lleva 3+ días esperando; te propone pasarlas a Después como plan [✅ Hacer todo] [✏️ No, corrijo], y corriges ("cancela la 2", "la 3 déjala")
+- `mándame el tablero` — una foto del tablero (KPIs + Hoy sí o sí · Mañana · Esperando · Correos) con el botón 🖥 Abrir tablero; también llega sola antes de la alarma de las 8 y del cierre (botón 🖥 Tablero)
+- `qué tengo esperando` — a quién esperas y desde cuándo, en prosa, y debajo la lista ⏳ numerada (botón ⏳ Esperando); no entra en "qué sigue" ni en "Hoy sí o sí"
 - `correos · correos de Chelsea` — todos los correos pendientes de esa cuenta (o de todas), numerados por urgencia; luego "el 3 lo hago yo", "el 2 para Chelsea", "archiva el 5". La línea se tacha sola cuando se resuelve
 - `el 5 es silencio · el 5 es solo app · el 5 es alerta` — aprende ese remitente (su dominio, o el email si es gmail/outlook) en la lista de esa cuenta y aplica el nivel al correo; "archiva el 5 y márcalo como silencio" hace las dos cosas. Si ya estaba en otra lista, lo mueve y te lo dice
 - `¿qué cerré ayer?` — pregunta libre: te contesta con tus tareas y notas (también "? qué tengo hoy")
@@ -69,7 +75,8 @@ Es lo mismo que manda el bot con `/ayuda todo`. La guía técnica está en [asis
 ## ℹ️ Otros
 
 - `/ayuda` — el resumen corto; "/ayuda todo" manda esta guía completa
+- `/menu · /ocultar` — el menú fijo bajo el teclado: 📋 Hoy · 📅 Mañana · ⏳ Esperando · 📧 Correos · 🎯 ¿Qué sigue? · 🖥 Tablero. Cada botón es una de estas preguntas; aparece solo con el primer mensaje y con cada alarma de las 8
 - `botones` — aparecen cuando falta empresa o urgencia, cuando varias tareas coinciden, antes de borrar, y en cada ⏰ (Listo · +1h · Mañana)
 - `"No te entendí"` — si no capta la frase, te pregunta si es una tarea nueva, una orden o una alarma
 - `hora de Cancún` — "hoy", "mañana" y las horas van en hora de Cancún; "el viernes" siempre es el próximo viernes
-- `en la web` — /hoy (tablero por horizonte: Hoy sí o sí · Mañana · Esta semana · Esperando · Después · Correos, arrastra las tarjetas; pestañas Prioridad y Empresas; ¿Qué sigue?), /tasks (tareas y notas), /correo, /settings (empresas, Conexiones de Google, Pagos recurrentes)
+- `en la web` — /hoy (tablero por horizonte: Hoy sí o sí · Mañana · Esta semana · Esperando · Después · Correos, arrastra las tarjetas; pestañas Prioridad, Empresas y Calendario; ¿Qué sigue?; y el chat 💬 abajo a la derecha: el mismo asistente que en Telegram, misma conversación, mismos planes con botones; el tablero se refresca solo), /tasks (tareas y notas), /correo, /settings (empresas, Conexiones de Google, Pagos recurrentes)

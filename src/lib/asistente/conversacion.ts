@@ -5,6 +5,7 @@
 // Declined suggestions ("luego") live here too, so the bot never insists.
 
 import { createServerClient } from '@/lib/supabase-server'
+import { canalActual, type TipoCanal } from './canal'
 
 export type Rol = 'user' | 'assistant'
 
@@ -28,6 +29,8 @@ export interface Turno {
   rol: Rol
   texto: string
   acciones: AccionesTurno | null
+  /** Fase 9c: where the turn happened. Missing before sql/2026-11-asistente-fase9c.sql. */
+  canal?: TipoCanal | null
   created_at: string
 }
 
@@ -38,12 +41,35 @@ function tabla() {
   return createServerClient().from('bot_conversacion')
 }
 
+/** Once the insert says the `canal` column is missing (SQL 9c not run), stop sending it. */
+let sinCanal = false
+
 /** Never throws: a missing table must not break a reply. */
 export async function guardarTurno(chatId: number, rol: Rol, texto: string, acciones?: AccionesTurno): Promise<void> {
   const t = texto.replace(/<[^>]+>/g, '').trim()
   if (!t) return
-  const { error } = await tabla().insert({ chat_id: chatId, rol, texto: t.slice(0, 4000), acciones: acciones ?? null })
+  const row: Record<string, unknown> = { chat_id: chatId, rol, texto: t.slice(0, 4000), acciones: acciones ?? null }
+  // Fase 9c: the thread is shared by Telegram and the web chat; each turn says where it happened.
+  if (!sinCanal) row.canal = canalActual()?.tipo ?? 'telegram'
+  let { error } = await tabla().insert(row)
+  if (error && !sinCanal && /canal/i.test(error.message)) {
+    sinCanal = true
+    console.warn(`[conversacion] sin columna canal (${error.message}); corre sql/2026-11-asistente-fase9c.sql`)
+    delete row.canal
+    ;({ error } = await tabla().insert(row))
+  }
   if (error) console.error(`[conversacion] insert: ${error.message}`)
+}
+
+/** Fase 9c-E: the last `max` turns of the thread, oldest first, for the web chat panel (markers out). */
+export async function turnosRecientes(chatId: number, max = 40): Promise<Turno[]> {
+  const { data, error } = await tabla()
+    .select('*')
+    .eq('chat_id', chatId)
+    .order('created_at', { ascending: false })
+    .limit(max)
+  if (error || !data) return []
+  return (data as Turno[]).reverse().filter((t) => t.texto !== '⟂ hilo limpiado')
 }
 
 /** The recent thread, oldest first. Stops at the last "olvida lo anterior". */

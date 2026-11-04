@@ -28,6 +28,8 @@
 // falls back to the `edicion` / `tarea` result below when the model fails.
 
 import type { Company, Priority } from '@/types'
+import { fraseDeBoton } from '@/lib/asistente/menu'
+import { clasificarPregunta } from '@/lib/asistente/preguntas'
 import { addDays } from '@/lib/asistente/cancun'
 
 export interface TareaParsed {
@@ -104,6 +106,11 @@ export type Parsed =
   | { kind: 'quitar_alarma'; arg: string }
   /** Fase 9: "qué tengo esperando" → the ⏳ list. */
   | { kind: 'esperando' }
+  /** Fase 9c-A: "/menu" installs the persistent menu; "/ocultar" removes it. */
+  | { kind: 'menu' }
+  | { kind: 'ocultar' }
+  /** Fase 9c-B: "mándame el tablero" / "🖥 Tablero" → the board as a picture. */
+  | { kind: 'tablero' }
   /** Fase 9: "la de TOTT está esperando a Andrew" / "… ya no espera" (fin). `termino` = a word of the title or "3". */
   | { kind: 'esperar'; termino: string; quien: string | null; fin: boolean }
   | { kind: 'pregunta'; texto: string }
@@ -510,10 +517,13 @@ export function parseDictado(text: string, companies: CompanyRef[], today: strin
 }
 
 export function parseMensaje(raw: string, companies: CompanyRef[], today: string): Parsed {
-  const text = raw.trim()
+  // Fase 9c-A: a tap on the persistent menu arrives as the button's label; it means its question.
+  const text = (fraseDeBoton(raw.trim()) ?? raw).trim()
   const lower = text.toLowerCase()
 
   if (/^\/?comandos\b|^\/?(?:ayuda|help)\s+(?:todo|toda|larga|completa|full)\b/i.test(lower)) return { kind: 'ayuda', larga: true }
+  if (/^\/menu\b|^(?:menu|menú)\s*[.!]?$|^(?:pon|ponme|dame|quiero|muestra|muéstrame|mostrar)\s+(?:el\s+)?men[uú]\s*[.!]?$/i.test(lower)) return { kind: 'menu' }
+  if (/^\/ocultar\b|^(?:oculta|ocultar|quita|quitar|esconde|esconder)\s+(?:el\s+)?(?:men[uú]|teclado|botones)\s*[.!]?$/i.test(lower)) return { kind: 'ocultar' }
   if (/^\/start\b/i.test(lower) || /^(?:hola|buenas|buenos\s+d[ií]as|buenas\s+tardes|hey|hi)[\s!.,]*$/i.test(lower)) return { kind: 'inicio' }
   if (/^(?:\/help|\/ayuda|ayuda|help|formato)\b/i.test(lower)) return { kind: 'ayuda', larga: false }
   const n0 = sinAcentos(text.replace(/^[¿?¡!\s]+|[?!.\s]+$/g, ''))
@@ -533,8 +543,12 @@ export function parseMensaje(raw: string, companies: CompanyRef[], today: string
   if (calCmd && !/^calendar:/i.test(text)) return { kind: 'calendar', termino: tidy(calCmd[1]) }
   const qs = parseQueSigue(text, companies)
   if (qs) return { kind: 'que_sigue', opts: qs }
+  // Fase 9c-B: the board as a picture.
+  if (/^\/tablero$|^(?:mandame|manda|pasame|dame|ponme|muestrame|quiero(?:\s+ver)?|ver|enviame|envia)\s+(?:el\s+|la\s+|una\s+)?(?:foto\s+(?:del\s+)?|imagen\s+(?:del\s+)?)?tablero$|^(?:foto|imagen)\s+del\s+tablero$|^tablero$|^como\s+(?:esta|va|se\s+ve|quedo)\s+el\s+tablero$/.test(n0)) return { kind: 'tablero' }
   // Fase 9: the ⏳ list and the two explicit forms; anything looser goes to the interpreter.
   if (/^(?:que\s+(?:tengo|hay|esta|tenemos)\s+(?:en\s+)?esperando|(?:lista\s+(?:de\s+)?)?esperando|en\s+espera|que\s+espero)$/.test(n0)) return { kind: 'esperando' }
+  // Fase 9c-D: the natural questions answered in prose, with or without "¿…?", no model needed.
+  if (clasificarPregunta(text, companies)) return { kind: 'pregunta', texto: text }
   if (/^[?¿]/.test(text) || /^\/?pregunta\b/i.test(text)) {
     // Keep the question as asked (its "¿…?" included) — only drop the trigger.
     // "? qué cerré ayer" → "qué cerré ayer"; "¿qué tengo hoy?" stays whole.
@@ -632,8 +646,9 @@ export function ayuda(modelo: string): string {
     '🗒 NOTAS',
     'nota IM: texto (reemplaza) · nota IM + línea (agrega) · nota IM: (borra)',
     'nota en paypal: texto (la agrega al pie de esa tarea, con fecha)',
-    '❓ PREGUNTAR',
-    '/pregunta ¿qué tengo hoy? (o empieza con ? o ¿) · te contesto con tus tareas y notas',
+    '❓ PREGUNTAR (te contesto en prosa y propongo qué sigue)',
+    '¿qué tengo hoy? · ¿qué me queda pendiente? · ¿qué tengo mañana? · ¿qué hay esta semana? · ¿cómo va IM? · ¿qué tengo estancado? · ¿qué tengo esperando? · otra cosa: /pregunta ¿qué cerré ayer?',
+    '📋 MENÚ · los botones bajo el teclado son estas preguntas (/menu lo trae, /ocultar lo quita) · "mándame el tablero" → la foto del tablero · 💬 en /hoy está el mismo chat',
     '⏰ ALARMAS PROPIAS (no son tareas)',
     'alarma mañana 3pm revisar pagos · recuérdame el viernes a las 10 llamar al contador · avísame en 2 horas X · mis alarmas · quita alarma 2',
     '⏰ Alarmas ☀️ 8:00 am y 🌙 6:00 pm, lun–sáb · 🏢 IM · DATAVIA · PD · Personal · Chelsea',

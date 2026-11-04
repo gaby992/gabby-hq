@@ -39,7 +39,8 @@ Es lo mismo que el bot manda con `/ayuda todo`; sale de
 la app debe poder decirse al bot, en texto o por voz: crear, completar, mover,
 borrar y editar tareas, escribir notas, preguntar. La web (`/hoy`, `/tasks`,
 `/correo`) es el tablero para **ver** (y, desde la fase 9, para mover
-tarjetas arrastrando), no un paso obligatorio. Si algo solo se
+tarjetas arrastrando; desde la 9c, con el chat 💬 que es el mismo bot), no
+un paso obligatorio. Si algo solo se
 puede hacer desde la web, es un pendiente del bot.
 
 Hay dos direcciones de tráfico:
@@ -111,7 +112,18 @@ Archivos del asistente dentro del repo:
 | `src/app/api/asistente/manana/route.ts` | Alarma de las 8:00 |
 | `src/app/api/asistente/tarde/route.ts` | Alarma de las 6:00 pm |
 | `src/app/api/asistente/recordatorios/route.ts` | Cron cada 5 min: manda las alarmas propias vencidas (fase 4) |
-| `src/app/api/telegram/route.ts` | Webhook del bot: comandos exactos, texto libre → intérprete, audios, botones |
+| `src/app/api/telegram/route.ts` | Webhook del bot: lee el update y llama al motor dentro del canal Telegram |
+| `src/lib/asistente/motor.ts` | Fase 9c: el motor del bot (antes vivía en el webhook): comandos exactos, texto libre → intérprete → plan, audios, botones. Lo comparten Telegram y el chat web |
+| `src/lib/asistente/canal.ts` | Fase 9c: por dónde habla el bot en esta petición (`telegram` \| `web`): el envío consulta esto; en la web los mensajes se recogen y vuelven como JSON |
+| `src/lib/asistente/menu.ts` | Fase 9c-A: el menú fijo (reply keyboard) y qué pregunta es cada botón |
+| `src/lib/asistente/tablero-datos.ts` | Fase 9c-B: el modelo de la foto del tablero (KPIs + 4 columnas, 6 tarjetas) |
+| `src/lib/asistente/tablero-imagen.tsx` | Fase 9c-B: dibuja la foto con `next/og`, la manda con `sendPhoto` y firma la URL |
+| `src/app/api/asistente/tablero.png/route.ts` | Fase 9c-B: la foto como PNG (`CRON_SECRET`, sesión o `?firma=`) |
+| `src/lib/asistente/narracion.ts` | Fase 9c-C/D: el párrafo de las alarmas y las respuestas narradas a las preguntas naturales |
+| `src/lib/asistente/preguntas.ts` | Fase 9c-D: qué pregunta natural es un texto (hoy, pendiente, mañana, estancado, empresa, esperando, semana), sin modelo |
+| `src/lib/asistente/simbolos.ts` | Los símbolos de las listas (🔺 🔸 ✴️ ▫️ ▪️), separados para que la narración no importe `alarmas.ts` |
+| `src/app/api/asistente/chat/route.ts` | Fase 9c-E: el chat 💬 de /hoy (GET historial · POST texto o botón) sobre el mismo motor |
+| `src/components/ChatPanel.tsx` | Fase 9c-E: el botón flotante y el panel lateral de conversación en /hoy |
 | `src/lib/asistente/config.ts` | Fase 7: lo que se personaliza (nombre, bot, tono, sugerencias) y el **system prompt único** (`personaPrompt`) |
 | `src/lib/asistente/conversacion.ts` | Fase 7: el hilo (`bot_conversacion`): últimos 10 turnos / 30 min, "olvida lo anterior", sugerencias declinadas |
 | `src/lib/asistente/sugerencias.ts` | Fase 7: la única sugerencia por mensaje, con botones, y qué hace cada botón |
@@ -174,6 +186,8 @@ Archivos del asistente dentro del repo:
 | `sql/2026-11-asistente-fase6c-niveles.sql` | Ajustes 6c: `cuentas_correo.solo_app` (la lista 📋 Solo app) y `cuentas_correo.idioma` ('es' / 'en') + precarga de Silencio, Solo app, las reglas `^accepted:` / `^declined:` / `^tentative:` e idioma 'en' en IM Chelsea (idempotente: se repite si se amplía) |
 | `sql/2026-11-duplicadas-select.sql` | Solo lectura (ajuste 6b-8): tareas con el mismo título donde una está cerrada y otra abierta, para revisar antes de borrar |
 | `sql/2026-11-asistente-fase7.sql` | Migración de la fase 7: `bot_conversacion` + `asistente_config` |
+| `sql/2026-11-asistente-fase9-tablero.sql` | Migración de la fase 9: `tasks.estado` y `tasks.esperando_a` |
+| `sql/2026-11-asistente-fase9c.sql` | Migración de la fase 9c: `bot_conversacion.canal` + `tasks.updated_at` con trigger (para "¿qué tengo estancado?") |
 | `src/lib/asistente/pagos.ts` | Fase 5-C: pagos recurrentes (fila + evento mensual en Calendar) |
 | `src/app/api/calendar/tarea/route.ts` | Fase 5-B: botón "📅 Agregar a Calendar" del panel de edición y casilla del formulario |
 | `src/app/api/calendar/sync/route.ts` | Fase 5-D: la web avisa después de escribir una tarea para que su evento siga a la fila |
@@ -2558,6 +2572,25 @@ Ninguna.
     en 🔺 Vencidas lleva a la columna 🔥 resaltada.
 11. **(9b) Pagos**: con un pago recurrente del día 15, en Calendario → Mes
     ese día muestra `💳 [IM] Vercel …`; no se puede arrastrar.
+12. **(9c) La foto**: dile al bot `mándame el tablero` (o toca 🖥 Tablero
+    en el menú). Llega una imagen con la franja de KPIs y las cuatro columnas
+    (Hoy sí o sí · Mañana · Esperando · Correos), 6 tarjetas por columna con
+    badge de empresa y ★, "ver N más" al pie, y debajo el botón
+    **🖥 Abrir tablero** que lleva a /hoy. La misma foto llega sola antes
+    del texto de la alarma de las 8 y del cierre (`?test=1` como en 1d).
+13. **(9c) Por voz**: manda un audio diciendo «¿cómo va IM?». Responde
+    «🎤 Entendí: …» y un párrafo con las abiertas, vencidas, esperando,
+    correos pendientes y la nota "por dónde iba" de IM, luego la lista corta
+    numerada de lo urgente de IM y una propuesta («¿Seguimos con …?»). Sin
+    pasar por el modelo (el parser lo reconoce); `la 1 lista` cierra la
+    primera línea.
+14. **(9c) Chat web**: en /hoy toca 💬 (abajo a la derecha) y escribe
+    «pásame Marketing Team al viernes». Contesta igual que en Telegram
+    («➡️ «Marketing Team» → vence vie …») y la tarjeta se mueve sola de
+    columna sin recargar. Prueba también «¿qué tengo estancado?»: aparece el
+    plan con [✅ Hacer todo] [✏️ No, corrijo] como botones del panel; al
+    confirmar, las tarjetas pasan a 📦 Después. Abre Telegram: la misma
+    conversación sigue ahí (es un solo hilo).
 
 ### 9e. Qué puede fallar y dónde verlo
 
@@ -2573,6 +2606,188 @@ Ninguna.
 | Una nota desapareció de la franja | La fila ya no está en `notas_empresa` (archivada, reemplazada o borrada desde el bot) o hay un chip de empresa activo | Chip "Todas"; `notas_historial` conserva el texto (ver 9a-K). |
 | En Calendario no sale ningún pago | `pagos_recurrentes` vacía o todos inactivos, o la tabla no existe (SQL 5c) | Settings → Pagos recurrentes; logs `[hoy] pagos: …`. |
 | Al arrastrar a un día la hora se perdió | No debería: `accion: 'fecha'` solo toca `due_date` | Si pasa, logs `[hoy] POST fecha: …` y /tasks → la tarea. |
+
+---
+
+## 9c. Fase 9c — El asistente habla: menú, foto del tablero, narración, preguntas y chat en /hoy
+
+**Principio.** El bot contesta como una asistente que **narra y propone**,
+no como un listado. Los números de las tareas se conservan solo como apoyo
+para referirse a ellas («la 3 lista»), nunca como la forma principal de
+usarlo. Español neutro, nunca voseo. Nada de lo anterior se quitó: los
+comandos exactos y las listas completas siguen igual; cambió la primera
+respuesta.
+
+### 9c-a. Qué hace
+
+**A) Menú fijo (reply keyboard).** Dos filas bajo el teclado de Telegram,
+siempre visibles:
+
+```
+[📋 Hoy] [📅 Mañana] [⏳ Esperando]
+[📧 Correos] [🎯 ¿Qué sigue?] [🖥 Tablero]
+```
+
+Cada botón **es una pregunta en lenguaje natural**: Telegram manda el texto
+del botón como un mensaje normal y el parser lo cambia por su frase
+(`src/lib/asistente/menu.ts`: 📋 Hoy → «¿qué tengo hoy?», 📅 Mañana →
+«¿qué tengo mañana?», ⏳ Esperando → «¿qué tengo esperando?», 📧 Correos →
+«correos», 🎯 → «¿qué sigue?», 🖥 Tablero → «mándame el tablero»). Tocar el
+botón y escribir la pregunta hacen exactamente lo mismo. Se instala con el
+**primer mensaje** de una conversación (no hay turnos en los últimos 30
+min: la respuesta lleva el teclado), con `/menu` (también «menú», «dame el
+menú»), con `/start` y bajo el texto de **cada alarma de las 8 y cierre**,
+así nunca se pierde. `/ocultar` («quita el menú») lo quita. Un teclado de
+respuesta no puede ir en el mismo mensaje que botones inline, por eso viaja
+en la primera respuesta sin botones de la petición (`canal.ts`:
+`pedirMenu()` → `sendTelegram` lo adjunta).
+
+**B) Foto del tablero.** `src/lib/asistente/tablero-imagen.tsx` dibuja
+con `next/og` (Satori + resvg, viene con Next 14; es el mismo motor que
+`@vercel/og`, sin paquete aparte) una imagen de 1200×760: título y fecha,
+la **franja de KPIs** (Hoy sí o sí · Vencidas · Esperando · Correos) y
+**cuatro columnas** (Hoy sí o sí · Mañana · Esperando · Correos) con hasta
+**6 tarjetas** cada una — título, badge de empresa con su color (o «sin
+empresa»), ★ si es importante y a la derecha «vencida 1 nov», la hora o
+«de quién» — y «ver N más» al pie. El modelo (qué va en cada columna) es
+`tablero-datos.ts` y usa **la misma regla** del tablero web y las listas
+(`horizonteDe` / `columnaCorreo`), así que nunca se contradicen. Sin emojis
+dentro de la imagen a propósito: Satori los baja de un CDN al renderizar y
+la foto no debe depender de eso (★ es un SVG). **Nunca** van datos de env
+vars ni correos completos: una tarjeta de correo es el nombre corto del
+remitente y el asunto, nada más.
+
+Cómo llega:
+
+| Cuándo | Qué pasa |
+| --- | --- |
+| Alarma de las 8 y cierre de las 6 | `ejecutarAlarma` manda la foto con `sendPhoto` **antes** del texto, con el botón inline **🖥 Abrir tablero** → `APP_URL/hoy`. Es *best effort*: si la imagen falla queda una línea en el log (`[alarma-manana] foto del tablero: …`) y el texto sale igual; la foto nunca bloquea la alarma ni cuenta para el reintento |
+| «mándame el tablero» · «foto del tablero» · «cómo se ve el tablero» · 🖥 Tablero | el parser (sin modelo) o el intérprete (acción `tablero`) la mandan a demanda; si falla, lo dice y da el link a /hoy |
+| `GET /api/asistente/tablero.png` | la misma imagen como PNG, para verla o probarla. Tres puertas: `Authorization: Bearer $CRON_SECRET` (como las alarmas), la sesión de la app (abrirla en el navegador logueada) o `?firma=<HMAC-SHA256(CRON_SECRET, "tablero:YYYY-MM-DD")>` (32 hex) para un link del día sin exponer el secreto |
+
+Los bytes se **suben** a Telegram (multipart), no se le da una URL: funciona
+igual en previews y no depende de que Telegram alcance la app. En el chat
+web la foto viaja como `data:image/png` dentro del mensaje.
+
+**C) Alarmas narradas.** La alarma de las 8 abre con **un párrafo** y
+debajo va la lista numerada por secciones como hasta ahora (fase 9). El
+párrafo dice: qué no puede esperar (vencidas con sus días, lo de hoy con su
+hora, urgentes sin fecha), qué lleva **más de un mes** vencido, qué hay
+**mañana**, **a quién** se está esperando (agrupado por persona) y cuántos
+**correos piden respuesta** (y cuántos urgentes). El cierre de las 6 igual:
+qué se cerró hoy (con hasta 3 nombres) y qué queda, luego la lista.
+
+Reglas: el párrafo **nombra máximo 3 tareas por punto** («y N más»),
+**nunca repite la lista** y no inventa: se compone en código
+(`narracion.ts`: `parrafoMananaFijo` / `parrafoTardeFijo`) a partir de las
+mismas filas que arman la lista, y el modelo solo lo **reescribe** con su
+voz (`pulir`: máximo 110 palabras, un solo párrafo, debe conservar cada
+«título»; 8 s de tope y si no, va el fijo). La línea del día de la fase 7-E
+queda sustituida por este párrafo.
+
+```
+☀️ Hoy, miércoles 4 nov
+Buenos días, Gabby. Lo que no puede esperar: 3 vencidas — «pagar luz» (50 días),
+«propuesta TOTT» (45 días) y «paypal statements» (12 días); 2 para hoy — «llamar a
+Juan» (3:00 pm) y «revisar contrato». «pagar luz» y «propuesta TOTT» llevan más de
+un mes vencidas. Mañana tienes 2 cosas: «revisar pagos» (10:00 am) y «correos de
+Chelsea». Esperas a Chelsea por 3 cosas y a Andrew (TOTT) por «landing TOTT».
+2 correos piden respuesta (1 urgente).
+
+📝 Por dónde ibas
+…
+🔥 Hoy sí o sí (6)
+🔺 1. pagar luz · Sin empresa · hace 50 días
+…
+```
+
+**D) Preguntas en lenguaje natural, con respuesta narrada.** Sin comandos
+nuevos: es la intención `pregunta` ampliada. `preguntas.ts` reconoce las
+formas (con o sin «¿…?», sin modelo) y `narracion.ts` contesta en prosa +
+lista corta numerada (registrada en `bot_alarmas` como `lista`, así «la 3
+lista» funciona sobre ella) + **siempre una propuesta de siguiente acción**.
+Si la pregunta llega por el intérprete (otra forma de decirlo), la acción
+`pregunta` pasa primero por aquí; lo que no es ninguna de estas sigue
+yendo al modelo (`/pregunta` de la fase 3, «¿qué cerré ayer?»).
+
+| Pregunta | Qué contesta | Propuesta con que cierra |
+| --- | --- | --- |
+| «¿qué tengo hoy?» · «qué hay hoy» · «cómo viene el día» · 📋 Hoy | párrafo (no puede esperar · más de un mes · correos) + 🔥 Hoy sí o sí numerada (≤ 8) | «¿Arrancamos con «X»? … «la 1 lista» / «pasa 1 a mañana»» |
+| «¿qué me queda pendiente?» · «qué tengo» · «qué me falta» | total abierto repartido por columna + lo mismo de arriba | igual |
+| «¿qué tengo mañana?» · 📅 Mañana | lo de mañana con horas (y cuánto trae el resto de la semana) + lista | «Si algo de hoy no va a salir, «pasa 2 a mañana»» |
+| «¿qué tengo estancado?» · «qué se me quedó atorado» · «qué está parado» | tareas **sin cambios en 14+ días** y sin fecha futura (`tasks.updated_at` con trigger — SQL 9c —; antes del SQL, `created_at`) + lo que lleva **3+ días esperando**, con días | «¿Las paso a Después, las cancelo o les pongo alarma?» y un **plan** con las de arriba a 📦 Después, con [✅ Hacer todo] [✏️ No, corrijo]; se corrige como cualquier plan («cancela la 2», «la 3 déjala», «olvídalo») |
+| «¿cómo va IM?» · «cómo vamos con PD» · «qué tal DATAVIA» · «qué hay de IM» (cualquier empresa) | abiertas, vencidas (días), hoy, mañana, semana, esperando (de quién), correos pendientes de sus cuentas (urgentes) y la nota «por dónde iba» con su edad, en prosa + lo urgente de esa empresa numerado | «¿Seguimos con «X»?» o «todo lo pendiente de IM» |
+| «¿qué tengo esperando?» · «a quién estoy esperando» · ⏳ Esperando | a quién esperas (agrupado) y desde cuándo (días desde el último cambio), la más vieja, correos pasados a Chelsea + la lista ⏳ numerada | «la 2 ya no espera» · «listo 2» · alarma de seguimiento |
+| «¿qué hay esta semana?» · «cómo viene la semana» | por día, lunes a domingo (los pasados marcados «pasó»), el día más cargado, lo vencido que arrastras | «pasa 3 al viernes» · «la 2 para después» |
+
+Dos acciones nuevas del intérprete acompañan esto: `tablero` («mándame el
+tablero») y `despues` («deja X para después», «quítale la fecha a X» →
+📦 Después, sin fecha; es lo que ejecuta el plan de las estancadas).
+
+**E) Chat 💬 en /hoy.** Botón flotante abajo a la derecha; abre un panel
+lateral (toda la pantalla en el teléfono) que recuerda si estaba abierto
+(`localStorage` `hoy.chat`). Usa **exactamente el mismo motor** que
+Telegram: `src/lib/asistente/motor.ts` (el código del webhook, movido a una
+librería) con el mismo parser, intérprete, memoria (`bot_conversacion`),
+borradores y confirmación de planes. El truco es el **canal**
+(`src/lib/asistente/canal.ts`, un `AsyncLocalStorage`): `POST
+/api/asistente/chat` envuelve la petición en el canal `web`, y `sendTelegram`
+—en vez de llamar a Telegram— **recoge** cada mensaje (texto, si es HTML,
+sus botones inline y la foto si la hay) y la ruta los devuelve como JSON. Un
+botón del panel manda su `callback_data` como `boton` y pasa por
+`procesarBoton`, el mismo código que un tap en Telegram (quitar botones y
+«answerCallbackQuery» son no-op en la web). Así «pásame Marketing Team al
+viernes», «¿qué tengo estancado?» → plan → [✅ Hacer todo], «borra 3» → [Sí,
+borrar] funcionan idénticos. Solo texto; voz no por ahora.
+
+Es **la misma conversación** que Telegram: el chat web habla como el primer
+chat de `ALLOWED_CHAT_IDS` (`chatIdWeb()`), así «sí», «la segunda» funcionan
+entre los dos y una alarma puesta desde la web suena en Telegram. La columna
+`bot_conversacion.canal` (`telegram` | `web`, SQL 9c) dice por dónde entró
+cada turno; el panel carga los últimos 40 (`GET /api/asistente/chat`) y marca
+«desde Telegram». **Tras cada respuesta el tablero se refresca solo**
+(`onChanged` → `GET /api/hoy`), así una acción confirmada mueve la tarjeta
+al instante. Las respuestas en HTML de Telegram (`<b>`, `<i>`, `<code>`,
+`<s>`, `<a>`) se pintan con esas etiquetas y nada más; el resto va como texto.
+Abajo del panel están los mismos seis botones del menú de Telegram.
+
+### 9c-b. Lo que hay que hacer a mano
+
+1. Supabase → SQL Editor → `sql/2026-11-asistente-fase9c.sql` en una
+   query. Agrega `bot_conversacion.canal` y `tasks.updated_at` (rellenado
+   con `coalesce(completed_at, created_at)`) con su trigger. **Nada rompe
+   sin él**: el bot guarda los turnos sin `canal` (lo avisa una vez en el
+   log) y usa `created_at` como «último cambio» para «¿qué tengo
+   estancado?»; con el SQL la respuesta es exacta.
+2. Push → redeploy. Sin env vars nuevas (`APP_URL` ya existía: es a donde
+   apunta 🖥 Abrir tablero).
+3. En Telegram escribe `/menu` una vez (o espera la alarma de las 8): el
+   menú queda fijo.
+
+### 9c-c. Env vars que agrega esta fase
+
+Ninguna.
+
+### 9c-d. Cómo probar que funciona
+
+Los pasos 12, 13 y 14 de [§ 9d](#9d-cómo-probar-que-funciona): recibir la
+foto con «mándame el tablero», preguntar «¿cómo va IM?» por voz, y desde el
+chat web decir «pásame Marketing Team al viernes» y ver que la tarjeta se
+mueve.
+
+### 9c-e. Qué puede fallar y dónde verlo
+
+| Síntoma | Causa probable | Dónde verlo / qué hacer |
+| --- | --- | --- |
+| La alarma llega sin foto | `next/og` falló al renderizar (fuente, memoria) o Telegram rechazó el `sendPhoto` | Logs: `[alarma-manana] foto del tablero: …`. El texto llega igual. Prueba `GET /api/asistente/tablero.png` con el `CRON_SECRET` para ver el error completo |
+| «mándame el tablero» responde «No pude armar la imagen…» | lo mismo, a demanda | Logs `[bot] tablero: …` |
+| El menú no aparece | el primer mensaje de la conversación llevaba botones inline (una pregunta con botones): el teclado no cabe en el mismo mensaje | `/menu`, o espera la siguiente alarma de las 8; o `/ocultar` si lo quitaste |
+| Un botón del menú crea una tarea «📋 Hoy» | la app vieja (sin fase 9c) recibió el texto del botón | Redeploy; el parser de 9c cambia el botón por su pregunta |
+| «¿qué tengo estancado?» marca como estancadas tareas que acabas de tocar | falta el SQL 9c: sin `updated_at` se usa `created_at` | Correr `sql/2026-11-asistente-fase9c.sql` |
+| El panel 💬 dice «Unauthorized» | sesión de la app vencida | Vuelve a entrar en /login |
+| El chat web y Telegram no comparten la conversación | `ALLOWED_CHAT_IDS` vacío (el chat web habla como chat 0) | Define `ALLOWED_CHAT_IDS` en Vercel |
+| Log `[conversacion] sin columna canal` | falta el SQL 9c | Correr el SQL; mientras, los turnos se guardan igual |
+| El párrafo de las 8 sale «seco» (el texto fijo) | el modelo tardó más de 8 s o devolvió algo que no conserva los títulos | Es el diseño: el fijo es correcto; mira `[narracion] pulir: …` en los logs |
 
 ---
 
@@ -2682,6 +2897,7 @@ verano; para una zona con DST hay que calcular el offset en vez de fijarlo).
 | Google Calendar API | 5 | $0 | Gratis dentro de las cuotas normales (1M llamadas/día; aquí son unas pocas por tarea). |
 | Gmail API | 6 | $0 | Gratis dentro de la cuota (aquí: una lectura de historial cada 15 min y un `get` por correo nuevo). |
 | LLM para clasificar correo (`gpt-5-mini` o el de `LLM_MODEL_CORREO`) | 6 | Un correo que llega al modelo ≈ 1200 tokens de entrada (prompt + cuerpo recortado a 3000 caracteres + resúmenes previos del hilo) + 100 de salida ≈ **$0.0005 USD**. Con 30 correos al día que pasan por el modelo × 30 días = 900 ≈ **$0.45 USD/mes**. | El ruido (listas y reglas) no pasa por el modelo; los VIP sí (tipo y resumen). Cada evaluación en `/correo/evaluar` reclasifica la ventana entera: 100 correos ≈ $0.05 por modelo. Se ve en Settings → Asistente como `correo:…`. |
+| LLM para narrar (fase 9c) | 9c | Dos llamadas al día (el párrafo de las 8 y el del cierre, ≈ 700 tokens cada una) ≈ **$0.02 USD/mes**. Las preguntas naturales («¿qué tengo hoy?», «¿cómo va IM?»…) y la foto del tablero **no usan el modelo**. | Si el modelo falla o tarda, va el párrafo fijo: cuesta $0. |
 | LLM para la conversación (fase 7) | 7 | El intérprete manda además el hilo reciente (≈ +300 tokens por mensaje) y la mañana una llamada corta (≈ 400 tokens). Con 30 mensajes al día: **≈ $0.65 USD/mes** en total para el intérprete; la mañana, centavos. | Sugerencias y "organízame" no usan el modelo. El costo real del mes se ve en Settings → Asistente. |
 
 **Fase 1 total: $0 adicionales** sobre lo que ya se paga.

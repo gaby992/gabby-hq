@@ -20,6 +20,8 @@ import { CORREO_ACCION_LABELS, CORREO_TIPO_LABELS, NIVEL_REMITENTE_EMOJI, NIVEL_
 import { normalizar } from './acciones'
 import { ejecutarNota } from './notas-bot'
 import { responderPregunta } from './pregunta'
+import { responderNarrada } from './narracion'
+import { enviarTablero } from './tablero-imagen'
 import { enviarQueSigue } from './que-sigue'
 import { dejarDeEsperar, enviarListaEsperando, moverTarea } from './esperando'
 import { confirmacionAlarma, crearRecordatorio, instanteDe } from './recordatorios'
@@ -223,7 +225,7 @@ function emparejarCrear(acciones: AccionResuelta[], ctx: ContextoInterprete): Ac
 const ICONO: Record<AccionLlm['tipo'], string> = {
   completar: '✅', cancelar: '🗑', borrar: '❌', posponer: '➡️', renombrar: '✏️', cambiar: '✏️', crear: '➕',
   nota_empresa: '📝', nota_tarea: '📎', alarma: '⏰', pregunta: '❓', que_sigue: '🎯', lista: '📋', calendar: '📅',
-  pagos_listar: '💳', dividir: '🪜', siguiente_paso: '🪜', correo: '📧', esperar: '⏳', esperando: '⏳', desconocido: '🤷',
+  pagos_listar: '💳', dividir: '🪜', siguiente_paso: '🪜', correo: '📧', esperar: '⏳', esperando: '⏳', tablero: '🖥', despues: '📦', desconocido: '🤷',
 }
 
 function fechaDicha(ymd: string, today: string): string {
@@ -281,13 +283,15 @@ function frase(a: AccionResuelta, today: string, conTarea: boolean): string {
     }
     case 'esperar': return a.fin ? `Retomar${tt} (ya no espera)` : `Dejar esperando${tt}${a.quien ? ` a ${a.quien}` : ''}`
     case 'esperando': return 'Mandar la lista de ⏳ Esperando'
+    case 'tablero': return 'Mandar la foto del tablero'
+    case 'despues': return `Pasar a Después (sin fecha)${tt}`
     case 'desconocido': return `No entendí «${corto(a.texto, 60)}»`
   }
 }
 
 /** True when an action adjacent to another on the same task reads well joined with " y ". */
 function enlazable(a: AccionResuelta): boolean {
-  return !!a.tarea && !a.error && ['posponer', 'renombrar', 'cambiar', 'completar', 'cancelar', 'borrar', 'nota_tarea', 'calendar', 'esperar'].includes(a.tipo)
+  return !!a.tarea && !a.error && ['posponer', 'renombrar', 'cambiar', 'completar', 'cancelar', 'borrar', 'nota_tarea', 'calendar', 'esperar', 'despues'].includes(a.tipo)
 }
 
 function fechaDeAccion(a: AccionResuelta): string | null | undefined {
@@ -626,8 +630,11 @@ export async function ejecutarUna(chatId: number, a: AccionResuelta): Promise<st
       const r = await crearRecordatorio(chatId, a.texto, cuando)
       return confirmacionAlarma(r)
     }
-    case 'pregunta':
-      return responderPregunta(chatId, a.texto)
+    case 'pregunta': {
+      // Fase 9c-D: the known questions get prose (no model); the rest, the LLM answer.
+      const n = await responderNarrada(chatId, a.texto)
+      return n ? n.texto : responderPregunta(chatId, a.texto)
+    }
     case 'que_sigue':
       // Sent as its own HTML message, like the lists.
       await enviarQueSigue(chatId, { empresa: a.empresa, solo_urgentes: a.solo_urgentes, solo_vencer: a.solo_vencer })
@@ -667,6 +674,12 @@ export async function ejecutarUna(chatId: number, a: AccionResuelta): Promise<st
     case 'esperando':
       await enviarListaEsperando(chatId)
       return '⏳ (lista enviada arriba)'
+    case 'tablero':
+      // Fase 9c-B: the picture goes as its own message.
+      await enviarTablero(chatId)
+      return '🖥 (tablero enviado arriba)'
+    case 'despues':
+      return moverTarea([tareaDe(a).id], 'despues')
     case 'desconocido':
       return `🤷 No entendí «${corto(a.texto, 60)}»`
   }

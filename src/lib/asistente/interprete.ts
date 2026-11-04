@@ -56,6 +56,10 @@ export type AccionLlm =
   | { tipo: 'esperar'; ref: string; quien?: string; fin?: boolean }
   /** Fase 9: "qué tengo esperando" → the ⏳ list. */
   | { tipo: 'esperando' }
+  /** Fase 9c-B: "mándame el tablero" → the board as a picture. */
+  | { tipo: 'tablero' }
+  /** Fase 9c-D: "deja X para después" / "quítale la fecha" → 📦 Después (no date). */
+  | { tipo: 'despues'; ref: string }
   | { tipo: 'desconocido'; texto: string }
 
 export interface FiltroCorreo {
@@ -72,7 +76,7 @@ export type TipoAccionLlm = AccionLlm['tipo']
 const TIPOS: TipoAccionLlm[] = [
   'completar', 'cancelar', 'borrar', 'posponer', 'renombrar', 'cambiar', 'crear',
   'nota_empresa', 'nota_tarea', 'alarma', 'pregunta', 'que_sigue', 'lista', 'calendar',
-  'pagos_listar', 'dividir', 'siguiente_paso', 'correo', 'esperar', 'esperando', 'desconocido',
+  'pagos_listar', 'dividir', 'siguiente_paso', 'correo', 'esperar', 'esperando', 'tablero', 'despues', 'desconocido',
 ]
 
 const ACCIONES_CORREO: CorreoAccion[] = ['chelsea', 'yo', 'tarea', 'archivar']
@@ -275,6 +279,8 @@ export function systemPrompt(today: string, cfg: AsistenteConfig = { nombre_pers
     '- {"tipo":"esperar","ref":REF,("quien":"…"),("fin":true)}  → "la de TOTT está esperando a Andrew", "esa está en manos del cliente", "la 3 espera respuesta de Juan": la tarea queda en ⏳ Esperando (quien = de quién, corto, sin "a"). ' +
       '"la de TOTT ya no espera", "ya respondió Andrew, retomo la de TOTT", "la 2 vuelve a mí" → fin:true (vuelve a estar en sus manos). NO es completar ni posponer',
     '- {"tipo":"esperando"}  → "qué tengo esperando", "qué está en manos de otros", "qué espero de alguien", "lista de esperando": la lista ⏳',
+    '- {"tipo":"tablero"}  → "mándame el tablero", "foto del tablero", "cómo se ve el tablero", "quiero ver el tablero": la imagen del tablero',
+    '- {"tipo":"despues","ref":REF}  → "deja X para después", "X para después", "quítale la fecha a X", "pásala a Después", "esa no corre": la tarea queda sin fecha en 📦 Después. NO es cancelar ni posponer a un día',
     '- {"tipo":"desconocido","texto":"…"}  → saludos, comentarios o algo que no es ninguna de las anteriores',
     '',
     'REF = a qué tarea se refiere: el id entre corchetes del contexto ("#3" = número de la última alarma, "t12" = otra tarea abierta), ' +
@@ -531,7 +537,11 @@ export function validarAcciones(raw: unknown): AccionLlm[] {
         break
       }
       case 'esperando':
+      case 'tablero':
         out.push({ tipo })
+        break
+      case 'despues':
+        if (ref) out.push({ tipo, ref })
         break
       case 'pregunta':
       case 'desconocido':
