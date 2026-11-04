@@ -41,7 +41,9 @@ import { dividirTarea, siguientePaso } from '@/lib/asistente/pasos'
 import { aplicarCorreccion, fusionarCorreccion, leerCorreccion, renderCorreccion, type Resultado } from '@/lib/asistente/correcciones'
 import { accionDeBoton } from '@/lib/correo/alertas'
 import { decidirCorreo } from '@/lib/correo/decisiones'
-import { cuentaPorTexto, enviarListaCorreos } from '@/lib/correo/listas'
+import { cuentasPorTexto, enviarListaCorreos } from '@/lib/correo/listas'
+import { leerRelectura, type Relectura } from '@/lib/asistente/relectura'
+import type { CuentaCorreo } from '@/types'
 import { cargarCuentas, cuentaPorId } from '@/lib/correo/cuentas'
 import { ultimaAlarma } from '@/lib/asistente/registro-listas'
 import { mensajeError, motivoParaUsuario } from '@/lib/errores'
@@ -274,6 +276,89 @@ async function salidaOrganizar(chatId: number, text: string): Promise<boolean> {
   return true
 }
 
+/**
+ * Ajuste 9c-1: "correos de X" — the MAILBOX X (never the company): one match
+ * → the narrated list; none or several → the accounts as buttons (a typed
+ * name works too while the question waits). `importante` narrows to urgent
+ * + "someone waits".
+ */
+async function responderCorreos(chatId: number, pedido: { cuenta: string | null; importante: boolean; mio: boolean }, prefix: string | null) {
+  if (!pedido.cuenta) {
+    if (prefix) await reply(chatId, prefix)
+    await enviarListaCorreos(chatId, null, { importante: pedido.importante })
+    return
+  }
+  const cfg = await cargarConfig()
+  const hits = await cuentasPorTexto(pedido.cuenta, { mio: pedido.mio, persona: cfg.nombre_persona })
+  if (hits.length === 1) {
+    if (prefix) await reply(chatId, prefix)
+    await enviarListaCorreos(chatId, hits[0], { importante: pedido.importante })
+    return
+  }
+  const todas = hits.length > 1 ? hits : await cargarCuentas().catch(() => [] as CuentaCorreo[])
+  if (todas.length === 0) {
+    await reply(chatId, joinLines(prefix, 'No hay cuentas de correo conectadas todavía (Settings → Correo).'))
+    return
+  }
+  const nonce = await borradorConNonce(chatId, pedido.cuenta, { tipo: 'cuenta_correo', cuenta_ids: todas.map((c) => c.id), importante: pedido.importante })
+  const pregunta = hits.length > 1
+    ? `«${pedido.cuenta}» puede ser ${hits.map((c) => c.nombre).join(' o ')}. ¿Cuál?`
+    : `No tengo una cuenta de correo «${pedido.cuenta}». ¿Cuál de estas?`
+  await reply(chatId, joinLines(prefix, pregunta), inlineKeyboard(todas.map((c) => [{ text: `📧 ${c.nombre}${c.duena ? ` (${c.duena})` : ''}`, callback_data: `a:${nonce}:${c.id}` }])))
+}
+
+/** The last things she said before this message (newest first), for a re-reading. */
+async function dichosAntes(chatId: number, actual: string): Promise<string[]> {
+  const turnos = await historial(chatId)
+  const textos = turnos.filter((t) => t.rol === 'user' && !t.texto.startsWith('[')).map((t) => t.texto).reverse()
+  // The current message is already in the thread: skip it.
+  if (textos[0] === actual) textos.shift()
+  return textos.slice(0, 4)
+}
+
+/**
+ * Ajuste 9c-1 (rule 4): she says the bot read her wrong. Admit it and
+ * re-run the previous message with the other reading: mail ("eran correos")
+ * → the mailbox list; tasks ("eran tareas") → the task list of that
+ * company; "me refería a …" → that, as a new message.
+ */
+async function responderRelectura(chatId: number, r: Relectura, texto: string, prefix: string | null) {
+  const antes = await dichosAntes(chatId, texto)
+  const pista = r.resto ?? antes.join(' · ')
+  if (r.lectura === 'correos') {
+    const companies = await cargarEmpresas()
+    const parsed = parseMensaje(`correos ${r.resto ?? ''}`.trim(), companies, cancunYmd())
+    const importante = /importante|urgente|respuesta/i.test(pista)
+    // The mailbox: what she named now, or any account mentioned in what she said before.
+    let cuenta: string | null = parsed.kind === 'correos' ? parsed.cuenta : null
+    if (!cuenta) {
+      for (const dicho of antes) {
+        const p = parseMensaje(`correos de ${dicho}`, companies, cancunYmd())
+        const hint = p.kind === 'correos' ? p.cuenta : dicho
+        if (hint && (await cuentasPorTexto(hint)).length >= 1) {
+          cuenta = hint
+          break
+        }
+      }
+    }
+    await responderCorreos(chatId, { cuenta, importante, mio: /\bmi\b/i.test(pista) }, joinLines(prefix, 'Tienes razón, lo leí mal: eran correos.'))
+    return
+  }
+  if (r.lectura === 'tareas') {
+    const companies = await cargarEmpresas()
+    const n = pista.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    const empresa = [...companies].sort((a, b) => b.name.length - a.name.length).find((c) => n.includes(c.name.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase())) ?? null
+    await reply(chatId, joinLines(prefix, `Tienes razón, lo leí mal: eran tareas${empresa ? ` de ${empresa.name.trim()}` : ''}.`))
+    await enviarLista(chatId, empresa ? 'pendientes' : 'manana', empresa)
+    return
+  }
+  if (r.resto) {
+    await handleText(chatId, r.resto, joinLines(prefix, 'Tienes razón, lo leí mal. Va de nuevo:'))
+    return
+  }
+  await reply(chatId, joinLines(prefix, 'Perdón, lo leí mal. ¿Me lo dices otra vez completo?'))
+}
+
 export async function handleText(chatId: number, text: string, prefix: string | null) {
   if (!text) {
     await reply(chatId, joinLines(prefix, 'No entendí nada. ¿Me lo repites?'))
@@ -284,6 +369,24 @@ export async function handleText(chatId: number, text: string, prefix: string | 
   // Fase 7: the thread remembers what she said (the transcription, for a voice note).
   await guardarTurno(chatId, 'user', text)
   if (await salidaOrganizar(chatId, text)) return
+  // Ajuste 9c-1: "¿cuál cuenta?" is waiting and she types the name ("IM Chelsea") → that mailbox.
+  const esperaCuenta = await borradorVigente(chatId)
+  if (esperaCuenta && 'tipo' in esperaCuenta.parsed && esperaCuenta.parsed.tipo === 'cuenta_correo') {
+    const hits = await cuentasPorTexto(text)
+    if (hits.length === 1 && esperaCuenta.parsed.cuenta_ids.includes(hits[0].id)) {
+      const importante = esperaCuenta.parsed.importante
+      await borrarBorrador(esperaCuenta.id)
+      if (prefix) await reply(chatId, prefix)
+      await enviarListaCorreos(chatId, hits[0], { importante })
+      return
+    }
+  }
+  // Ajuste 9c-1: "eso no son correos, son tareas" / "no, me refería a…" corrects how the LAST message was read.
+  const relectura = leerRelectura(text)
+  if (relectura) {
+    await responderRelectura(chatId, relectura, text, prefix)
+    return
+  }
   // Ajuste 7-G: while a plan waits for its OK, "quita X", "déjala donde
   // estaba" or "olvídalo" correct THAT plan; nothing is deleted or completed.
   const pendiente = await planPendiente(chatId)
@@ -424,18 +527,10 @@ export async function handleText(chatId: number, text: string, prefix: string | 
       if (prefix) await reply(chatId, prefix)
       await enviarLista(chatId, parsed.tipo, parsed.empresa ?? null)
       return
-    case 'correos': {
-      // Ajuste 6-2: the live mail list of one account (or all), numbered and recorded (tipo 'correos').
-      if (prefix) await reply(chatId, prefix)
-      const cuenta = parsed.cuenta ? await cuentaPorTexto(parsed.cuenta) : null
-      if (parsed.cuenta && !cuenta) {
-        const nombres = (await cargarCuentas().catch(() => [])).map((c) => `${c.nombre}${c.duena ? ` (${c.duena})` : ''}`)
-        await reply(chatId, `No tengo una cuenta de correo «${parsed.cuenta}».${nombres.length ? ` Las que hay: ${nombres.join(', ')}.` : ''} Di solo "correos" para ver todas.`)
-        return
-      }
-      await enviarListaCorreos(chatId, cuenta)
+    case 'correos':
+      // Ajuste 6-2 / 9c-1: the live mail list of one mailbox (or all), narrated, numbered and recorded (tipo 'correos').
+      await responderCorreos(chatId, parsed, prefix)
       return
-    }
     case 'que_sigue':
       // Fase 4b: ordered in code, same HTML style as the 8:00 list, numbered like an alarm.
       if (prefix) await reply(chatId, prefix)
@@ -519,7 +614,7 @@ function botonesAclarar(nonce: string) {
 async function preguntarQueEs(chatId: number, text: string, prefix: string | null) {
   const cfg = await cargarConfig()
   const nonce = await borradorConNonce(chatId, text, { tipo: 'aclarar', texto: text })
-  await reply(chatId, joinLines(prefix, `No pillé eso, ${cfg.nombre_persona}. ¿Es una tarea nueva, una orden sobre una tarea, o una alarma?`), botonesAclarar(nonce))
+  await reply(chatId, joinLines(prefix, `No entendí bien eso, ${cfg.nombre_persona}. ¿Es una tarea nueva, una orden sobre una tarea, o una alarma?`), botonesAclarar(nonce))
 }
 
 /** "divide X": the open task whose title contains X, then its steps. */
@@ -831,8 +926,8 @@ export async function procesarBoton(chatId: number, messageId: number | null, da
   // "e:<nonce>:<company_id>" | "p:<nonce>:<priority>" | "t:<nonce>:<task_id>" | "y:<nonce>:1|0"
   // fase 4: "k:<nonce>:1|0" (plan) | "h:<nonce>:09|12|15|18" (alarm hour) | "q:<nonce>:tarea|orden|alarma"
   // fase 7: "s:<nonce>:<valor>" (suggestion) | "o:<nonce>:<valor>" (organízame)
-  // ajuste 7-G: "c:<nonce>:<n>" (an ambiguous correction of the plan)
-  const m = data.match(/^([eptykhqsoc]):([0-9a-f]{8}):(.+)$/)
+  // ajuste 7-G: "c:<nonce>:<n>" (an ambiguous correction of the plan) · 9c-1: "a:<nonce>:<cuenta_id>" (which mailbox)
+  const m = data.match(/^([eptykhqsoca]):([0-9a-f]{8}):(.+)$/)
   if (!m) return
   const [, kind, nonce, value] = m
   await guardarTurno(chatId, 'user', `[botón: ${value}]`, { boton: value })
@@ -858,6 +953,14 @@ export async function procesarBoton(chatId: number, messageId: number | null, da
         await borrarBorrador(borrador.id)
       }
       await reply(chatId, r.text, r.replyMarkup)
+      return
+    }
+
+    // ── Ajuste 9c-1: "correos de X" → which mailbox ──
+    if (parsed.tipo === 'cuenta_correo') {
+      if (kind !== 'a' || !parsed.cuenta_ids.includes(value)) return
+      await borrarBorrador(borrador.id)
+      await enviarListaCorreos(chatId, await cuentaPorId(value), { importante: parsed.importante })
       return
     }
 

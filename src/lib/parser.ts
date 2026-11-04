@@ -94,8 +94,13 @@ export type Parsed =
   | { kind: 'que_sigue'; opts: QueSigueOpts }
   /** Fase 4c: the 8:00 / 6:00 pm list, on demand; fase 4d: 'pendientes' + empresa = one company's full list. */
   | { kind: 'lista'; tipo: ListaTipo; empresa?: CompanyRef | null }
-  /** Ajuste 6-2: "correos" / "correos de Chelsea" → every pending mail of that account (null = all), numbered. */
-  | { kind: 'correos'; cuenta: string | null }
+  /**
+   * Ajuste 6-2: "correos" / "correos de Chelsea" → every pending mail of that account (null = all), numbered.
+   * Ajuste 9c-1: ANY phrase that asks to see mail lands here, never in a task list. `cuenta` is the
+   * account hint as said ("chelsea", "im gabby"); `importante` = "lo más importante" / "urgentes" /
+   * "qué necesita respuesta"; `mio` = "mi correo" (the person's own mailbox when the hint is ambiguous).
+   */
+  | { kind: 'correos'; cuenta: string | null; importante: boolean; mio: boolean }
   /** Fase 5-B: "pon en calendar la de TOTT" → the open task whose title contains `termino`. */
   | { kind: 'calendar'; termino: string }
   /** Fase 5-C: recurring payments — the bot only LISTS them (they are managed in /settings). */
@@ -475,16 +480,39 @@ function parseLista(text: string, companies: CompanyRef[]): { tipo: ListaTipo; e
 // A voice note that DICTATES the fields as a comma-separated list:
 // "Agregar un nuevo task, whatsapp, chelito, due date, mañana, compañía".
 // The field words are not the title; what is left between them is.
-/** "correos", "mis correos", "correos de Chelsea", "lista de correos", "¿qué correos tengo pendientes?" */
+// Ajuste 9c-1: any phrase that asks to SEE mail is the "correos" intent — never a task list and never
+// a new task — however it is said: "dame una lista de lo más importante de correos de Chelsea",
+// "los correos de chelsea, una lista por favor", "mi correo de IM", "qué necesita respuesta en el
+// buzón de PD". What is NOT a list: a decision on a mail ("el correo de Andrew lo hago yo", "archiva
+// …"), a note ("nota en paypal: ya mandé el correo"), an alarm, and a task with a date, an hour or a
+// priority in front ("mañana revisar correo de Juan", "urgente IM contestar el correo de TOTT").
+const RE_PALABRA_CORREO = /\b(?:correos?|mails?|e-?mails?|buzon(?:es)?|bandeja(?:\s+de\s+entrada)?|inbox)\b/
+const RE_DECISION_CORREO = /\b(?:lo\s+hago\s+yo|yo\s+lo\s+(?:hago|contesto|respondo)|para\s+chelsea|pasaselo|archiva|archivalo|archivar|es\s+tarea|como\s+tarea|silencio|solo\s+app|es\s+alerta|es\s+ruido|es\s+vip|respond[ei]|contest[ao]|marca(?:lo)?\s+como|borra|elimina)\b/
+const RE_FILTRO_IMPORTANTE = /\b(?:(?:lo\s+)?mas\s+importantes?|importantes?|urgentes?|prioritarios?|(?:de\s+)?(?:alta|prioridad\s+alta)|necesitan?\s+respuesta|piden\s+respuesta|esperan\s+respuesta|sin\s+responder|por\s+responder|que\s+(?:me\s+)?(?:falta|faltan)\s+(?:por\s+)?(?:responder|contestar))\b/
+/** Words that are the request itself, not the account: what is left after removing them is the account hint. */
+const RELLENO_CORREOS = new Set([
+  'dame', 'dime', 'mandame', 'manda', 'pasame', 'pasa', 'ponme', 'muestrame', 'muestra', 'ensename', 'ensena', 'enviame', 'envia', 'ver', 'quiero', 'quisiera', 'necesito', 'puedes', 'podrias', 'me',
+  'una', 'un', 'el', 'la', 'los', 'las', 'lo', 'lista', 'listado', 'resumen', 'de', 'del', 'con', 'en', 'a', 'al', 'y', 'o', 'que', 'cual', 'cuales', 'como', 'hay', 'tengo', 'tenemos', 'tiene', 'tienen', 'estan', 'esta', 'son', 'es',
+  'mas', 'importante', 'importantes', 'urgente', 'urgentes', 'prioritario', 'prioritarios', 'prioridad', 'alta', 'necesita', 'necesitan', 'piden', 'pide', 'esperan', 'respuesta', 'responder', 'contestar', 'sin', 'por', 'favor', 'porfa', 'porfis', 'gracias',
+  'mi', 'mis', 'cuenta', 'buzon', 'buzones', 'bandeja', 'entrada', 'inbox', 'correo', 'correos', 'mail', 'mails', 'email', 'emails', 'e-mail', 'e-mails',
+  'pendiente', 'pendientes', 'nuevo', 'nuevos', 'recientes', 'ultimos', 'hoy', 'ahora', 'ahorita', 'todo', 'todos', 'todas', 'revisa', 'revisame', 'revisar', 'checa', 'chequea', 'checar', 'veamos', 'revisemos', 'llego', 'llegaron', 'entro', 'entraron', 'traes', 'trae',
+])
+
+/** "correos", "mis correos", "correos de Chelsea", "lista de correos", "¿qué correos tengo pendientes?", and every looser way of asking for mail. */
 function parseCorreos(text: string): Parsed | null {
-  const n = sinAcentos(text.trim().replace(/^[¿?¡!\s]+|[?!.\s]+$/g, '')).toLowerCase()
-  const m = n.match(/^\/?(?:mis\s+|los\s+|(?:la\s+)?lista\s+de\s+(?:los\s+)?|dame\s+(?:los\s+|la\s+lista\s+de\s+)?|ver\s+|mandame\s+(?:los\s+)?)?correos(?:\s+pendientes)?(?:\s+(?:de|del|de\s+la\s+cuenta(?:\s+de)?)\s+(.+))?$/)
-  if (m) return { kind: 'correos', cuenta: m[1] ? tidy(m[1]) : null }
-  if (/^(?:que|cuales)\s+correos\s+(?:tengo|hay)(?:\s+pendientes)?(?:\s+(?:de|del)\s+(.+))?$/.test(n)) {
-    const de = n.match(/\s(?:de|del)\s+(.+)$/)
-    return { kind: 'correos', cuenta: de ? tidy(de[1]) : null }
-  }
-  return null
+  const n = sinAcentos(text.trim().replace(/^[¿?¡!\s]+|[?!.\s]+$/g, '')).replace(/[«»"']/g, '')
+  if (!RE_PALABRA_CORREO.test(n)) return null
+  // Not a request to see mail: a decision, a note, an alarm, a radar idea — or a task (date, hour or priority).
+  if (RE_DECISION_CORREO.test(n)) return null
+  if (/^(?:nota|radar|alarma|recuerdame|avisame|recordatorio)\b/.test(n) || /\bnota\s+en\b/.test(n)) return null
+  if (/^(?:urgente|normal|cuando\s+pueda|importante)\s+\S/.test(n) && !/^(?:urgentes|importantes)\b/.test(n)) return null
+  if (/\b(?:manana|pasado\s+manana|(?:el\s+)?(?:lunes|martes|miercoles|jueves|viernes|sabado|domingo)|a\s+las\s+\d|\d{1,2}\s*(?:am|pm)|en\s+\d+\s+dias|el\s+\d{1,2}\s+de\s+[a-z]+)\b/.test(n)) return null
+  const importante = RE_FILTRO_IMPORTANTE.test(n)
+  const mio = /\bmis?\s+(?:correos?|mails?|e-?mails?|buzon|bandeja)\b/.test(n)
+  // The account hint: whatever is not the request itself. "chelsea", "im gabby", "" (all).
+  const palabras = n.replace(/[,;:()]+/g, ' ').split(/\s+/).filter((w) => w && !RELLENO_CORREOS.has(w))
+  const cuenta = palabras.join(' ').trim()
+  return { kind: 'correos', cuenta: cuenta || null, importante, mio }
 }
 
 const CAMPO_RE = /^(?:agregar?|agrega|añadir?|crear?|nuevo|nueva|un|una|task|tarea|tareas|titulo|título|due|date|fecha|vence|para|compañ[ií]a|company|empresa|prioridad|priority|urgencia)$/i
@@ -532,10 +560,11 @@ export function parseMensaje(raw: string, companies: CompanyRef[], today: string
   if (div) return { kind: 'dividir', termino: tidy(div[1]) }
   if (/^(?:siguiente|proximo|otro)\s+paso$|^el\s+que\s+sigue$|^paso\s+siguiente$/.test(n0)) return { kind: 'siguiente_paso' }
   if (/^(?:organizame|organiza(?:me)?\s+(?:mis\s+)?(?:pendientes|tareas|dia)|ayudame\s+con\s+(?:mis\s+)?(?:pendientes|tareas)|no\s+se\s+por\s+donde\s+empezar|estoy\s+abrumad[ao]|que\s+hago|ponme\s+en\s+orden|ordename)$/.test(n0)) return { kind: 'organizar' }
-  const lista = parseLista(text, companies)
-  if (lista) return { kind: 'lista', tipo: lista.tipo, empresa: lista.empresa ?? null }
+  // Ajuste 9c-1: mail first — a phrase that mentions correos is never a task list ("lista de correos de Chelsea").
   const correos = parseCorreos(text)
   if (correos) return correos
+  const lista = parseLista(text, companies)
+  if (lista) return { kind: 'lista', tipo: lista.tipo, empresa: lista.empresa ?? null }
   const pagos = parsePagos(text, companies)
   if (pagos) return pagos
   const calCmd = text.match(/^(?:pon|ponme|agrega|agr[ée]game|mete|m[ée]teme)\s+(?:en|al)\s+(?:el\s+)?(?:google\s+)?(?:calendar|calendario|agenda)\s+(?:la\s+(?:tarea\s+)?(?:de|del)\s+|la\s+|el\s+)?(.+)$/i)

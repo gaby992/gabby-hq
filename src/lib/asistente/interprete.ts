@@ -58,6 +58,8 @@ export type AccionLlm =
   | { tipo: 'esperando' }
   /** Fase 9c-B: "mándame el tablero" → the board as a picture. */
   | { tipo: 'tablero' }
+  /** Ajuste 9c-1: any way of asking to SEE mail ("lo más importante del buzón de PD") → the narrated mail list. `cuenta` = the MAILBOX, never a company. */
+  | { tipo: 'correos_lista'; cuenta?: string; importante?: boolean }
   /** Fase 9c-D: "deja X para después" / "quítale la fecha" → 📦 Después (no date). */
   | { tipo: 'despues'; ref: string }
   | { tipo: 'desconocido'; texto: string }
@@ -76,7 +78,7 @@ export type TipoAccionLlm = AccionLlm['tipo']
 const TIPOS: TipoAccionLlm[] = [
   'completar', 'cancelar', 'borrar', 'posponer', 'renombrar', 'cambiar', 'crear',
   'nota_empresa', 'nota_tarea', 'alarma', 'pregunta', 'que_sigue', 'lista', 'calendar',
-  'pagos_listar', 'dividir', 'siguiente_paso', 'correo', 'esperar', 'esperando', 'tablero', 'despues', 'desconocido',
+  'pagos_listar', 'dividir', 'siguiente_paso', 'correo', 'esperar', 'esperando', 'tablero', 'despues', 'correos_lista', 'desconocido',
 ]
 
 const ACCIONES_CORREO: CorreoAccion[] = ['chelsea', 'yo', 'tarea', 'archivar']
@@ -280,6 +282,8 @@ export function systemPrompt(today: string, cfg: AsistenteConfig = { nombre_pers
       '"la de TOTT ya no espera", "ya respondió Andrew, retomo la de TOTT", "la 2 vuelve a mí" → fin:true (vuelve a estar en sus manos). NO es completar ni posponer',
     '- {"tipo":"esperando"}  → "qué tengo esperando", "qué está en manos de otros", "qué espero de alguien", "lista de esperando": la lista ⏳',
     '- {"tipo":"tablero"}  → "mándame el tablero", "foto del tablero", "cómo se ve el tablero", "quiero ver el tablero": la imagen del tablero',
+    '- {"tipo":"correos_lista",("cuenta":"…"),("importante":true)}  → cualquier forma de pedir VER correos: "mándame los correos de Chelsea", "qué llegó al buzón de PD", "lo más importante del correo de IM", "qué necesita respuesta en mi correo". ' +
+      'OJO: ahí "Chelsea"/"PD"/"IM" es el BUZÓN (una cuenta de correo), NUNCA la empresa ni sus tareas; cuenta = ese nombre tal cual lo dijo. "lo más importante" / "urgentes" / "qué necesita respuesta" → importante:true. Esto NUNCA es "lista" (lista es de TAREAS)',
     '- {"tipo":"despues","ref":REF}  → "deja X para después", "X para después", "quítale la fecha a X", "pásala a Después", "esa no corre": la tarea queda sin fecha en 📦 Después. NO es cancelar ni posponer a un día',
     '- {"tipo":"desconocido","texto":"…"}  → saludos, comentarios o algo que no es ninguna de las anteriores',
     '',
@@ -539,6 +543,9 @@ export function validarAcciones(raw: unknown): AccionLlm[] {
       case 'esperando':
       case 'tablero':
         out.push({ tipo })
+        break
+      case 'correos_lista':
+        out.push({ tipo, cuenta: str(a.cuenta), importante: a.importante === true || undefined })
         break
       case 'despues':
         if (ref) out.push({ tipo, ref })

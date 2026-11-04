@@ -107,15 +107,44 @@ async function cargarCuentasSinFallar(): Promise<CuentaCorreo[]> {
   }
 }
 
-/** "correos de Chelsea" / "correos de IM Gabby" → the account (by owner or name); null = all. */
+function sinAcentos(s: string): string {
+  return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
+}
+
+/**
+ * Ajuste 9c-1: the accounts a spoken hint points at — partial and
+ * case-insensitive over the account's name, its owner and its email
+ * ("chelsea" → IM Chelsea; "pd" → PD Gabby; "im gabby" → IM Gabby). Pure.
+ *   exact owner or name → that one
+ *   every word of the hint found in "nombre duena email" → those
+ *   `mio` ("mi correo de IM") and still several → the person's own (owner = `persona`)
+ * Several left → the caller asks with buttons. Empty hint → [] (means "all").
+ */
+export function elegirCuentas(texto: string | null | undefined, cuentas: CuentaCorreo[], opts: { mio?: boolean; persona?: string } = {}): CuentaCorreo[] {
+  const t = sinAcentos(texto ?? '')
+  if (!t) return []
+  const exacta = cuentas.find((c) => sinAcentos(c.duena ?? '') === t) ?? cuentas.find((c) => sinAcentos(c.nombre) === t) ?? cuentas.find((c) => sinAcentos(c.conexion?.email ?? '') === t)
+  if (exacta) return [exacta]
+  const palabras = t.split(/\s+/).filter(Boolean)
+  const clave = (c: CuentaCorreo) => sinAcentos(`${c.nombre} ${c.duena ?? ''} ${c.conexion?.email ?? ''}`)
+  let hits = cuentas.filter((c) => palabras.every((w) => clave(c).includes(w)))
+  if (hits.length > 1 && opts.mio && opts.persona) {
+    const mias = hits.filter((c) => sinAcentos(c.duena ?? '') === sinAcentos(opts.persona!))
+    if (mias.length >= 1) hits = mias
+  }
+  return hits
+}
+
+/** The accounts a hint points at (see elegirCuentas), from the database. */
+export async function cuentasPorTexto(texto: string | null | undefined, opts: { mio?: boolean; persona?: string } = {}): Promise<CuentaCorreo[]> {
+  if (!(texto ?? '').trim()) return []
+  return elegirCuentas(texto, await cargarCuentasSinFallar(), opts)
+}
+
+/** "correos de Chelsea" / "correos de IM Gabby" → the ONE account the hint points at; null when none or several. */
 export async function cuentaPorTexto(texto: string | null | undefined): Promise<CuentaCorreo | null> {
-  const t = (texto ?? '').trim().toLowerCase()
-  if (!t) return null
-  const cuentas = await cargarCuentasSinFallar()
-  return cuentas.find((c) => (c.duena ?? '').trim().toLowerCase() === t)
-    ?? cuentas.find((c) => c.nombre.trim().toLowerCase() === t)
-    ?? cuentas.find((c) => c.nombre.toLowerCase().includes(t) || (c.duena ?? '').toLowerCase().includes(t) || (c.conexion?.email ?? '').toLowerCase().includes(t))
-    ?? null
+  const hits = await cuentasPorTexto(texto)
+  return hits.length === 1 ? hits[0] : null
 }
 
 /**
@@ -123,12 +152,15 @@ export async function cuentaPorTexto(texto: string | null | undefined): Promise<
  * all accounts), numbered, grouped alta / necesita respuesta / resto, with
  * sender and age; then the VIPs answered in the last 48 h, greyed.
  */
-export async function construirListaCorreos(cuenta: CuentaCorreo | null, now: Date = new Date()): Promise<Bloque> {
-  const [pendientes, respondidos, cuentas] = await Promise.all([
+export async function construirListaCorreos(cuenta: CuentaCorreo | null, now: Date = new Date(), opts: { importante?: boolean } = {}): Promise<Bloque> {
+  const [todos, respondidos, cuentas] = await Promise.all([
     correosPendientes({ cuentaId: cuenta?.id ?? null, dias: 7 }),
     correosRespondidosVip({ cuentaId: cuenta?.id ?? null }),
     cargarCuentasSinFallar(),
   ])
+  // Ajuste 9c-1: "lo más importante" / "urgentes" / "qué necesita respuesta" → alta + a person waits; the rest stays out (and is counted).
+  const pendientes = opts.importante ? todos.filter((c) => grupoDe(c) !== 'resto') : todos
+  const fuera = todos.length - pendientes.length
   // One account → its language; every account → Spanish headers, each line in its account's language.
   const idioma: IdiomaCorreo = cuenta?.idioma ?? 'es'
   const t = textos(idioma)
@@ -138,9 +170,11 @@ export async function construirListaCorreos(cuenta: CuentaCorreo | null, now: Da
   const items: AlarmaItem[] = []
   if (pendientes.length === 0) {
     const cola = respondidos.length > 0 ? '\n' + respondidos.map((r) => lineaRespondido(r, duenaDe(r.cuenta_id), idiomaDe(r.cuenta_id))).join('\n') : ''
-    return { html: `📧 <b>${t.correos} · ${nombre} (0)</b>\n${t.nadaPendiente} · ${linkCorreo('/correo')}${cola}`, items, total: 0 }
+    const nada = opts.importante && fuera > 0 ? `Nada urgente ni que pida respuesta; ${fuera === 1 ? 'hay 1 correo' : `hay ${fuera} correos`} sin prisa en ${linkCorreo('/correo')}.` : `${t.nadaPendiente} · ${linkCorreo('/correo')}`
+    return { html: `📧 <b>${t.correos} · ${nombre}${opts.importante ? ' · lo importante' : ''} (0)</b>\n${nada}${cola}`, items, total: 0 }
   }
-  const bloques = [`📧 <b>${t.correos} · ${nombre} (${pendientes.length})</b>`]
+  // Ajuste 9c-1: the narration first (Spanish), then the numbered lines (each in its account's language).
+  const bloques = [`📧 <b>${t.correos} · ${nombre}${opts.importante ? ' · lo importante' : ''} (${pendientes.length})</b>\n${escapeHtml(parrafoCorreos(pendientes, cuenta?.nombre ?? null, { importante: !!opts.importante, fuera, now }))}`]
   const mostrados = pendientes.slice(0, MAX_EN_LISTA_CORREOS)
   let n = 0
   for (const grupo of ['alta', 'respuesta', 'resto'] as GrupoCorreo[]) {
@@ -156,13 +190,51 @@ export async function construirListaCorreos(cuenta: CuentaCorreo | null, now: Da
   }
   if (pendientes.length > MAX_EN_LISTA_CORREOS) bloques.push(`· ${t.mas(pendientes.length - MAX_EN_LISTA_CORREOS, linkCorreo('/correo'))}`)
   if (respondidos.length > 0) bloques.push(respondidos.map((r) => lineaRespondido(r, duenaDe(r.cuenta_id), idiomaDe(r.cuenta_id))).join('\n'))
+  if (opts.importante && fuera > 0) bloques.push(`· ${fuera === 1 ? '1 correo sin prisa' : `${fuera} correos sin prisa`} fuera de esta lista: di «correos${cuenta ? ` de ${escapeHtml(cuenta.nombre)}` : ''}» para verlos todos`)
   bloques.push(pieDecidir(1))
   return { html: bloques.join('\n\n'), items, total: pendientes.length }
 }
 
+/**
+ * Ajuste 9c-1: one short paragraph in Spanish about what is pending —
+ * how many, how many urgent (with up to 3 senders and subjects), how many
+ * a person is waiting on, the oldest — and what to do first. Names at most
+ * 3; the numbered lines below carry the rest.
+ */
+export function parrafoCorreos(pendientes: CorreoLite[], cuenta: string | null, opts: { importante: boolean; fuera: number; now?: Date }): string {
+  const now = opts.now ?? new Date()
+  const altas = pendientes.filter((c) => grupoDe(c) === 'alta')
+  const respuesta = pendientes.filter((c) => grupoDe(c) === 'respuesta')
+  const resto = pendientes.filter((c) => grupoDe(c) === 'resto')
+  const paraChelsea = pendientes.filter((c) => c.estado === 'para_chelsea').length
+  const corto = (s: string, max = 34) => (s.length > max ? s.slice(0, max - 1) + '…' : s)
+  const nombrar = (cs: CorreoLite[]) => {
+    const v = cs.slice(0, 3).map((c) => `${quienCorto(c)} · «${corto(c.asunto ?? '(sin asunto)')}»`)
+    const r = cs.length - v.length
+    return r > 0 ? `${v.join(', ')} y ${r} más` : v.length <= 1 ? v.join('') : `${v.slice(0, -1).join(', ')} y ${v[v.length - 1]}`
+  }
+  const donde = cuenta ? ` en ${cuenta}` : ''
+  const partes: string[] = []
+  if (opts.importante) partes.push(`Lo que importa${donde}: ${pendientes.length === 1 ? '1 correo' : `${pendientes.length} correos`}.`)
+  else partes.push(`Tienes ${pendientes.length === 1 ? '1 correo pendiente' : `${pendientes.length} correos pendientes`}${donde}.`)
+  if (altas.length > 0) partes.push(`${altas.length === 1 ? '1 urgente' : `${altas.length} urgentes`}: ${nombrar(altas)}.`)
+  if (respuesta.length > 0) partes.push(`${respuesta.length === 1 ? '1 pide respuesta' : `${respuesta.length} piden respuesta`}${altas.length === 0 ? `: ${nombrar(respuesta)}` : ''}.`)
+  if (!opts.importante && resto.length > 0) partes.push(`${resto.length === 1 ? '1 es solo para enterarte' : `${resto.length} son solo para enterarte`}.`)
+  if (paraChelsea > 0) partes.push(`${paraChelsea === 1 ? '1 ya está con Chelsea' : `${paraChelsea} ya están con Chelsea`} sin responder.`)
+  const viejo = [...pendientes].sort((a, b) => (a.recibido_en ?? '').localeCompare(b.recibido_en ?? ''))[0]
+  if (viejo?.recibido_en) {
+    const d = Math.floor((now.getTime() - new Date(viejo.recibido_en).getTime()) / 86_400_000)
+    if (d >= 2) partes.push(`El más viejo lleva ${d} días (${quienCorto(viejo)}).`)
+  }
+  if (opts.importante && opts.fuera > 0) partes.push(`Dejo fuera ${opts.fuera === 1 ? '1 que no urge' : `${opts.fuera} que no urgen`}.`)
+  const primero = altas[0] ?? respuesta[0] ?? pendientes[0]
+  if (primero) partes.push(`¿Empezamos por el de ${quienCorto(primero)}? Dime «el 1 lo hago yo» o «el 1 para Chelsea».`)
+  return partes.join(' ')
+}
+
 /** Sends the "correos" list to one chat and records it (tipo 'correos') so its numbers work. */
-export async function enviarListaCorreos(chatId: number, cuenta: CuentaCorreo | null): Promise<number> {
-  const built = await construirListaCorreos(cuenta)
+export async function enviarListaCorreos(chatId: number, cuenta: CuentaCorreo | null, opts: { importante?: boolean } = {}): Promise<number> {
+  const built = await construirListaCorreos(cuenta, new Date(), opts)
   const messageId = await sendTelegram(chatId, built.html, { html: true, tag: 'lista-correos' })
   await guardarAlarma('correos', built.items, { chat_id: chatId, message_id: messageId, texto: built.html })
   return built.total

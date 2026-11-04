@@ -124,6 +124,8 @@ Archivos del asistente dentro del repo:
 | `src/lib/asistente/simbolos.ts` | Los símbolos de las listas (🔺 🔸 ✴️ ▫️ ▪️), separados para que la narración no importe `alarmas.ts` |
 | `src/app/api/asistente/chat/route.ts` | Fase 9c-E: el chat 💬 de /hoy (GET historial · POST texto o botón) sobre el mismo motor |
 | `src/components/ChatPanel.tsx` | Fase 9c-E: el botón flotante y el panel lateral de conversación en /hoy |
+| `src/lib/asistente/relectura.ts` | Ajuste 9c-1: «eso no son correos, son tareas» / «no, me refería a…» como corrección de la última lectura |
+| `scripts/pruebas-parser.mjs` · `scripts/pruebas-loader.mjs` | `npm run pruebas`: pruebas del parser sin base de datos (menú, tablero, preguntas naturales, correos por lenguaje natural, relecturas) |
 | `src/lib/asistente/config.ts` | Fase 7: lo que se personaliza (nombre, bot, tono, sugerencias) y el **system prompt único** (`personaPrompt`) |
 | `src/lib/asistente/conversacion.ts` | Fase 7: el hilo (`bot_conversacion`): últimos 10 turnos / 30 min, "olvida lo anterior", sugerencias declinadas |
 | `src/lib/asistente/sugerencias.ts` | Fase 7: la única sugerencia por mensaje, con botones, y qué hace cada botón |
@@ -2787,7 +2789,88 @@ mueve.
 | El panel 💬 dice «Unauthorized» | sesión de la app vencida | Vuelve a entrar en /login |
 | El chat web y Telegram no comparten la conversación | `ALLOWED_CHAT_IDS` vacío (el chat web habla como chat 0) | Define `ALLOWED_CHAT_IDS` en Vercel |
 | Log `[conversacion] sin columna canal` | falta el SQL 9c | Correr el SQL; mientras, los turnos se guardan igual |
+| «correos de X» pregunta «¿Cuál de estas?» con botones | «X» no coincide con ninguna cuenta (o con varias) por nombre, dueña o email | Toca la cuenta o escribe su nombre; revisa los nombres en Settings → Correo (ajuste 9c-1) |
+| El bot tomó «eso no son correos» como una orden | La frase no empieza por «no» / «eso no» / «me refería» | Dilo así: «no, me refería a los correos de PD» (ajuste 9c-1, regla 4) |
 | El párrafo de las 8 sale «seco» (el texto fijo) | el modelo tardó más de 8 s o devolvió algo que no conserva los títulos | Es el diseño: el fijo es correcto; mira `[narracion] pulir: …` en los logs |
+
+### 9c-f. Ajuste 9c-1 (4 nov 2026) — correos por lenguaje natural y español neutro
+
+**Lo que pasó en producción.** «dame una lista de lo más importante de
+correos de Chelsea» → el bot pidió «correos»; «los correos de chelsea, una
+lista por favor» → «No tengo una cuenta de correo «chelsea, una lista por
+favor»»; luego «IM Chelsea» + «sí» → devolvió **tareas** de la empresa
+Chelsea, no correos. El parser solo reconocía cuatro formas fijas de pedir
+correos, tomaba todo lo que seguía a «de» como nombre de cuenta, y al no
+encontrar la cuenta la conversación cayó en el intérprete, que leyó
+«Chelsea» como empresa.
+
+**Reglas (y dónde viven):**
+
+1. **Cualquier frase que mencione correo / correos / mail(s) / email(s) /
+   buzón / bandeja / inbox es la intención `correos`**, nunca una lista de
+   tareas ni una tarea nueva (`parseCorreos` en `src/lib/parser.ts`, que
+   ahora corre **antes** que las listas de tareas). Lo que NO es pedir
+   correos y sigue su camino: una decisión sobre un correo («el correo de
+   Andrew lo hago yo», «archiva…», «es silencio»), una nota («nota en
+   paypal: ya mandé el correo»), una alarma, y una tarea con fecha, hora o
+   urgencia delante («mañana revisar correo de Juan», «urgente IM contestar
+   el correo de TOTT»). El **nombre de la cuenta** es lo que queda de la
+   frase al quitar las palabras del pedido («dame», «una lista», «lo más
+   importante», «por favor»…): «chelsea», «im gabby», «pd», o nada (= todas).
+   Se resuelve con **coincidencia parcial e insensible a mayúsculas** sobre
+   `cuentas_correo.nombre`, la dueña y el email de la conexión
+   (`elegirCuentas` / `cuentasPorTexto` en `src/lib/correo/listas.ts`):
+   «chelsea» → IM Chelsea; «pd» → PD Gabby; «mi correo de IM» → entre IM
+   Chelsea e IM Gabby gana la de la dueña (Settings → Asistente, «Gabby»)
+   porque dijo «mi». **Varias coincidencias (o ninguna) → botones** con las
+   cuentas (`a:<nonce>:<cuenta_id>`, borrador `cuenta_correo`); si en vez de
+   tocar escribe el nombre («IM Chelsea»), también vale. La forma de pedir
+   que llega por el intérprete tiene su acción: `correos_lista`
+   (`cuenta`, `importante`).
+2. **Empresa ≠ buzón.** «Chelsea» en una frase de correos es el **buzón**
+   (la cuenta IM Chelsea); en una frase de tareas («pendientes de Chelsea»,
+   «qué sigue de Chelsea», «cómo va Chelsea») es la **empresa**. El parser
+   decide por la frase, nunca se mezclan, y el prompt del intérprete lo dice
+   con todas sus letras.
+3. **«lo más importante» / «urgentes» / «qué necesita respuesta»** filtra
+   a urgencia **alta** + **necesita respuesta / pedido de tarea**
+   (`construirListaCorreos(…, { importante: true })`), y dice cuántos quedan
+   fuera. La respuesta es **narrada**: un párrafo en español (cuántos hay,
+   cuántos urgen con hasta 3 remitentes y asuntos, cuántos piden respuesta,
+   cuántos ya están con Chelsea, el más viejo, por cuál empezar) y debajo la
+   lista corta numerada de siempre, cada línea **en el idioma de su cuenta**
+   (ajuste 6c) y con el pie «el 3 lo hago yo · el 2 para Chelsea · archiva el
+   5». Se registra como lista `correos`, así los números funcionan.
+4. **Correcciones de lectura.** «eso no son correos, son tareas», «no, me
+   refería a los correos de PD», «no eran tareas, eran los correos de
+   Chelsea» son una **corrección del último mensaje del bot**, no una orden
+   nueva (`src/lib/asistente/relectura.ts`, leído en `handleText` antes del
+   parser). El bot lo reconoce («Tienes razón, lo leí mal: eran correos») y
+   **reintenta con la otra lectura** sobre lo que ella dijo antes (los
+   últimos turnos del hilo): correos → la cuenta mencionada en esos turnos;
+   tareas → la lista de pendientes de la empresa mencionada (o la completa);
+   «me refería a …» → eso, como mensaje nuevo. Un «no» solo, «no, quita X»
+   o «esa no, la otra» no son relecturas: siguen siendo respuestas al plan o
+   a la pregunta pendiente.
+5. **Español neutro, siempre.** Regla para todos los textos fijos del bot y
+   para la persona del modelo (`personaPrompt`): nunca voseo («tenés»,
+   «querés», «vos», «dale» como muletilla) ni regionalismos de España
+   («pillé», «vale», «mola», «guay», «tío», «currar», «flipar»), de Argentina
+   («che», «re», «bárbaro»), de Chile («bacán», «cachái»), de Colombia
+   («chévere», «parcero»), de México («chido», «órale», «padre», «ahorita»,
+   «chamba», «platicar», «hueva», «flojera», «neta») ni anglicismos de moda
+   («cool», «okay»). Sí valen: «Listo», «Hecho», «Ok», «Ojo», «👏», tuteo.
+   Lo que la **usuaria** dice puede ser como sea («me da flojera», «me da
+   hueva»): esas palabras aparecen en el parser como entrada, no como
+   salida. Revisión de hoy sobre `src/`: solo «No pillé eso» (ahora «No
+   entendí bien eso»); el resto estaba limpio. Al agregar un texto nuevo,
+   pasar esta lista.
+
+**Pruebas del parser.** `npm run pruebas` (`scripts/pruebas-parser.mjs`,
+sin base de datos, con el loader `scripts/pruebas-loader.mjs`): los cuatro
+mensajes de producción de arriba están ahí, más las formas de pedir correos,
+lo que no lo es, el menú, el tablero y las preguntas naturales. Falla con
+código 1 si algo se rompe.
 
 ---
 

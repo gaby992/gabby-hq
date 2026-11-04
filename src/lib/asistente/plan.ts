@@ -11,6 +11,7 @@ import { PRIORITY_LABELS } from '@/types'
 import type { Cambios, TareaParsed } from '@/lib/parser'
 import { cancelarTareas, ejecutarAccion, renombrarTarea } from './acciones'
 import { enviarLista } from './alarmas'
+import { cuentasPorTexto, enviarListaCorreos } from '@/lib/correo/listas'
 import { addDays, cancunHm, cancunYmd, formatFechaHoraEs, formatHoraEs, formatVenceEs } from './cancun'
 import { buscarEnAbiertas, type AccionLlm, type ContextoInterprete, type FiltroCorreo, type TareaLite } from './interprete'
 import { decidirCorreo } from '@/lib/correo/decisiones'
@@ -225,7 +226,7 @@ function emparejarCrear(acciones: AccionResuelta[], ctx: ContextoInterprete): Ac
 const ICONO: Record<AccionLlm['tipo'], string> = {
   completar: '✅', cancelar: '🗑', borrar: '❌', posponer: '➡️', renombrar: '✏️', cambiar: '✏️', crear: '➕',
   nota_empresa: '📝', nota_tarea: '📎', alarma: '⏰', pregunta: '❓', que_sigue: '🎯', lista: '📋', calendar: '📅',
-  pagos_listar: '💳', dividir: '🪜', siguiente_paso: '🪜', correo: '📧', esperar: '⏳', esperando: '⏳', tablero: '🖥', despues: '📦', desconocido: '🤷',
+  pagos_listar: '💳', dividir: '🪜', siguiente_paso: '🪜', correo: '📧', esperar: '⏳', esperando: '⏳', tablero: '🖥', despues: '📦', correos_lista: '📧', desconocido: '🤷',
 }
 
 function fechaDicha(ymd: string, today: string): string {
@@ -284,6 +285,7 @@ function frase(a: AccionResuelta, today: string, conTarea: boolean): string {
     case 'esperar': return a.fin ? `Retomar${tt} (ya no espera)` : `Dejar esperando${tt}${a.quien ? ` a ${a.quien}` : ''}`
     case 'esperando': return 'Mandar la lista de ⏳ Esperando'
     case 'tablero': return 'Mandar la foto del tablero'
+    case 'correos_lista': return `Mandar los correos${a.cuenta ? ` de ${a.cuenta}` : ''}${a.importante ? ' (lo importante)' : ''}`
     case 'despues': return `Pasar a Después (sin fecha)${tt}`
     case 'desconocido': return `No entendí «${corto(a.texto, 60)}»`
   }
@@ -680,6 +682,13 @@ export async function ejecutarUna(chatId: number, a: AccionResuelta): Promise<st
       return '🖥 (tablero enviado arriba)'
     case 'despues':
       return moverTarea([tareaDe(a).id], 'despues')
+    case 'correos_lista': {
+      // Ajuste 9c-1: the mailbox by partial name; several matches → say which, nothing sent.
+      const hits = a.cuenta ? await cuentasPorTexto(a.cuenta) : []
+      if (a.cuenta && hits.length !== 1) return hits.length === 0 ? `No tengo una cuenta de correo «${a.cuenta}».` : `«${a.cuenta}» puede ser ${hits.map((c) => c.nombre).join(' o ')}: dime cuál.`
+      await enviarListaCorreos(chatId, hits[0] ?? null, { importante: a.importante === true })
+      return '📧 (correos enviados arriba)'
+    }
     case 'desconocido':
       return `🤷 No entendí «${corto(a.texto, 60)}»`
   }

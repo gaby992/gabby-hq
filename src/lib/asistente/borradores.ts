@@ -36,6 +36,8 @@ export type BorradorParsed =
   | { tipo: 'aclarar'; texto: string }
   /** Fase 5-B: "ponla en calendar" on a task without an hour: [9am] [12pm] [3pm] [6pm] [todo el día]. */
   | { tipo: 'calendar_hora'; task_id: string; texto: string }
+  /** Ajuste 9c-1: "correos de X" where X matches none or several accounts: [IM Chelsea] [IM Gabby]… (or typed). */
+  | { tipo: 'cuenta_correo'; cuenta_ids: string[]; importante: boolean }
   /** Fase 7: one suggestion with buttons, and the guided "organízame" session. */
   | SugerenciaDraft
   | OrganizarDraft
