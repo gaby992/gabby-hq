@@ -17,6 +17,9 @@ interface Props {
   onUpdate: () => void
   /** Current 'YYYY-MM-DD', passed down so a whole list agrees on "today". */
   today?: string
+  /** Fase 9: the board opens the card already expanded (and straight into the edit form). */
+  defaultExpanded?: boolean
+  defaultEditing?: boolean
 }
 
 const PRIORITIES: Priority[] = ['urgente', 'normal', 'cuando']
@@ -32,14 +35,14 @@ function preserveGmailRef(original: string | null, edited: string): string {
   return edited.trimEnd() ? `${edited.trimEnd()}\n\n${ref}` : ref
 }
 
-export default function TaskCard({ task, companies, onUpdate, today }: Props) {
-  const [expanded, setExpanded] = useState(false)
+export default function TaskCard({ task, companies, onUpdate, today, defaultExpanded = false, defaultEditing = false }: Props) {
+  const [expanded, setExpanded] = useState(defaultExpanded)
   const [newSubtask, setNewSubtask] = useState('')
   const [addingSubtask, setAddingSubtask] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
   // Inline edit
-  const [editing, setEditing] = useState(false)
+  const [editing, setEditing] = useState(defaultExpanded && defaultEditing)
   const [text, setText] = useState(task.text)
   const [companyId, setCompanyId] = useState(task.company_id ?? '')
   const [priority, setPriority] = useState<Priority>(task.priority)

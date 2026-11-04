@@ -8,6 +8,7 @@
 import { createServerClient } from '@/lib/supabase-server'
 import type { Company, NotaEmpresa, Priority } from '@/types'
 import { CHELSEA_COMPANY_NAME } from '@/lib/chelsea'
+import { estaEsperando } from '@/lib/horizonte'
 import { CANCUN_TZ, addDays, cancunDayBounds, cancunYmd, daysBetween, formatHoraEs, formatVenceEs } from './cancun'
 import { correosRecientes, quienCorto } from '@/lib/correo/pendientes'
 import { CORREO_ESTADO_LABELS } from '@/types'
@@ -22,6 +23,8 @@ interface TaskLite {
   due_time: string | null
   company_id: string | null
   completed_at: string | null
+  estado?: 'abierta' | 'esperando' | null
+  esperando_a?: string | null
 }
 
 const EMPRESAS_ORDEN = ['IM', 'DATAVIA', 'PD', 'Personal', CHELSEA_COMPANY_NAME]
@@ -62,10 +65,12 @@ function tags(t: TaskLite, today: string): string {
     else out.push(`vence ${formatVenceEs(t.due_date)}${hora}`)
   } else out.push('sin fecha')
   out.push(t.priority + (t.importante ? ' ★' : ''))
+  if (estaEsperando(t)) out.push(`⏳ esperando${t.esperando_a ? ` a ${t.esperando_a}` : ''}`)
   return out.join(' · ')
 }
 
 function esDeHoy(t: TaskLite, today: string): boolean {
+  if (estaEsperando(t)) return false
   if (t.due_date && t.due_date <= today) return true
   return t.priority === 'urgente' || t.importante
 }
@@ -96,7 +101,7 @@ export async function construirContexto(now: Date = new Date()): Promise<Context
   const hace7 = cancunDayBounds(addDays(today, -7)).startIso
 
   const db = createServerClient()
-  const cols = 'id, text, priority, importante, due_date, due_time, company_id, completed_at'
+  const cols = 'id, text, priority, importante, due_date, due_time, company_id, completed_at, estado, esperando_a'
   const [openRes, doneRes, companiesRes, notasRes, correos] = await Promise.all([
     db.from('tasks').select(cols).eq('done', false),
     db.from('tasks').select(cols).eq('done', true).gte('completed_at', hace7).order('completed_at', { ascending: false }),
@@ -130,13 +135,15 @@ export async function construirContexto(now: Date = new Date()): Promise<Context
     const mine = open.filter((t) => t.company_id === s.id)
     const hoy = mine.filter((t) => esDeHoy(t, today)).sort(byUrgency)
     const semana = mine
-      .filter((t) => !esDeHoy(t, today) && t.due_date && t.due_date > today && t.due_date <= domingo)
+      .filter((t) => !esDeHoy(t, today) && !estaEsperando(t) && t.due_date && t.due_date > today && t.due_date <= domingo)
       .sort(byUrgency)
+    // Fase 9: what waits on someone else, with who — so "¿qué espero de Andrew?" can be answered.
+    const esperando = mine.filter(estaEsperando)
     const cerradas = done.filter((t) => t.company_id === s.id)
     const nota = s.id ? notas.find((n) => n.company_id === s.id)?.nota?.trim() : null
     const isChelsea = s.name.toLowerCase() === CHELSEA_COMPANY_NAME.toLowerCase()
 
-    if (!nota && hoy.length === 0 && semana.length === 0 && cerradas.length === 0 && !(isChelsea && correos.some((m) => m.estado === 'para_chelsea'))) continue
+    if (!nota && hoy.length === 0 && semana.length === 0 && esperando.length === 0 && cerradas.length === 0 && !(isChelsea && correos.some((m) => m.estado === 'para_chelsea'))) continue
 
     lines.push(`== ${s.name} ==`)
     if (nota) {
@@ -152,6 +159,10 @@ export async function construirContexto(now: Date = new Date()): Promise<Context
       lines.push(`Resto de la semana (${semana.length}):`)
       for (const t of w.items) lines.push(`- ${t.text} [${tags(t, today)}]`)
       if (w.extra > 0) lines.push(`- (+${w.extra} más)`)
+    }
+    if (esperando.length > 0) {
+      lines.push(`Esperando a alguien (${esperando.length}):`)
+      for (const t of esperando) lines.push(`- ${t.text} [${tags(t, today)}]`)
     }
     if (cerradas.length > 0) {
       const c = cap(cerradas)

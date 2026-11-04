@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 
 const links = [
-  { href: '/', label: 'Hoy' },
+  { href: '/hoy', label: 'Hoy' },
   { href: '/tasks', label: 'Tasks' },
   { href: '/correo', label: 'Correo' },
   { href: '/inbox', label: 'Inbox IM' },
@@ -32,7 +32,7 @@ export default function Nav() {
           <nav className="flex gap-1">
             {links.map(({ href, label }) => {
               const active =
-                href === '/inbox' ? INBOX_PATHS.includes(pathname) : href === '/correo' ? pathname.startsWith('/correo') : pathname === href
+                href === '/inbox' ? INBOX_PATHS.includes(pathname) : href === '/correo' ? pathname.startsWith('/correo') : href === '/hoy' ? pathname === '/hoy' || pathname === '/' : pathname === href
               return (
                 <Link
                   key={href}

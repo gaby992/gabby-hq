@@ -20,6 +20,7 @@ sección y **no se empieza una fase hasta validar la anterior**.
 | 6b | Ajustes del correo: listas desde `correos`, lista viva "correos", tachado en sitio, alertas solo VIP/alta, seguridad de mensajes, bug del cierre | ✅ Construida — pendiente de validar (correr el SQL 6b) |
 | 6c | Correo: tres niveles por remitente (🔇 Silencio · 📋 Solo app · 🔔 Alerta), "Reaplicar reglas", aprender desde el bot ("el 5 es silencio"), "Reclasificar sin modelo", regla `^asunto` → Solo app, idioma por cuenta | ✅ Construida — pendiente de validar (correr el SQL 6c) |
 | 7 | De comandos a conversación: memoria, sugerencias, "organízame", personalidad | ✅ Construida — pendiente de validar |
+| 9 | Tablero por horizonte en /hoy (Hoy sí o sí · Mañana · Esta semana · Esperando · Después · Correos), arrastrar tarjetas, estado "esperando", alarma de las 8 reordenada | ✅ Construida — pendiente de validar (correr el SQL 9) |
 
 ---
 
@@ -36,7 +37,8 @@ Es lo mismo que el bot manda con `/ayuda todo`; sale de
 **Principio: el bot es la puerta principal.** Cualquier acción que exista en
 la app debe poder decirse al bot, en texto o por voz: crear, completar, mover,
 borrar y editar tareas, escribir notas, preguntar. La web (`/hoy`, `/tasks`,
-`/inbox`) es el tablero para **ver**, no un paso obligatorio. Si algo solo se
+`/correo`) es el tablero para **ver** (y, desde la fase 9, para mover
+tarjetas arrastrando), no un paso obligatorio. Si algo solo se
 puede hacer desde la web, es un pendiente del bot.
 
 Hay dos direcciones de tráfico:
@@ -2289,7 +2291,214 @@ Ninguna.
 
 ---
 
-## 8. Cómo replicarlo para otra persona
+## 9. Fase 9 — Tablero por horizonte (nueva pantalla /hoy)
+
+**Motivo.** La matriz de Eisenhower sirve para *pensar*; para *ejecutar*
+hace falta ver de un vistazo qué es de hoy, qué es de mañana y qué puede
+esperar, como un pipeline. El tablero pasa a ser la pantalla de entrada
+(`/` redirige a `/hoy`); la matriz queda como pestaña **Prioridad** y los
+bloques por empresa con sus notas como pestaña **Empresas**. Nada de lo
+anterior se quitó: cambió la primera pantalla.
+
+### 9a. Qué hace
+
+**A) Seis columnas, de izquierda a derecha.** Cada una con contador y
+scroll propio; se ven 8 tarjetas y luego "ver N más".
+
+| Columna | Qué cae ahí |
+| --- | --- |
+| 🔥 Hoy sí o sí | `due_date` = hoy, vencidas, y lo marcado **urgente** sin fecha |
+| 📅 Mañana | `due_date` = mañana |
+| 🗓 Esta semana | `due_date` de pasado mañana al domingo |
+| ⏳ Esperando | tareas con `estado = 'esperando'` (con "de quién"), **todas las tareas de la empresa Chelsea** y los correos marcados "Para Chelsea" (como tarjetas de correo) |
+| 📦 Después | sin fecha, o más allá del domingo, o "cuando pueda" sin fecha |
+| 📧 Correos | pendientes (`nuevo`) de las cuentas activas que son **alta** o **necesita respuesta / pedido de tarea**, con sus 4 botones (📨 Chelsea · 🙋 Lo hago yo · ➕ Tarea · 🗄 Archivar) |
+
+La regla vive en UN solo lugar, `src/lib/horizonte.ts`
+(`horizonteDe(tarea, hoy, chelseaId)`), y la usan el tablero, la alarma de
+las 8 y el cierre, así que nunca se contradicen. Se evalúa en orden y gana
+la primera: esperando (o Chelsea) → hoy → mañana → esta semana → después.
+Una tarea en "esperando" **no** entra en 🔥 ni en "¿qué sigue?" aunque
+tenga fecha vencida: está en manos de alguien más.
+
+**B) Tarjeta.** Título en una línea (el tooltip trae el texto completo, la
+primera línea de las notas y la edad) · badge de empresa · hora si tiene ·
+★ si es importante · color de edad: **gris** a partir de 14 días desde que
+se creó, **rojo** (borde y título) a partir de 30, con los días a la
+derecha. En 🔥 las vencidas dicen "vencida 1 nov"; en ⏳ dice "⏳ Andrew
+(TOTT)" (o "Chelsea" si es de esa empresa, o "¿de quién?" si no se dijo).
+Click → el **panel de edición que ya existe** (la tarjeta de /tasks,
+abierta directo en el formulario) sobre un fondo oscuro; ✕ o click fuera
+lo cierra. Checkbox a la izquierda para completar (hace lo mismo que
+`listo 3`: `done = true` y el evento de Calendar se va).
+
+**C) Arrastrar.** Drag & drop nativo del navegador (HTML5, sin librería),
+con el botón **⋯ Mover a…** en cada tarjeta como alternativa (es lo que se
+usa en el teléfono, donde no hay drag). Al soltar:
+
+| Suelto en | Qué cambia en la tarea |
+| --- | --- |
+| 🔥 Hoy | `due_date` = hoy, `estado` vuelve a `abierta` |
+| 📅 Mañana | `due_date` = mañana, `abierta` |
+| 🗓 Esta semana | `due_date` = **viernes** si hoy es domingo–jueves, si no el **lunes siguiente** (el encabezado de la columna dice a qué día cae); `abierta` |
+| ⏳ Esperando | `estado = 'esperando'` y pregunta **"¿de quién?"** en un input chico arriba de la columna (OK vacío = sin nombre; ✕ cancela el movimiento). La fecha se conserva |
+| 📦 Después | quita `due_date` (y la hora), `abierta` |
+| un **correo** en 🔥 / 📅 | ejecuta **"Lo hago yo"** (mismo código que el botón: estado `lo_hago_yo` + tarea con `Ref: gmail:…`, nunca duplicada) y a esa tarea le pone esa fecha |
+| un **correo** en ⏳ | ejecuta **"Para Chelsea"** |
+
+Un correo no puede ir a Esta semana / Después, y nada se puede soltar en 📧.
+**Todo pasa por el servidor**: `POST /api/hoy` (protegido por la sesión de
+la app) llama a las **mismas funciones que usa el bot** — `moverTarea`
+(`src/lib/asistente/esperando.ts`), `ejecutarAccion({accion:'listo'})`,
+`decidirCorreo` — y la lectura es `GET /api/hoy` (tareas abiertas con
+empresa y subtareas, empresas, notas, radar, correos pendientes de las
+cuentas activas, cuentas). El tablero no escribe en Supabase desde el
+navegador. (El panel de edición y las pestañas Prioridad / Empresas siguen
+escribiendo como antes, con el cliente anon.)
+
+**D) Estado "esperando" — modelo y bot.** Dos columnas nuevas en `tasks`:
+`estado text not null default 'abierta'` (`abierta` | `esperando`, con
+check) y `esperando_a text null`. El bot:
+
+| Le dices | Qué hace |
+| --- | --- |
+| `la de TOTT está esperando a Andrew` · `la 3 esperando a Juan` · `lo de paypal queda esperando por el banco` | `estado = esperando`, `esperando_a = "Andrew"`. Sale de 🔥 y de "¿qué sigue?". Por número de la última lista o por palabra del título (con botones si hay varias) |
+| `la de TOTT ya no espera` · `la 3 ya no está esperando` · `paypal vuelve a mí` | vuelve a `abierta` (la fecha no se toca) |
+| `qué tengo esperando` · `¿qué tengo esperando?` · `en espera` | la lista **⏳ Esperando (N)** numerada y registrada: después `listo 2` o `la 2 ya no espera` funcionan |
+
+Las formas exactas las lee el parser clásico sin modelo; cualquier otra
+forma ("esa está en manos del cliente", "ya respondió Andrew, retomo la de
+TOTT") la entiende el intérprete con las acciones nuevas `esperar`
+(`ref`, `quien`, `fin`) y `esperando`. En el contexto del intérprete y de
+`/pregunta` cada tarea que espera va marcada "⏳ esperando a X", y
+`/pregunta` las lista aparte ("Esperando a alguien (N)"). También quedan
+fuera de **organízame**, de "¿seguimos con…?" y de "ojo: vencidas".
+Completarlas (`listo`) o moverlas de fecha (`pasa … al lunes`) sigue
+funcionando igual; mover la fecha **no** las saca de esperando (solo
+soltarlas en otra columna o decir "ya no espera").
+
+**E) Arriba del tablero.** Chips por empresa (como en /tasks; filtran
+tareas **y** correos — un correo es de la empresa de su cuenta, Settings →
+Correo) · botón **🎯 ¿Qué sigue?** (la tarjeta de siempre) · toggle
+**Tablero | Prioridad | Empresas**, recordado en `localStorage`
+(`hoy.vista`). Las notas "por dónde iba" son una **franja plegable**: una
+línea por empresa (nombre + primera línea de la nota, morada si es de ≤ 3
+días, gris con la edad si no); click en la línea despliega la nota completa
+**editable** (el mismo editor de los bloques; guardar al salir, Esc
+cancela, archivar si es vieja). En Prioridad, click en una nota de C1 salta
+a Empresas y abre ese bloque, como antes.
+
+**F) Alarma de las 8 y cierre de las 6.** Reflejan el tablero. Secciones
+en este orden, numeradas de corrido (así `listo 4`, `pasa 2,5`, "el 7 ya
+no espera" funcionan sobre ellas):
+
+```
+☀️ Hoy, martes 4 nov
+Buenos días, Gabby. … (la línea del día, como en la fase 7)
+
+📝 Por dónde ibas                     ← solo notas de ≤ 3 días, una línea cada una
+📝 IM: vamos por la propuesta 2
+
+🔥 Hoy sí o sí (3)
+🔺 1. paypal statements · IM · hace 3 días
+🔸 2. llamar a Juan · PD · 3:00 pm 📅
+✴️ 3. propuesta TOTT · IM · urgente ★
+· +N más en GabbyHQ                   ← a partir de 15
+
+📅 Mañana (2)                         ← solo títulos (y empresa / hora)
+▫️ 4. correos de Chelsea · IM
+▫️ 5. revisar pagos · PD · 10:00 am
+
+⏳ Esperando (2)
+⏳ 6. landing TOTT · IM · Andrew (TOTT)
+⏳ 7. whatsapp chelito · Chelsea
+
+📧 IM Chelsea (3)                     ← igual que antes (ajuste 6c)
+📧 8. ✴️ Andrew (TOTT) · Landing page changes · hace 3h
+…
+
+Total: 14 tareas abiertas (4 esta semana · 3 después, en la app) · abrir GabbyHQ
+```
+
+"Esta semana" y "Después" **no van** en la alarma (están en la app); solo
+viajan sus contadores en la última línea. Las secciones 📅 y ⏳ se omiten
+si están vacías; 🔥 siempre sale ("— nada vencido ni urgente 🎉"). Topes:
+15 en 🔥, 10 en 📅, 10 en ⏳. Dentro de 🔥 el orden es el del tablero:
+vencidas (más vieja primero) → vence hoy (por hora) → urgente sin fecha.
+La línea del saludo cuenta solo lo propio (ni Chelsea ni esperando).
+
+El **cierre de las 6** es igual, con **✅ Hecho hoy** arriba: balance,
+✅ Hecho hoy (por empresa, sin numerar), 🔥 Hoy sí o sí (lo de hoy que
+**sigue abierto** — eso es lo que pregunta "¿Qué pasa a mañana?"), 📅
+Mañana, ⏳ Esperando, 📧 Correos, totales, y el pie `pasa 2,5` / `pasa
+todo`. La sección "❌ Vencidas hoy sin cerrar" desapareció: es exactamente
+🔥. La sugerencia de "día difícil" (fase 7-E) sigue igual. `/pendientes IM`
+no cambia (sigue siendo la lista completa de una empresa).
+
+**G) Móvil.** Las columnas van en un **carrusel horizontal con snap**
+(cada columna ocupa ~82 % del ancho; se desliza de una en una), 🔥 primero.
+En tablet, 3 columnas por fila; en pantallas anchas (≥ 1536 px) las 6 en
+una fila, más ancho que el resto de la página.
+
+### 9b. Lo que hay que hacer a mano
+
+1. **Antes del deploy**: Supabase → SQL Editor →
+   `sql/2026-11-asistente-fase9-tablero.sql` en una query. Abajo deben
+   salir las dos columnas (`estado` default `'abierta'`, `esperando_a`
+   nullable) y `esperando = 0`. El bot y el tablero leen esas columnas
+   (`select … estado, esperando_a`): sin el SQL, las listas del bot y
+   `GET /api/hoy` fallan con "column tasks.estado does not exist".
+2. Push → redeploy. Sin env vars nuevas.
+3. Abre GabbyHQ: `/` te lleva a `/hoy` con el tablero. Si prefieres la
+   matriz como entrada, toca **Prioridad** una vez: se recuerda.
+
+### 9c. Env vars que agrega esta fase
+
+Ninguna.
+
+### 9d. Cómo probar que funciona
+
+1. **Arrastrar "Voice Calls precios" de 🔥 Hoy a 📦 Después.** La tarjeta
+   desaparece de 🔥 y aparece en 📦 sin fecha; arriba sale la línea verde
+   "📦 «Voice Calls precios» … → Después (sin fecha)". En /tasks la tarea
+   ya no tiene fecha. Si tenía evento en Calendar, el evento se borra
+   (una fecha vacía = sin evento, como en la fase 5-D).
+2. **Un correo de Hope a 🔥 Hoy.** La tarjeta de correo sale de 📧, el
+   correo queda `lo_hago_yo` en /correo, y en 🔥 aparece una tarea nueva
+   con el asunto del correo, `due_date` = hoy y el `Ref: gmail:…` en sus
+   notas (ábrela con click para verlo). Si vuelves a arrastrar otro correo
+   del mismo hilo no se duplica la tarea (misma Ref).
+3. **A ⏳ Esperando.** Arrastra una tarea: aparece el input "¿de quién?";
+   escribe `Andrew (TOTT)` y OK. La tarjeta muestra "⏳ Andrew (TOTT)".
+   Pide `¿qué sigue?` al bot: esa tarea **no** sale. Di `qué tengo
+   esperando`: sale numerada. Di `la 1 ya no espera`: vuelve a su columna
+   por fecha.
+4. **Desde el bot**: `la de TOTT está esperando a Andrew` → "⏳ «…» queda
+   esperando a Andrew". Recarga /hoy: está en ⏳.
+5. **Alarma**: `curl -H "Authorization: Bearer $CRON_SECRET"
+   "$APP_URL/api/asistente/manana?test=1"` (como en 1d). Debe llegar con
+   las secciones 🔥 → 📅 → ⏳ → 📧 y los números de corrido; `listo 4`
+   cierra la cuarta línea sea de la sección que sea. `cierre` por el bot:
+   ✅ Hecho hoy arriba, luego lo mismo.
+6. **Móvil**: en el teléfono, /hoy desliza de columna en columna; en cada
+   tarjeta ⋯ → "Mover a…" lista los destinos con la fecha a la que caen.
+7. **Vista recordada**: toca Prioridad, recarga: sigue en Prioridad.
+
+### 9e. Qué puede fallar y dónde verlo
+
+| Síntoma | Causa probable | Dónde verlo / qué hacer |
+| --- | --- | --- |
+| /hoy dice "No se pudo cargar: … column tasks.estado does not exist" (o la alarma de las 8 falla con eso) | Falta el SQL 9 | Correr `sql/2026-11-asistente-fase9-tablero.sql`. |
+| Soltar no hace nada en el teléfono | El drag nativo no existe en touch | Usa ⋯ → Mover a… en la tarjeta (es lo esperado). |
+| Una tarjeta soltada en ⏳ no se mueve | El input "¿de quién?" quedó esperando (OK o ✕) | Contesta el input; ✕ cancela el movimiento. |
+| Un correo arrastrado dice "Un correo solo puede ir a Hoy, Mañana … o Esperando" | Se soltó en Esta semana / Después | Es a propósito: decide primero (Lo hago yo) y luego mueve la tarea. |
+| La tarea de un correo no sale en 🔥 | La cuenta no tiene empresa y el chip filtra por empresa | Chip "Todas" (o "Sin empresa"). |
+| Una tarea vencida no aparece en 🔥 | Está en esperando (⏳) o es de la empresa Chelsea | Es la regla; "la 3 ya no espera" la regresa. |
+| El tablero no cambia después de arrastrar | `POST /api/hoy` devolvió error (línea roja arriba del tablero) | Logs de Vercel: `[hoy] POST mover: …`. |
+
+---
+
+## 10. Cómo replicarlo para otra persona
 
 Checklist completo para levantar el mismo asistente para alguien más (por
 ejemplo Chelsea), desde cero hasta la primera alarma. Lo que cambia es: el bot
@@ -2322,8 +2531,9 @@ El código es el mismo repo.
    `sql/2026-10-asistente-fase2.sql`, `sql/2026-10-asistente-fase3.sql` y
    `sql/2026-10-asistente-fase4.sql`, `sql/2026-11-asistente-fase4b.sql` y
    `sql/2026-11-asistente-fase5.sql`, `sql/2026-11-asistente-fase5c.sql`,
-   `sql/2026-11-asistente-fase6-correo.sql`, `sql/2026-11-asistente-fase7.sql` y
-   `sql/2026-11-asistente-fase6b-ajustes.sql` (y sus pruebas en queries aparte, ver
+   `sql/2026-11-asistente-fase6-correo.sql`, `sql/2026-11-asistente-fase7.sql`,
+   `sql/2026-11-asistente-fase6b-ajustes.sql`, `sql/2026-11-asistente-fase6c-niveles.sql`
+   y `sql/2026-11-asistente-fase9-tablero.sql` (y sus pruebas en queries aparte, ver
    1b, 2b, 3b y 4b Paso 1). El SQL de la fase 6 precarga las cuentas de
    correo de Gabby y Chelsea: cambia esos emails y listas por los de la
    persona (o bórralas y créalas en Settings → Correo).
@@ -2381,7 +2591,7 @@ verano; para una zona con DST hay que calcular el offset en vez de fijarlo).
 
 ---
 
-## 9. Costos estimados por mes
+## 11. Costos estimados por mes
 
 | Concepto | Fase | Costo | Nota |
 | --- | --- | --- | --- |

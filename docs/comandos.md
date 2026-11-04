@@ -15,6 +15,7 @@ Es lo mismo que manda el bot con `/ayuda todo`. La guía técnica está en [asis
 - `qué vence esta semana` — solo lo que vence de aquí al domingo
 - `qué sigue de IM` — lo mismo, pero solo de esa empresa
 - `/pendientes IM` — todo lo abierto de IM, numerado
+- `qué tengo esperando` — lo que está en manos de alguien más (la columna ⏳ del tablero), numerado; no entra en "qué sigue" ni en "Hoy sí o sí"
 - `correos · correos de Chelsea` — todos los correos pendientes de esa cuenta (o de todas), numerados por urgencia; luego "el 3 lo hago yo", "el 2 para Chelsea", "archiva el 5". La línea se tacha sola cuando se resuelve
 - `el 5 es silencio · el 5 es solo app · el 5 es alerta` — aprende ese remitente (su dominio, o el email si es gmail/outlook) en la lista de esa cuenta y aplica el nivel al correo; "archiva el 5 y márcalo como silencio" hace las dos cosas. Si ya estaba en otra lista, lo mueve y te lo dice
 - `¿qué cerré ayer?` — pregunta libre: te contesta con tus tareas y notas (también "? qué tengo hoy")
@@ -45,6 +46,7 @@ Es lo mismo que manda el bot con `/ayuda todo`. La guía técnica está en [asis
 - `11 se llama URo pendiente` — le cambia el título
 - `paypal urgente` — cambia la urgencia; "paypal para el viernes" la fecha; "paypal es de PD" la empresa; "paypal mañana 3pm" fecha y hora
 - `pon en calendar la de TOTT` — crea el evento de una tarea que ya existe
+- `la de TOTT está esperando a Andrew` — la deja en ⏳ Esperando con "de quién" (también "la 3 esperando a Juan"); "la de TOTT ya no espera" / "la 3 vuelve a mí" la retoma
 - `la anterior es urgente` — "la anterior" = la última tarea de la que hablaste
 - `quita alarma 2` — borra una alarma propia (número de "mis alarmas")
 
@@ -69,4 +71,4 @@ Es lo mismo que manda el bot con `/ayuda todo`. La guía técnica está en [asis
 - `botones` — aparecen cuando falta empresa o urgencia, cuando varias tareas coinciden, antes de borrar, y en cada ⏰ (Listo · +1h · Mañana)
 - `"No te entendí"` — si no capta la frase, te pregunta si es una tarea nueva, una orden o una alarma
 - `hora de Cancún` — "hoy", "mañana" y las horas van en hora de Cancún; "el viernes" siempre es el próximo viernes
-- `en la web` — /hoy (tablero y ¿Qué sigue?), /tasks (tareas y notas), /settings (empresas, Conexiones de Google, Pagos recurrentes)
+- `en la web` — /hoy (tablero por horizonte: Hoy sí o sí · Mañana · Esta semana · Esperando · Después · Correos, arrastra las tarjetas; pestañas Prioridad y Empresas; ¿Qué sigue?), /tasks (tareas y notas), /correo, /settings (empresas, Conexiones de Google, Pagos recurrentes)

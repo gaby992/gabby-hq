@@ -89,7 +89,7 @@ export async function trasCompletar(chatId: number, cfg: AsistenteConfig, taskId
   if (!hecha) return null
   const db = createServerClient()
   const { data: rows } = await db.from('tasks').select(COLS_SIN_NOTAS + ', company_id').eq('done', false)
-  const abiertas = ((rows as unknown as (TaskRow & { company_id: string | null })[]) ?? [])
+  const abiertas = ((rows as unknown as (TaskRow & { company_id: string | null })[]) ?? []).filter((t) => t.estado !== 'esperando')
   const { data: hechaRow } = await db.from('tasks').select('company_id').eq('id', taskId).maybeSingle<{ company_id: string | null }>()
   const mismas = abiertas.filter((t) => t.company_id === (hechaRow?.company_id ?? null))
   const empresa = hecha.company?.name ?? 'sin empresa'
@@ -114,7 +114,7 @@ export async function trasPregunta(chatId: number, cfg: AsistenteConfig): Promis
     db.from('companies').select('*'),
     db.from('notas_empresa').select('*'),
   ])
-  const vencidas = ((rows as unknown as (TaskRow & { company_id: string | null })[]) ?? [])
+  const vencidas = ((rows as unknown as (TaskRow & { company_id: string | null })[]) ?? []).filter((t) => t.estado !== 'esperando')
   const porEmpresa = new Map<string | null, (TaskRow & { company_id: string | null })[]>()
   for (const t of vencidas) porEmpresa.set(t.company_id, [...(porEmpresa.get(t.company_id) ?? []), t])
   for (const [, lista] of Array.from(porEmpresa.entries())) {

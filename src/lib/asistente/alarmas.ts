@@ -9,6 +9,7 @@ import type { Company, NotaEmpresa, Task } from '@/types'
 import { CHELSEA_COMPANY_NAME } from '@/lib/chelsea'
 import { NOTA_FRESCA_DIAS } from '@/lib/notas'
 import { daysSince } from '@/lib/dates'
+import { HORIZONTES, HORIZONTE_EMOJI, HORIZONTE_LABELS, compararEnColumna, estaEsperando, horizonteDe, type Horizonte } from '@/lib/horizonte'
 import { cancunDayBounds, cancunYmd, daysBetween, formatCortoEs, formatDiaLargoEs, formatHoraEs } from './cancun'
 import { allowedChatIds, escapeHtml, sendTelegram } from './telegram'
 import { cargarConfig, personaPrompt, type AsistenteConfig } from './config'
@@ -294,39 +295,126 @@ async function lineaBuenosDias(cfg: AsistenteConfig, tasks: Task[], today: strin
   }
 }
 
+// ── Fase 9: the lists mirror the board ───────────────────────────────────
+//   🔥 Hoy sí o sí → 📅 Mañana (titles only) → ⏳ Esperando → 📧 Correos.
+//   "Esta semana" and "Después" stay in the app (only their counts travel).
+
+/** Numbered lines per section before "+N más en GabbyHQ". */
+const MAX_HOY = 15
+const MAX_MANANA = 10
+const MAX_ESPERANDO = 10
+
+interface Seccion {
+  horizonte: Horizonte
+  tasks: Task[]
+}
+
+/** The board's columns from the open tasks, each already in column order. Chelsea's tasks sit in ⏳. */
+function columnas(tasks: Task[], companies: Company[], today: string): Record<Horizonte, Task[]> {
+  const chelseaId = companies.find((c) => isChelsea(c.name))?.id ?? null
+  const out: Record<Horizonte, Task[]> = { hoy: [], manana: [], semana: [], esperando: [], despues: [] }
+  for (const t of tasks) out[horizonteDe(t, today, chelseaId)].push(t)
+  for (const h of HORIZONTES) out[h].sort((a, b) => compararEnColumna(a, b, today))
+  return out
+}
+
+/**
+ * One line of a board section. 🔥 keeps the list symbols and the "why"
+ * (hace N días · hora · urgente ★); 📅 is title + company (and hour);
+ * ⏳ adds who it waits for.
+ */
+function lineaTablero(n: number, t: Task, h: Horizonte, companies: Company[], today: string): string {
+  const text = escapeHtml(t.text)
+  const empresa = escapeHtml(companies.find((c) => c.id === t.company_id)?.name.trim() ?? SIN_EMPRESA)
+  const hora = t.due_time ? `${formatHoraEs(t.due_time.slice(0, 5))}${t.gcal_event_id ? ' 📅' : ''}` : ''
+  if (h === 'esperando') {
+    const partes = [text, empresa]
+    if (t.esperando_a) partes.push(escapeHtml(t.esperando_a))
+    else if (t.due_date) partes.push(formatCortoEs(t.due_date))
+    return `⏳ ${n}. ${partes.join(' · ')}`
+  }
+  if (h === 'manana') return `${SIMBOLO[bucketFor(t, today)]} ${n}. ${[text, empresa, hora].filter(Boolean).join(' · ')}`
+  // 🔥
+  const bucket = bucketFor(t, today)
+  const porque =
+    bucket === 'vencida' ? (() => { const d = daysBetween(t.due_date!, today); return `hace ${d} ${d === 1 ? 'día' : 'días'}` })()
+    : bucket === 'hoy' ? hora
+    : t.importante ? 'urgente ★' : 'urgente'
+  return `${SIMBOLO[bucket]} ${n}. ${[text, empresa, porque].filter(Boolean).join(' · ')}`
+}
+
+function masTablero(extra: number): string {
+  return `· +${extra} más en <a href="${appUrl()}/hoy">GabbyHQ</a>`
+}
+
+/** Renders one section, numbering from items.length + 1 and recording each line. */
+function renderSeccion(s: Seccion, max: number, companies: Company[], today: string, items: AlarmaItem[], opts: { vacio?: string } = {}): string | null {
+  const titulo = `${HORIZONTE_EMOJI[s.horizonte]} <b>${HORIZONTE_LABELS[s.horizonte]} (${s.tasks.length})</b>`
+  if (s.tasks.length === 0) return opts.vacio ? `${titulo}\n${opts.vacio}` : null
+  const lines = [titulo]
+  for (const t of s.tasks.slice(0, max)) {
+    items.push({ n: items.length + 1, task_id: t.id })
+    lines.push(lineaTablero(items.length, t, s.horizonte, companies, today))
+  }
+  if (s.tasks.length > max) lines.push(masTablero(s.tasks.length - max))
+  return lines.join('\n')
+}
+
+/** 🔥 → 📅 → ⏳ (the alarm's order), then the counts of what stays in the app. */
+function seccionesTablero(tasks: Task[], companies: Company[], today: string, items: AlarmaItem[], opts: { vacioHoy: string }): { bloques: string[]; semana: number; despues: number } {
+  const col = columnas(tasks, companies, today)
+  const bloques = [
+    renderSeccion({ horizonte: 'hoy', tasks: col.hoy }, MAX_HOY, companies, today, items, { vacio: opts.vacioHoy }),
+    renderSeccion({ horizonte: 'manana', tasks: col.manana }, MAX_MANANA, companies, today, items),
+    renderSeccion({ horizonte: 'esperando', tasks: col.esperando }, MAX_ESPERANDO, companies, today, items),
+  ].filter((b): b is string => !!b)
+  return { bloques, semana: col.semana.length, despues: col.despues.length }
+}
+
+function pieTotales(tasks: Task[], semana: number, despues: number): string {
+  const resto = [semana > 0 ? `${semana} esta semana` : null, despues > 0 ? `${despues} después` : null].filter(Boolean).join(' · ')
+  return `Total: ${plural(tasks.length, 'tarea abierta', 'tareas abiertas')}${resto ? ` (${resto}, en la app)` : ''} · <a href="${appUrl()}/hoy">abrir GabbyHQ</a>`
+}
+
 export async function buildManana(today: string = cancunYmd()): Promise<Mensaje> {
   const [{ tasks, companies, notas }, cfg] = await Promise.all([loadOpenTasks(), cargarConfig()])
-  // Fase 4b: only notes of the last 3 days are "por dónde iba"; older ones stay in /hoy, greyed.
-  const frescas = notas.filter((n) => daysSince(n.updated_at) <= NOTA_FRESCA_DIAS)
-  const { grupos, items } = buildGrupos(tasks, companies, frescas, today)
-
+  const items: AlarmaItem[] = []
   const link = `<a href="${appUrl()}/hoy">abrir GabbyHQ</a>`
-  if (grupos.length === 0) {
+  if (tasks.length === 0) {
     const correos = await seccionCorreos(0, items)
-    return { text: `☀️ No tienes tareas pendientes. Revisa Construir en GabbyHQ.\n${link}\n\n${correos}`, items }
+    return { text: `☀️ No tienes tareas pendientes. Revisa Después en GabbyHQ.\n${link}\n\n${correos}`, items }
   }
 
-  const saludo = await lineaBuenosDias(cfg, tasks.filter((t) => !isChelsea(companies.find((c) => c.id === t.company_id)?.name ?? '')), today)
+  // The greeting looks at Gabby's own active work: not Chelsea's, not what waits on someone.
+  const propias = tasks.filter((t) => !estaEsperando(t) && !isChelsea(companies.find((c) => c.id === t.company_id)?.name ?? ''))
+  const saludo = await lineaBuenosDias(cfg, propias, today)
   const blocks: string[] = [`☀️ <b>Hoy, ${formatDiaLargoEs(today)}</b>\n${escapeHtml(saludo)}`]
-  for (const g of grupos) blocks.push(renderGrupo(g, today, { notas: true }).join('\n'))
+
+  // Fase 4b: only notes of the last 3 days are "por dónde iba"; older ones stay in /hoy, greyed.
+  const frescas = companiesInOrder(companies)
+    .map((c) => ({ c, nota: notas.find((n) => n.company_id === c.id)?.nota?.trim() }))
+    .filter((x): x is { c: Company; nota: string } => !!x.nota && daysSince(notas.find((n) => n.company_id === x.c.id)!.updated_at) <= NOTA_FRESCA_DIAS)
+  if (frescas.length > 0) blocks.push(['📝 <b>Por dónde ibas</b>', ...frescas.map((x) => `📝 ${escapeHtml(x.c.name.trim())}: ${escapeHtml(x.nota)}`)].join('\n'))
+
+  const { bloques, semana, despues } = seccionesTablero(tasks, companies, today, items, { vacioHoy: '— nada vencido ni urgente 🎉' })
+  blocks.push(...bloques)
   blocks.push(await seccionCorreos(items.length, items))
-  const total = grupos.reduce((acc, g) => acc + g.items.length + g.extra, 0)
-  blocks.push(`Total: ${plural(total, 'tarea abierta', 'tareas abiertas')} · ${link}`)
+  blocks.push(pieTotales(tasks, semana, despues))
   return { text: blocks.join('\n\n'), items }
 }
 
 export async function buildTarde(today: string = cancunYmd()): Promise<Mensaje> {
   const [{ tasks, companies }, done] = await Promise.all([loadOpenTasks(), loadDoneToday(today)])
-  const { grupos, items } = buildGrupos(tasks, companies, [], today)
+  const items: AlarmaItem[] = []
 
   // Fase 7-E: the balance first. "de N" = closed today + still open.
-  const vencidas = tasks.filter((t) => t.due_date && t.due_date < today).length
+  const vencidas = tasks.filter((t) => !estaEsperando(t) && t.due_date && t.due_date < today).length
   const balance = done.tasks.length > 0
     ? `Cerraste ${done.tasks.length} de ${done.tasks.length + tasks.length} 👏.${vencidas > 0 ? ` ${vencidas === 1 ? 'Queda 1 vencida' : `Quedan ${vencidas} vencidas`}.` : ''}`
     : tasks.length > 0 ? `Hoy no se cerró nada.${vencidas > 0 ? ` ${vencidas === 1 ? 'Hay 1 vencida' : `Hay ${vencidas} vencidas`}.` : ''}` : 'Nada abierto 🎉'
   const blocks: string[] = [`🌙 <b>Cierre del día</b> · ${formatDiaLargoEs(today)}\n${balance}`]
 
-  // ✅ Hecho hoy — by company, same fixed order, not numbered (nothing to "pasa").
+  // ✅ Hecho hoy — on top, by company, same fixed order, not numbered (nothing to "pasa").
   const doneLines: string[] = []
   const ordered = companiesInOrder(done.companies)
   const doneSections = [
@@ -344,28 +432,13 @@ export async function buildTarde(today: string = cancunYmd()): Promise<Mensaje> 
       : '✅ <b>Hecho hoy (0)</b> · nada registrado'
   )
 
-  // ⏳ Sigue pendiente — every open task, recomputed now and renumbered.
-  const abiertas = grupos.reduce((acc, g) => acc + g.items.length + g.extra, 0)
-  if (items.length > 0) {
-    const pendLines = [`⏳ <b>Sigue pendiente (${abiertas})</b>`]
-    for (const g of grupos) pendLines.push(...renderGrupo(g, today, { notas: false }))
-    blocks.push(pendLines.join('\n'))
-  } else {
-    blocks.push('⏳ <b>Sigue pendiente (0)</b> · nada de la lista de hoy 🎉')
-  }
-
-  // ❌ Due today and still open — same numbers as above.
-  const vencidasHoy = grupos.flatMap((g) => g.items.filter((i) => i.bucket === 'hoy'))
-  if (vencidasHoy.length > 0) {
-    const lines = [`❌ <b>Vencidas hoy sin cerrar (${vencidasHoy.length})</b>`]
-    for (const i of vencidasHoy) lines.push(`• ${i.n}. ${escapeHtml(i.task.text)}`)
-    blocks.push(lines.join('\n'))
-  }
-
-  const tareas = items.length
+  // Fase 9: then the board as it stands now — 🔥 still open is what "¿Qué pasa a mañana?" asks about.
+  const { bloques, semana, despues } = seccionesTablero(tasks, companies, today, items, { vacioHoy: '— nada de hoy sin cerrar 🎉' })
+  blocks.push(...bloques)
   blocks.push(await seccionCorreos(items.length, items))
+  blocks.push(pieTotales(tasks, semana, despues))
 
-  if (tareas > 0) {
+  if (items.some((i) => i.task_id)) {
     blocks.push('¿Qué pasa a mañana? Responde: <code>pasa 2,5</code> (o <code>pasa todo</code>)')
   }
 

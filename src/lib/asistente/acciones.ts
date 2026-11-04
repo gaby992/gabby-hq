@@ -25,6 +25,9 @@ export interface AccionParams {
   texto?: string
   /** editar: what to change. */
   cambios?: Cambios
+  /** esperar (fase 9): who the task waits for; `fin` = it stops waiting. */
+  quien?: string | null
+  fin?: boolean
 }
 
 export const USO: Record<Accion, string> = {
@@ -33,6 +36,7 @@ export const USO: Record<Accion, string> = {
   borra: 'Formato: borra 3 (número de la última alarma) · borra paypal (palabra del título)',
   nota_tarea: 'Formato: nota en paypal: texto que quieres agregar',
   editar: 'Formato: paypal para el viernes · paypal urgente · paypal es de PD',
+  esperar: 'Formato: la de TOTT está esperando a Andrew · la 3 ya no espera · qué tengo esperando',
 }
 
 const MAX_CANDIDATOS = 5
@@ -47,12 +51,15 @@ export interface TaskRow {
   gcal_event_id?: string | null
   priority: 'urgente' | 'normal' | 'cuando'
   importante: boolean
+  /** Fase 9: 'esperando' = in someone else's hands (needs sql/2026-11-asistente-fase9-tablero.sql). */
+  estado?: 'abierta' | 'esperando' | null
+  esperando_a?: string | null
   company: { name: string } | null
 }
 
-const COLS = 'id, text, done, notes, due_date, due_time, gcal_event_id, priority, importante, company:companies(name)'
+export const COLS = 'id, text, done, notes, due_date, due_time, gcal_event_id, priority, importante, estado, esperando_a, company:companies(name)'
 /** Same without `notes`: what may travel to the LLM (fase 4 interpreter). */
-export const COLS_SIN_NOTAS = 'id, text, done, due_date, due_time, priority, importante, company:companies(name)'
+export const COLS_SIN_NOTAS = 'id, text, done, due_date, due_time, priority, importante, estado, esperando_a, company:companies(name)'
 
 export interface Respuesta {
   text: string
@@ -123,6 +130,7 @@ const VERBO: Record<Accion, string> = {
   borra: 'borro',
   nota_tarea: 'lleva la nota',
   editar: 'cambio',
+  esperar: 'dejo esperando',
 }
 
 export function etiqueta(t: Pick<TaskRow, 'text' | 'company'>): string {
@@ -214,6 +222,12 @@ export async function ejecutarAccion(params: AccionParams, ids: string[]): Promi
       out.push(`📎 Nota agregada a «${t.text}»`)
     }
     return out.join('\n') || 'Esa tarea ya no existe.'
+  }
+
+  if (params.accion === 'esperar') {
+    // Fase 9: the same write the board's ⏳ column does (dynamic import: esperando.ts reads COLS from here).
+    const { dejarDeEsperar, moverTarea } = await import('./esperando')
+    return params.fin ? dejarDeEsperar(ids) : moverTarea(ids, 'esperando', { esperando_a: params.quien ?? null })
   }
 
   if (params.accion === 'editar') {

@@ -54,7 +54,7 @@ export interface NotaParsed {
   texto: string
 }
 
-export type Accion = 'pasa' | 'listo' | 'borra' | 'nota_tarea' | 'editar'
+export type Accion = 'pasa' | 'listo' | 'borra' | 'nota_tarea' | 'editar' | 'esperar'
 
 /** What "paypal urgente" / "paypal para el viernes" / "paypal es de PD" want to change. */
 export interface Cambios {
@@ -102,6 +102,10 @@ export type Parsed =
   | { kind: 'pagos_web' }
   | { kind: 'alarmas' }
   | { kind: 'quitar_alarma'; arg: string }
+  /** Fase 9: "qué tengo esperando" → the ⏳ list. */
+  | { kind: 'esperando' }
+  /** Fase 9: "la de TOTT está esperando a Andrew" / "… ya no espera" (fin). `termino` = a word of the title or "3". */
+  | { kind: 'esperar'; termino: string; quien: string | null; fin: boolean }
   | { kind: 'pregunta'; texto: string }
   | { kind: 'radar'; titulo: string }
   | { kind: 'nota'; nota: NotaParsed }
@@ -528,6 +532,8 @@ export function parseMensaje(raw: string, companies: CompanyRef[], today: string
   if (calCmd && !/^calendar:/i.test(text)) return { kind: 'calendar', termino: tidy(calCmd[1]) }
   const qs = parseQueSigue(text, companies)
   if (qs) return { kind: 'que_sigue', opts: qs }
+  // Fase 9: the ⏳ list and the two explicit forms; anything looser goes to the interpreter.
+  if (/^(?:que\s+(?:tengo|hay|esta|tenemos)\s+(?:en\s+)?esperando|(?:lista\s+(?:de\s+)?)?esperando|en\s+espera|que\s+espero)$/.test(n0)) return { kind: 'esperando' }
   if (/^[?¿]/.test(text) || /^\/?pregunta\b/i.test(text)) {
     // Keep the question as asked (its "¿…?" included) — only drop the trigger.
     // "? qué cerré ayer" → "qué cerré ayer"; "¿qué tengo hoy?" stays whole.
@@ -543,6 +549,10 @@ export function parseMensaje(raw: string, companies: CompanyRef[], today: string
     ?? text.match(/^(?:por\s+d[oó]nde\s+(?:iba|voy|vamos|ibamos|íbamos)|notas?\s+de)\s*:?\s*([\s\S]*)$/i)
   if (nota) return { kind: 'nota', nota: parseNota(nota[1], companies) }
   if (/^(?:mis\s+)?alarmas\s*[.!?]?$/i.test(text)) return { kind: 'alarmas' }
+  const esperar = text.match(/^(?:la\s+(?:tarea\s+)?(?:de|del)\s+|la\s+|el\s+|lo\s+de\s+)?(.+?)\s+(?:est[aá]\s+esperando|queda\s+esperando|esperando|en\s+espera\s+de|espera\s+respuesta\s+de)\s+(?:a\s+|de\s+|por\s+)?(.+?)\s*[.!]*$/i)
+  if (esperar && !/^(?:que|qu[eé])\b/i.test(text)) return { kind: 'esperar', termino: tidy(esperar[1]).replace(/^(?:el|la|los|las)\s+(?=\d)/i, ''), quien: tidy(esperar[2]), fin: false }
+  const retomar = text.match(/^(?:la\s+(?:tarea\s+)?(?:de|del)\s+|la\s+|el\s+|lo\s+de\s+)?(.+?)\s+(?:ya\s+no\s+(?:est[aá]\s+)?(?:esperando|espera)|vuelve\s+a\s+m[ií]|la\s+retomo)\s*[.!]*$/i)
+  if (retomar) return { kind: 'esperar', termino: tidy(retomar[1]).replace(/^(?:el|la|los|las)\s+(?=\d)/i, ''), quien: null, fin: true }
   const quitar = text.match(/^(?:quita|quitar|borra|borrar|elimina|cancela)\s+(?:la\s+)?alarma\s+([\s\S]+)$/i)
   if (quitar) return { kind: 'quitar_alarma', arg: tidy(quitar[1]) }
   // Ajuste 6-7: "1 listo", "3 terminado", "2, 5 hechas", "el 4 listo" — numbers of the last list, no model needed.
@@ -601,6 +611,7 @@ export function ayuda(modelo: string): string {
     '🧭 ORGANÍZAME · "no sé por dónde empezar" · "estoy abrumada" → repasamos tus pendientes uno por uno con botones (Hoy · Mañana · Esta semana · Cancelar · Delegar · Siguiente); "para" sale',
     '🪜 "me da flojera «X»" · "divide X" → la parto en 3-5 pasos (subtareas) y te digo el primero · "siguiente paso" · 📆 Cuéntame la semana ("hoy…, mañana…, el miércoles…") y la armo por día sin duplicar',
     '🎯 ¿QUÉ SIGUE? · "qué hago primero" · "solo urgentes" · "qué vence esta semana" · "qué sigue de IM" → una tarea para ahora, 3 después, 3 por vencer; luego "listo 1" / "pasa el segundo"',
+    '⏳ ESPERANDO · "la de TOTT está esperando a Andrew" (sale de Hoy sí o sí) · "la de TOTT ya no espera" · "qué tengo esperando" → la lista ⏳',
     '📧 CORREOS · "correos" · "correos de Chelsea" → todos los pendientes numerados; luego "el 3 lo hago yo" · "el 2 para Chelsea" · "archiva el 5"',
     '📋 /hoy · "dame la lista" · "todo lo pendiente" → la lista completa de las 8:00, ahora · "cierre" → la de las 6:00 pm · /pendientes IM → solo esa empresa',
     '💳 PAGOS: "pagos de IM" · "qué pagos hay esta semana" (se administran en /settings → Pagos recurrentes)',

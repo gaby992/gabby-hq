@@ -1,9 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // The "Hoy" view lives at "/" — the Telegram alarms link to /hoy because
-  // that reads better in a message, so make that address work.
+  // Fase 9: the board lives at /hoy (the address the Telegram alarms link
+  // to); the root just sends you there.
   async redirects() {
-    return [{ source: '/hoy', destination: '/', permanent: false }]
+    return [{ source: '/', destination: '/hoy', permanent: false }]
   },
   async headers() {
     return [

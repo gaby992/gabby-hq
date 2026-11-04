@@ -15,6 +15,7 @@ import { createServerClient } from '@/lib/supabase-server'
 import type { Company, NotaEmpresa, Priority } from '@/types'
 import { CHELSEA_COMPANY_NAME } from '@/lib/chelsea'
 import { NOTA_FRESCA_DIAS } from '@/lib/notas'
+import { estaEsperando } from '@/lib/horizonte'
 import { daysSince } from '@/lib/dates'
 import { SIMBOLO, guardarAlarma, simboloDe, type AlarmaItem } from './alarmas'
 import { addDays, cancunYmd, daysBetween, formatHoraEs, formatVenceEs } from './cancun'
@@ -39,6 +40,8 @@ interface TaskLite {
   due_date: string | null
   due_time: string | null
   company_id: string | null
+  /** Fase 9: 'esperando' tasks are left out — they are in someone else's hands. */
+  estado?: 'abierta' | 'esperando' | null
   company: { name: string } | null
 }
 
@@ -97,7 +100,7 @@ export async function calcularQueSigue(opts: QueSigueOpts = {}, now: Date = new 
   const domingo = addDays(today, (7 - dow) % 7 || 7)
   const db = createServerClient()
   const [tasksRes, companiesRes, notasRes] = await Promise.all([
-    db.from('tasks').select('id, text, priority, importante, due_date, due_time, company_id, company:companies(name)').eq('done', false),
+    db.from('tasks').select('id, text, priority, importante, due_date, due_time, company_id, estado, company:companies(name)').eq('done', false),
     db.from('companies').select('*'),
     db.from('notas_empresa').select('*'),
   ])
@@ -105,7 +108,8 @@ export async function calcularQueSigue(opts: QueSigueOpts = {}, now: Date = new 
   if (companiesRes.error) throw new Error(`Supabase companies: ${companiesRes.error.message}`)
   if (notasRes.error) throw new Error(`Supabase notas_empresa: ${notasRes.error.message}`)
   const companies = (companiesRes.data as Company[]) ?? []
-  let tasks = (tasksRes.data as unknown as TaskLite[]) ?? []
+  // Fase 9: what waits on someone else is never "lo que sigue", whatever its date.
+  let tasks = ((tasksRes.data as unknown as TaskLite[]) ?? []).filter((t) => !estaEsperando(t))
   let notas = (notasRes.data as NotaEmpresa[]) ?? []
 
   // Chelsea's tasks are delegated: never "lo que sigue" for Gabby.

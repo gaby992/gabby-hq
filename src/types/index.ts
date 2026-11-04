@@ -1,5 +1,11 @@
 export type Priority = 'urgente' | 'normal' | 'cuando'
 
+/**
+ * Fase 9: 'esperando' = in someone else's hands. It leaves "🔥 Hoy sí o sí"
+ * and "¿qué sigue?" even with an overdue date, and shows in "⏳ Esperando".
+ */
+export type TaskEstado = 'abierta' | 'esperando'
+
 export interface Company {
   id: string
   name: string
@@ -35,6 +41,10 @@ export interface Task {
   done: boolean
   /** Set by a DB trigger when `done` flips to true, cleared when it flips back. */
   completed_at?: string | null
+  /** Fase 9: default 'abierta'. Missing before sql/2026-11-asistente-fase9-tablero.sql. */
+  estado?: TaskEstado
+  /** Fase 9: who the task waits for ("Andrew (TOTT)"). Only meaningful with estado 'esperando'. */
+  esperando_a?: string | null
   created_at: string
   company?: Company
   subtasks?: Subtask[]

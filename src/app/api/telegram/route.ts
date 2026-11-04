@@ -60,6 +60,7 @@ import { cargarEmpresas, confirmacion, guardarTarea, pregunta } from '@/lib/asis
 import { responderPregunta } from '@/lib/asistente/pregunta'
 import { enviarQueSigue } from '@/lib/asistente/que-sigue'
 import { enviarLista } from '@/lib/asistente/alarmas'
+import { enviarListaEsperando } from '@/lib/asistente/esperando'
 import { guiaTelegram } from '@/lib/asistente/comandos'
 import { cargarConfig, presentacion, type AsistenteConfig } from '@/lib/asistente/config'
 import { guardarTurno, limpiarHilo } from '@/lib/asistente/conversacion'
@@ -381,6 +382,17 @@ async function handleText(chatId: number, text: string, prefix: string | null) {
     case 'alarmas':
       await reply(chatId, joinLines(prefix, await listarRecordatorios(chatId)))
       return
+    case 'esperando':
+      // Fase 9: the ⏳ column as a numbered list ("listo 2" works on it).
+      if (prefix) await reply(chatId, prefix)
+      await enviarListaEsperando(chatId)
+      return
+    case 'esperar': {
+      // Fase 9: "la de TOTT está esperando a Andrew" — by list number or a word of the title.
+      const params: AccionParams = { accion: 'esperar', quien: parsed.quien, fin: parsed.fin }
+      await responderAccion(chatId, text, params, (nonce) => manejarAccion(params, parsed.termino, nonce), prefix)
+      return
+    }
     case 'quitar_alarma':
       await reply(chatId, joinLines(prefix, await quitarRecordatorio(chatId, parsed.arg)))
       return

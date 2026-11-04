@@ -55,7 +55,8 @@ export async function iniciarOrganizar(cfg: AsistenteConfig, today: string = can
   ])
   if (error) throw new Error(`Supabase tasks: ${error.message}`)
   const chelsea = ((companies as Company[]) ?? []).find((c) => c.name.trim().toLowerCase() === CHELSEA_COMPANY_NAME.toLowerCase())
-  const abiertas = ((rows as unknown as (TaskRow & { company_id: string | null; created_at: string })[]) ?? []).filter((t) => t.company_id !== chelsea?.id)
+  // Fase 9: waiting tasks are not hers to sort out right now.
+  const abiertas = ((rows as unknown as (TaskRow & { company_id: string | null; created_at: string })[]) ?? []).filter((t) => t.company_id !== chelsea?.id && t.estado !== 'esperando')
   const total = abiertas.length
   if (total === 0) return null
 

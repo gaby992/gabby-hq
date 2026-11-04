@@ -21,6 +21,7 @@ import { normalizar } from './acciones'
 import { ejecutarNota } from './notas-bot'
 import { responderPregunta } from './pregunta'
 import { enviarQueSigue } from './que-sigue'
+import { dejarDeEsperar, enviarListaEsperando, moverTarea } from './esperando'
 import { confirmacionAlarma, crearRecordatorio, instanteDe } from './recordatorios'
 import { confirmacion, guardarTarea } from './tareas'
 import { agregarACalendar, cuandoDe } from '@/lib/google/sync'
@@ -222,7 +223,7 @@ function emparejarCrear(acciones: AccionResuelta[], ctx: ContextoInterprete): Ac
 const ICONO: Record<AccionLlm['tipo'], string> = {
   completar: '✅', cancelar: '🗑', borrar: '❌', posponer: '➡️', renombrar: '✏️', cambiar: '✏️', crear: '➕',
   nota_empresa: '📝', nota_tarea: '📎', alarma: '⏰', pregunta: '❓', que_sigue: '🎯', lista: '📋', calendar: '📅',
-  pagos_listar: '💳', dividir: '🪜', siguiente_paso: '🪜', correo: '📧', desconocido: '🤷',
+  pagos_listar: '💳', dividir: '🪜', siguiente_paso: '🪜', correo: '📧', esperar: '⏳', esperando: '⏳', desconocido: '🤷',
 }
 
 function fechaDicha(ymd: string, today: string): string {
@@ -278,13 +279,15 @@ function frase(a: AccionResuelta, today: string, conTarea: boolean): string {
       const filtro = a.filtro ? [a.filtro.tipo ? CORREO_TIPO_LABELS[a.filtro.tipo].toLowerCase() : null, a.filtro.urgencia, a.filtro.de ? `de ${a.filtro.de}` : null, a.filtro.hoy ? 'de hoy' : null].filter(Boolean).join(' ') : ''
       return `${que}: ${cs.length} correos${filtro ? ` (${filtro})` : ''}${cs.length > 0 ? ` — ${cs.slice(0, 3).map((c) => `«${corto(c.asunto ?? '', 25)}»`).join(', ')}${cs.length > 3 ? '…' : ''}` : ''}`
     }
+    case 'esperar': return a.fin ? `Retomar${tt} (ya no espera)` : `Dejar esperando${tt}${a.quien ? ` a ${a.quien}` : ''}`
+    case 'esperando': return 'Mandar la lista de ⏳ Esperando'
     case 'desconocido': return `No entendí «${corto(a.texto, 60)}»`
   }
 }
 
 /** True when an action adjacent to another on the same task reads well joined with " y ". */
 function enlazable(a: AccionResuelta): boolean {
-  return !!a.tarea && !a.error && ['posponer', 'renombrar', 'cambiar', 'completar', 'cancelar', 'borrar', 'nota_tarea', 'calendar'].includes(a.tipo)
+  return !!a.tarea && !a.error && ['posponer', 'renombrar', 'cambiar', 'completar', 'cancelar', 'borrar', 'nota_tarea', 'calendar', 'esperar'].includes(a.tipo)
 }
 
 function fechaDeAccion(a: AccionResuelta): string | null | undefined {
@@ -658,6 +661,12 @@ export async function ejecutarUna(chatId: number, a: AccionResuelta): Promise<st
       }
       return out.join('\n') || '📧 ningún correo'
     }
+    case 'esperar':
+      // Fase 9: the same write the board's ⏳ column does.
+      return a.fin ? dejarDeEsperar([tareaDe(a).id]) : moverTarea([tareaDe(a).id], 'esperando', { esperando_a: a.quien ?? null })
+    case 'esperando':
+      await enviarListaEsperando(chatId)
+      return '⏳ (lista enviada arriba)'
     case 'desconocido':
       return `🤷 No entendí «${corto(a.texto, 60)}»`
   }

@@ -52,6 +52,10 @@ export type AccionLlm =
    * Ajuste 6c: `nivel` learns the sender ("el 5 es silencio"); with `accion` too ("archiva el 5 y márcalo como silencio").
    */
   | { tipo: 'correo'; accion?: CorreoAccion; nivel?: NivelRemitente; ref?: string; filtro?: FiltroCorreo }
+  /** Fase 9: "la de TOTT está esperando a Andrew" (quien) · "la de TOTT ya no espera" (fin). */
+  | { tipo: 'esperar'; ref: string; quien?: string; fin?: boolean }
+  /** Fase 9: "qué tengo esperando" → the ⏳ list. */
+  | { tipo: 'esperando' }
   | { tipo: 'desconocido'; texto: string }
 
 export interface FiltroCorreo {
@@ -68,14 +72,14 @@ export type TipoAccionLlm = AccionLlm['tipo']
 const TIPOS: TipoAccionLlm[] = [
   'completar', 'cancelar', 'borrar', 'posponer', 'renombrar', 'cambiar', 'crear',
   'nota_empresa', 'nota_tarea', 'alarma', 'pregunta', 'que_sigue', 'lista', 'calendar',
-  'pagos_listar', 'dividir', 'siguiente_paso', 'correo', 'desconocido',
+  'pagos_listar', 'dividir', 'siguiente_paso', 'correo', 'esperar', 'esperando', 'desconocido',
 ]
 
 const ACCIONES_CORREO: CorreoAccion[] = ['chelsea', 'yo', 'tarea', 'archivar']
 const TIPOS_CORREO: CorreoTipo[] = ['necesita_respuesta', 'pedido_de_tarea', 'fyi', 'notificacion', 'marketing', 'reunion', 'pago']
 
 /** A task as the interpreter and the plan see it: no notes. */
-export type TareaLite = Pick<TaskRow, 'id' | 'text' | 'due_date' | 'due_time' | 'priority' | 'importante' | 'company'>
+export type TareaLite = Pick<TaskRow, 'id' | 'text' | 'due_date' | 'due_time' | 'priority' | 'importante' | 'estado' | 'esperando_a' | 'company'>
 
 export interface ContextoInterprete {
   text: string
@@ -110,11 +114,13 @@ async function ultimaMencionada(chatId: number): Promise<string | null> {
 }
 
 function fechaCorta(t: TareaLite, today: string): string {
-  if (!t.due_date) return 'sin fecha'
+  // Fase 9: a waiting task says so before its date — the model must not treat it as overdue work.
+  const espera = t.estado === 'esperando' ? `⏳ esperando${t.esperando_a ? ` a ${t.esperando_a}` : ''} · ` : ''
+  if (!t.due_date) return `${espera}sin fecha`
   const hora = t.due_time ? ` ${t.due_time.slice(0, 5)}` : ''
-  if (t.due_date < today) return `vencida (${t.due_date}${hora})`
-  if (t.due_date === today) return `vence hoy${hora}`
-  return `vence ${t.due_date}${hora}`
+  if (t.due_date < today) return `${espera}vencida (${t.due_date}${hora})`
+  if (t.due_date === today) return `${espera}vence hoy${hora}`
+  return `${espera}vence ${t.due_date}${hora}`
 }
 
 export async function construirContextoInterprete(
@@ -266,6 +272,9 @@ export function systemPrompt(today: string, cfg: AsistenteConfig = { nombre_pers
       'Un número de la última lista que es "📧 correo" NUNCA es completar/posponer: es "correo". ' +
       'NIVEL = aprender el remitente para siempre (va con accion o solo): "el 5 es silencio"/"silencia a zoom"/"ese remitente es ruido" → nivel silencio; "el 5 es solo app"/"que no me avise, solo en la app" → nivel solo_app; "el 5 es alerta"/"ese remitente es VIP"/"avísame siempre de TOTT" → nivel alerta; ' +
       '"archiva el 5 y márcalo como silencio" → accion archivar + nivel silencio. Va al menos accion o nivel.',
+    '- {"tipo":"esperar","ref":REF,("quien":"…"),("fin":true)}  → "la de TOTT está esperando a Andrew", "esa está en manos del cliente", "la 3 espera respuesta de Juan": la tarea queda en ⏳ Esperando (quien = de quién, corto, sin "a"). ' +
+      '"la de TOTT ya no espera", "ya respondió Andrew, retomo la de TOTT", "la 2 vuelve a mí" → fin:true (vuelve a estar en sus manos). NO es completar ni posponer',
+    '- {"tipo":"esperando"}  → "qué tengo esperando", "qué está en manos de otros", "qué espero de alguien", "lista de esperando": la lista ⏳',
     '- {"tipo":"desconocido","texto":"…"}  → saludos, comentarios o algo que no es ninguna de las anteriores',
     '',
     'REF = a qué tarea se refiere: el id entre corchetes del contexto ("#3" = número de la última alarma, "t12" = otra tarea abierta), ' +
@@ -516,6 +525,14 @@ export function validarAcciones(raw: unknown): AccionLlm[] {
         if (t) out.push({ tipo, texto: t, fecha: fecha(a.fecha), hora: hora(a.hora), en_minutos: min })
         break
       }
+      case 'esperar': {
+        const quien = str(a.quien)?.replace(/^(?:a|de)\s+/i, '')
+        if (ref) out.push({ tipo, ref, quien: a.fin === true ? undefined : quien, fin: a.fin === true || undefined })
+        break
+      }
+      case 'esperando':
+        out.push({ tipo })
+        break
       case 'pregunta':
       case 'desconocido':
         out.push({ tipo, texto: texto || '…' })
