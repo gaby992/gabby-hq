@@ -23,7 +23,7 @@ sección y **no se empieza una fase hasta validar la anterior**.
 | 9 | Tablero por horizonte en /hoy (Hoy sí o sí · Mañana · Esta semana · Esperando · Después · Correos), arrastrar tarjetas, estado "esperando", alarma de las 8 reordenada | ✅ Construida — pendiente de validar (correr el SQL 9) |
 | 9b | Tablero: franja de KPIs, vista Calendario (semana / mes, pagos recurrentes, arrastrar a un día), badge "sin empresa" editable, "la 5 es de PD" | ✅ Validada |
 | 9c | El asistente habla: menú de botones, foto del tablero, resumen en líneas, preguntas narradas, chat 💬 en la web | ✅ Validada |
-| 12 | Dashboard de vida: pantalla Resumen (agenda con Google Calendar en lectura, prioridades, correos, notas, KPIs, "Resumen diario"), menú lateral blanco/azul, pantallas Calendario y Notas, alerta de correo en el idioma de la cuenta | ✅ Construida — pendiente de validar |
+| 12 | Dashboard de vida: pantalla Resumen clara (agenda con Google Calendar en lectura, prioridades, correos, notas, KPIs, "Resumen diario", herramientas conectadas), menú lateral índigo/morado, pantallas Calendario y Notas, alerta de correo en el idioma de la cuenta | ✅ Construida — pendiente de validar |
 
 ---
 
@@ -2935,9 +2935,13 @@ puerta principal; esta pantalla es el vistazo.
 
 ### 12a. Qué hace
 
-**A) Menú lateral blanco con acento azul** (`src/components/Sidebar.tsx`).
-Fijo a la izquierda en la compu, cajón bajo una barra blanca en el teléfono.
-El resto de la app conserva su tema oscuro. Entradas:
+**A) Menú lateral índigo oscuro con el ítem activo en morado**
+(`src/components/Sidebar.tsx`), la paleta del reel de referencia. Fijo a la
+izquierda en la compu, cajón bajo una barra del mismo color en el teléfono.
+La pantalla Resumen usa la paleta clara de la referencia (fondo gris pálido,
+tarjetas blancas, acento morado `#6C5CE7`; `src/components/Fondo.tsx` elige
+el fondo por ruta); las demás pantallas conservan el tema oscuro hasta que
+se rediseñen. Entradas:
 
 ```
 🏠 Resumen (/resumen)   🗂 Tablero (/hoy)   📅 Calendario (/calendario)

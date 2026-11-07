@@ -6,6 +6,7 @@ import { COMPANY_COLORS, CORREO_ACCION_LABELS, CORREO_URGENCIA_EMOJI, type Corre
 import type { Resumen, ItemAgenda, Prioridad, CorreoResumen } from '@/lib/asistente/resumen'
 import { relativeDaysEs } from '@/lib/dates'
 import ChatPanel from '@/components/ChatPanel'
+import { CLARO } from '@/components/Fondo'
 
 // Fase 12: the Dashboard de vida. One page that gathers the day — agenda by
 // hour (tasks, payments, the connected Google Calendar in read-only),
@@ -23,32 +24,34 @@ function hora12(t: string): string {
   return `${h12}:${String(m).padStart(2, '0')} ${h < 12 ? 'am' : 'pm'}`
 }
 
-function saludoDelDia(): string {
-  const h = new Date().getHours()
-  if (h < 12) return 'Buenos días'
-  if (h < 19) return 'Buenas tardes'
-  return 'Buenas noches'
-}
-
 function Empresa({ empresa }: { empresa: { name: string; color: string } | null }) {
   if (!empresa) return null
   const color = COMPANY_COLORS[empresa.color] ?? '#888780'
   return (
-    <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium" style={{ backgroundColor: color + '22', color }}>
+    <span className="inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-semibold" style={{ backgroundColor: color + '1f', color }}>
       {empresa.name}
     </span>
   )
 }
 
+/** A white card of the light palette (the reference's panels). */
 function Tarjeta({ titulo, children, accion, className = '' }: { titulo: string; children: React.ReactNode; accion?: React.ReactNode; className?: string }) {
   return (
-    <section className={`bg-[#1c1c1c] border border-[#2a2a2a] rounded-lg ${className}`}>
-      <header className="flex items-center justify-between gap-2 px-4 py-2.5 border-b border-[#2a2a2a]">
-        <h2 className="text-sm font-semibold text-[#e8e8e8]">{titulo}</h2>
+    <section className={`rounded-xl shadow-sm ${className}`} style={{ backgroundColor: CLARO.tarjeta, border: `1px solid ${CLARO.borde}` }}>
+      <header className="flex items-center justify-between gap-2 px-5 pt-4 pb-2">
+        <h2 className="text-[13px] font-semibold" style={{ color: CLARO.texto }}>{titulo}</h2>
         {accion}
       </header>
-      <div className="px-4 py-3">{children}</div>
+      <div className="px-5 pb-4">{children}</div>
     </section>
+  )
+}
+
+function Enlace({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <Link href={href} className="text-xs font-medium hover:underline" style={{ color: CLARO.acento }}>
+      {children}
+    </Link>
   )
 }
 
@@ -133,29 +136,31 @@ export default function ResumenPage() {
     }
   }
 
-  if (!datos && !error) return <div className="text-sm text-[#888888] py-8 text-center">Loading...</div>
-  if (!datos) return <p className="text-xs text-red-400">No se pudo cargar: {error}</p>
+  if (!datos && !error) return <div className="text-sm py-8 text-center" style={{ color: CLARO.textoSuave }}>Loading...</div>
+  if (!datos) return <p className="text-xs text-red-500">No se pudo cargar: {error}</p>
 
   const kpis = [
-    { emoji: '🔥', label: 'Hoy sí o sí', n: datos.kpis.hoy, color: 'text-red-400', href: '/hoy#col-hoy' },
-    { emoji: '🔺', label: 'Vencidas', n: datos.kpis.vencidas, color: 'text-red-400', href: '/hoy#col-hoy' },
-    { emoji: '⏳', label: 'Esperando', n: datos.kpis.esperando, color: 'text-[#7F77DD]', href: '/hoy#col-esperando' },
-    { emoji: '📧', label: 'Correos', n: datos.kpis.correos, color: 'text-[#1D9E75]', href: '/hoy#col-correos' },
+    { emoji: '🔥', label: 'Hoy sí o sí', n: datos.kpis.hoy, color: '#E5484D', href: '/hoy#col-hoy' },
+    { emoji: '🔺', label: 'Vencidas', n: datos.kpis.vencidas, color: '#E5484D', href: '/hoy#col-hoy' },
+    { emoji: '⏳', label: 'Esperando', n: datos.kpis.esperando, color: CLARO.acento, href: '/hoy#col-esperando' },
+    { emoji: '📧', label: 'Correos', n: datos.kpis.correos, color: '#1D9E75', href: '/hoy#col-correos' },
   ]
 
   const renderItem = (it: ItemAgenda) => (
-    <li key={`${it.tipo}-${it.id}`} className="flex items-start gap-3 py-1.5">
-      <span className="w-16 flex-shrink-0 text-xs text-[#888888] tabular-nums pt-0.5">{it.hora ? hora12(it.hora) : it.tipo === 'evento' ? 'todo el día' : '—'}</span>
-      <span className="flex-shrink-0 text-sm leading-5">{it.tipo === 'pago' ? '💳' : it.tipo === 'evento' ? '📆' : it.importante ? '★' : '▫️'}</span>
+    <li key={`${it.tipo}-${it.id}`} className="flex items-start gap-3 py-2">
+      <span className="w-[4.5rem] flex-shrink-0 text-xs tabular-nums pt-0.5" style={{ color: CLARO.textoSuave }}>
+        {it.hora ? hora12(it.hora) : it.tipo === 'evento' ? 'todo el día' : '—'}
+      </span>
+      <span className="flex-shrink-0 text-sm leading-5">{it.tipo === 'pago' ? '💳' : it.tipo === 'evento' ? '📆' : it.importante ? '★' : '•'}</span>
       <div className="min-w-0 flex-1">
-        <p className={`text-sm leading-5 truncate ${it.tipo === 'evento' ? 'text-[#9bb7e8]' : 'text-[#e8e8e8]'}`}>
+        <p className="text-[13px] leading-5 truncate" style={{ color: CLARO.texto }}>
           {it.link ? <a href={it.link} target="_blank" rel="noreferrer" className="hover:underline">{it.titulo}</a> : it.titulo}
         </p>
         <div className="flex items-center gap-1.5 mt-0.5">
           <Empresa empresa={it.empresa} />
-          {it.detalle && <span className="text-[10px] text-[#888888]">{it.detalle}</span>}
-          {it.fin && it.hora && <span className="text-[10px] text-[#555555]">hasta {hora12(it.fin)}</span>}
-          {it.tipo === 'evento' && <span className="text-[10px] text-[#555555]">Google Calendar</span>}
+          {it.detalle && <span className="text-[10px]" style={{ color: CLARO.textoSuave }}>{it.detalle}</span>}
+          {it.fin && it.hora && <span className="text-[10px]" style={{ color: CLARO.textoApagado }}>hasta {hora12(it.fin)}</span>}
+          {it.tipo === 'evento' && <span className="text-[10px]" style={{ color: CLARO.textoApagado }}>Google Calendar</span>}
         </div>
       </div>
     </li>
@@ -164,122 +169,116 @@ export default function ResumenPage() {
   const renderPrioridad = (p: Prioridad) => {
     const busy = ocupadas.has(p.id)
     return (
-      <li key={p.id} className="flex items-start gap-2.5 py-1.5">
+      <li key={p.id} className="flex items-start gap-3 py-2">
         <button
           onClick={() => void completar(p.id)}
           disabled={busy}
           title="Completar"
-          className="mt-0.5 flex-shrink-0 w-4 h-4 rounded border-2 border-[#555555] hover:border-[#1D9E75] disabled:opacity-40 transition-colors"
+          className="mt-0.5 flex-shrink-0 w-[18px] h-[18px] rounded-[5px] border-2 transition-colors disabled:opacity-40 hover:bg-[#EEEBFF]"
+          style={{ borderColor: busy ? CLARO.acento : '#C9C7DD', backgroundColor: busy ? CLARO.acento : 'transparent' }}
         />
         <div className={`min-w-0 flex-1 ${busy ? 'opacity-50' : ''}`}>
-          <p className="text-sm leading-5 text-[#e8e8e8]">{p.text}</p>
+          <p className="text-[13px] leading-5" style={{ color: CLARO.texto }}>{p.text}</p>
           <div className="flex items-center gap-1.5 mt-0.5">
             <Empresa empresa={p.empresa} />
-            {p.importante && <span className="text-[10px] text-[#EF9F27]">★</span>}
-            {p.porque && <span className="text-[10px] text-[#888888]">{p.porque}</span>}
+            {p.importante && <span className="text-[10px] text-[#D9A400]">★</span>}
+            {p.porque && <span className="text-[10px]" style={{ color: CLARO.textoSuave }}>{p.porque}</span>}
           </div>
         </div>
       </li>
     )
   }
 
+  const divisor = { borderColor: CLARO.borde }
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {/* ── Cabecera ── */}
-      <div className="flex flex-wrap items-end justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-[#e8e8e8]">
-            {saludoDelDia()}, {datos.nombre} ☀️
+          <h1 className="text-[22px] font-bold tracking-tight" style={{ color: CLARO.texto }}>
+            Hola, {datos.nombre} ☀️
           </h1>
-          <p className="text-sm text-[#888888] capitalize">{datos.fecha_larga}</p>
+          <p className="text-sm capitalize" style={{ color: CLARO.textoSuave }}>{datos.fecha_larga}</p>
         </div>
         <button
           onClick={() => (diario === null ? void pedirDiario(false) : setDiario(null))}
           disabled={diarioCargando}
-          className="px-3 py-1.5 text-sm font-medium rounded-md bg-[#7F77DD] text-white hover:bg-[#6b62d0] disabled:opacity-50 transition-colors"
+          className="px-4 py-2 text-[13px] font-semibold rounded-lg text-white shadow-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
+          style={{ backgroundColor: CLARO.acento }}
         >
-          {diarioCargando ? 'Armando…' : diario === null ? '📋 Resumen diario' : 'Cerrar resumen'}
+          {diarioCargando ? 'Armando…' : diario === null ? 'Resumen diario' : 'Cerrar resumen'}
         </button>
       </div>
 
-      {(error || mensaje) && <p className={`text-xs ${error ? 'text-red-400' : 'text-emerald-400'}`}>{error ?? mensaje}</p>}
+      {(error || mensaje) && <p className={`text-xs ${error ? 'text-red-500' : 'text-emerald-600'}`}>{error ?? mensaje}</p>}
 
       {/* ── Resumen diario: the same text the 8:00 alarm sends, on demand ── */}
       {diario !== null && (
-        <section className="bg-[#222222] border border-[#7F77DD]/50 rounded-lg px-5 py-4 space-y-3">
+        <section className="rounded-xl px-5 py-4 space-y-3 shadow-sm" style={{ backgroundColor: CLARO.acentoSuave, border: `1px solid #D9D3FF` }}>
           <div className="flex items-center justify-between gap-2">
-            <h2 className="text-sm font-semibold text-[#7F77DD]">📋 Resumen diario</h2>
+            <h2 className="text-[13px] font-semibold" style={{ color: CLARO.acento }}>Resumen diario</h2>
             <div className="flex items-center gap-2">
-              {diarioEnviado && <span className="text-[11px] text-emerald-400">{diarioEnviado}</span>}
+              {diarioEnviado && <span className="text-[11px] text-emerald-600">{diarioEnviado}</span>}
               <button
                 onClick={() => void pedirDiario(true)}
                 disabled={diarioCargando}
-                className="px-2.5 py-1 text-xs rounded-md bg-[#7F77DD]/15 text-[#7F77DD] hover:bg-[#7F77DD]/25 disabled:opacity-50 transition-colors"
+                className="px-3 py-1 text-xs font-medium rounded-md text-white hover:opacity-90 disabled:opacity-50"
+                style={{ backgroundColor: CLARO.acento }}
               >
-                📲 Enviar a Telegram
+                Enviar a Telegram
               </button>
             </div>
           </div>
-          <p className="text-sm leading-6 text-[#e8e8e8] whitespace-pre-wrap">{diario || 'Nada pendiente 🎉'}</p>
+          <p className="text-[13px] leading-6 whitespace-pre-wrap" style={{ color: CLARO.texto }}>{diario || 'Nada pendiente 🎉'}</p>
         </section>
       )}
 
       {/* ── KPIs ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {kpis.map((k) => (
-          <Link key={k.label} href={k.href} className="bg-[#1c1c1c] border border-[#2a2a2a] rounded-lg px-3 py-2 hover:border-[#555555] transition-colors">
-            <p className="text-[11px] text-[#888888]">{k.emoji} {k.label}</p>
-            <p className={`text-2xl font-semibold leading-tight ${k.n === 0 ? 'text-[#555555]' : k.color}`}>{k.n}</p>
+          <Link key={k.label} href={k.href} className="rounded-xl px-4 py-3 shadow-sm hover:shadow transition-shadow" style={{ backgroundColor: CLARO.tarjeta, border: `1px solid ${CLARO.borde}` }}>
+            <p className="text-[11px] font-medium" style={{ color: CLARO.textoSuave }}>{k.emoji} {k.label}</p>
+            <p className="text-2xl font-bold leading-tight" style={{ color: k.n === 0 ? CLARO.textoApagado : k.color }}>{k.n}</p>
           </Link>
         ))}
       </div>
 
       {/* ── Agenda · Prioridades ── */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-        <Tarjeta
-          titulo="Agenda de hoy"
-          className="lg:col-span-3"
-          accion={<Link href="/calendario" className="text-xs text-[#7F77DD] hover:underline">Ver calendario</Link>}
-        >
+        <Tarjeta titulo="Agenda de hoy" className="lg:col-span-3" accion={<Enlace href="/calendario">Ver calendario</Enlace>}>
           {datos.agenda.length === 0 && datos.sin_hora.length === 0 ? (
-            <p className="text-sm text-[#555555]">Nada con hora hoy{datos.calendar_fallo ? ' (no pude leer Google Calendar)' : ''}.</p>
+            <p className="text-sm" style={{ color: CLARO.textoApagado }}>Nada con hora hoy{datos.calendar_fallo ? ' (no pude leer Google Calendar)' : ''}.</p>
           ) : (
             <>
-              <ul className="divide-y divide-[#2a2a2a]">{datos.agenda.map(renderItem)}</ul>
+              <ul className="divide-y" style={divisor}>{datos.agenda.map(renderItem)}</ul>
               {datos.sin_hora.length > 0 && (
                 <>
-                  <p className="mt-2 pt-2 border-t border-[#2a2a2a] text-[10px] uppercase tracking-wide text-[#555555]">Sin hora</p>
-                  <ul className="divide-y divide-[#2a2a2a]">{datos.sin_hora.map(renderItem)}</ul>
+                  <p className="mt-2 pt-2 border-t text-[10px] uppercase tracking-wide" style={{ ...divisor, color: CLARO.textoApagado }}>Sin hora</p>
+                  <ul className="divide-y" style={divisor}>{datos.sin_hora.map(renderItem)}</ul>
                 </>
               )}
-              {datos.calendar_fallo && <p className="mt-2 text-[11px] text-[#555555]">No pude leer Google Calendar ahora; la agenda muestra solo tareas y pagos.</p>}
+              {datos.calendar_fallo && <p className="mt-2 text-[11px]" style={{ color: CLARO.textoApagado }}>No pude leer Google Calendar ahora; la agenda muestra solo tareas y pagos.</p>}
             </>
           )}
         </Tarjeta>
 
-        <Tarjeta
-          titulo="Prioridades principales"
-          className="lg:col-span-2"
-          accion={<Link href="/hoy" className="text-xs text-[#7F77DD] hover:underline">Ver tablero</Link>}
-        >
+        <Tarjeta titulo="Prioridades principales" className="lg:col-span-2" accion={<Enlace href="/hoy">Ver tablero</Enlace>}>
           {datos.prioridades.length === 0 ? (
-            <p className="text-sm text-[#555555]">Nada vencido ni urgente 🎉</p>
+            <p className="text-sm" style={{ color: CLARO.textoApagado }}>Nada vencido ni urgente 🎉</p>
           ) : (
-            <ul className="divide-y divide-[#2a2a2a]">{datos.prioridades.map(renderPrioridad)}</ul>
+            <ul className="divide-y" style={divisor}>{datos.prioridades.map(renderPrioridad)}</ul>
           )}
         </Tarjeta>
       </div>
 
       {/* ── Correos · Por dónde iba ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Tarjeta
-          titulo="Correos que piden respuesta"
-          accion={<Link href="/correo" className="text-xs text-[#7F77DD] hover:underline">Ver todos</Link>}
-        >
+        <Tarjeta titulo="Correos que piden respuesta" accion={<Enlace href="/correo">Ver todos</Enlace>}>
           {datos.correos.length === 0 ? (
-            <p className="text-sm text-[#555555]">Nadie espera respuesta ✨</p>
+            <p className="text-sm" style={{ color: CLARO.textoApagado }}>Nadie espera respuesta ✨</p>
           ) : (
-            <ul className="divide-y divide-[#2a2a2a]">
+            <ul className="divide-y" style={divisor}>
               {datos.correos.map((c) => {
                 const busy = ocupadas.has(c.id)
                 const u = c.urgencia ?? 'media'
@@ -288,18 +287,19 @@ export default function ResumenPage() {
                     <div className="flex items-start gap-2">
                       <span className="flex-shrink-0 text-xs leading-5" title={u}>{CORREO_URGENCIA_EMOJI[u]}</span>
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm leading-5 text-[#e8e8e8]">{c.quien}</p>
-                        <p className="truncate text-xs leading-4 text-[#888888]">{c.asunto ?? '(sin asunto)'}</p>
-                        <p className="text-[10px] text-[#555555]">{c.cuenta} · {c.hace}</p>
+                        <p className="truncate text-[13px] leading-5" style={{ color: CLARO.texto }}>{c.quien}</p>
+                        <p className="truncate text-xs leading-4" style={{ color: CLARO.textoSuave }}>{c.asunto ?? '(sin asunto)'}</p>
+                        <p className="text-[10px]" style={{ color: CLARO.textoApagado }}>{c.cuenta} · {c.hace}</p>
                       </div>
-                      <div className="flex gap-0.5 flex-shrink-0">
+                      <div className="flex gap-1 flex-shrink-0">
                         {ACCIONES_CORREO.map((a) => (
                           <button
                             key={a}
                             onClick={() => void decidirCorreo(c, a)}
                             disabled={busy}
                             title={CORREO_ACCION_LABELS[a]}
-                            className="px-1.5 py-0.5 text-[11px] rounded bg-[#2a2a2a] hover:bg-[#333333] disabled:opacity-40 transition-colors"
+                            className="w-7 h-7 text-[12px] rounded-md disabled:opacity-40 transition-colors hover:bg-[#EEEBFF]"
+                            style={{ backgroundColor: '#F4F5FA', border: `1px solid ${CLARO.borde}` }}
                           >
                             {ICONO_ACCION[a]}
                           </button>
@@ -313,21 +313,18 @@ export default function ResumenPage() {
           )}
         </Tarjeta>
 
-        <Tarjeta
-          titulo="📝 Por dónde iba"
-          accion={<Link href="/notas" className="text-xs text-[#7F77DD] hover:underline">Editar notas</Link>}
-        >
+        <Tarjeta titulo="Por dónde iba" accion={<Enlace href="/notas">Editar notas</Enlace>}>
           {datos.notas.length === 0 ? (
-            <p className="text-sm text-[#555555]">Sin notas. Escríbelas en Notas o dile al bot «nota IM: …».</p>
+            <p className="text-sm" style={{ color: CLARO.textoApagado }}>Sin notas. Escríbelas en Notas o dile al bot «nota IM: …».</p>
           ) : (
-            <ul className="space-y-2">
+            <ul className="space-y-2.5">
               {datos.notas.map((n) => {
                 const color = COMPANY_COLORS[n.color] ?? '#888780'
                 return (
-                  <li key={n.company_id} className="text-sm leading-5">
+                  <li key={n.company_id} className="text-[13px] leading-5">
                     <span className="font-semibold mr-1.5" style={{ color }}>{n.empresa}</span>
-                    <span className="text-[#c8c8c8]">{n.nota.trim().split('\n')[0]}</span>
-                    <span className="ml-1.5 text-[10px] text-[#555555]">{relativeDaysEs(n.updated_at)}</span>
+                    <span style={{ color: CLARO.texto }}>{n.nota.trim().split('\n')[0]}</span>
+                    <span className="ml-1.5 text-[10px]" style={{ color: CLARO.textoApagado }}>{relativeDaysEs(n.updated_at)}</span>
                   </li>
                 )
               })}
@@ -336,20 +333,33 @@ export default function ResumenPage() {
         </Tarjeta>
       </div>
 
-      {/* ── Conexiones ── */}
-      <div className="flex flex-wrap items-center gap-2 text-[11px]">
-        <span className="text-[#555555]">Conexiones:</span>
-        {datos.conexiones.cuentas.map((c) => (
-          <span key={c.email} className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 ${c.activa ? 'border-[#2a2a2a] text-[#c8c8c8]' : 'border-[#2a2a2a] text-[#555555]'}`} title={c.email}>
-            {c.calendar && '📅'}{c.correo && '📧'}{!c.calendar && !c.correo && '○'} {c.email}
+      {/* ── Herramientas conectadas ── */}
+      <Tarjeta titulo="Herramientas conectadas" accion={<Enlace href="/settings/conexiones">+ Agregar</Enlace>}>
+        <div className="flex flex-wrap gap-2">
+          {datos.conexiones.cuentas.map((c) => (
+            <span
+              key={c.email}
+              className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs"
+              style={{ border: `1px solid ${CLARO.borde}`, color: c.activa ? CLARO.texto : CLARO.textoApagado, backgroundColor: '#FAFAFD' }}
+              title={c.email}
+            >
+              <span className="text-base leading-none">{c.calendar && c.correo ? '📅✉️' : c.calendar ? '📅' : c.correo ? '✉️' : '○'}</span>
+              <span>
+                <span className="block font-medium leading-tight">{c.calendar && c.correo ? 'Calendar + Gmail' : c.calendar ? 'Google Calendar' : c.correo ? 'Gmail' : 'Google'}</span>
+                <span className="block text-[10px] leading-tight" style={{ color: CLARO.textoApagado }}>{c.email}</span>
+              </span>
+            </span>
+          ))}
+          <span className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs" style={{ border: `1px solid ${CLARO.borde}`, color: datos.conexiones.telegram ? CLARO.texto : CLARO.textoApagado, backgroundColor: '#FAFAFD' }}>
+            <span className="text-base leading-none">📲</span>
+            <span>
+              <span className="block font-medium leading-tight">Telegram</span>
+              <span className="block text-[10px] leading-tight" style={{ color: CLARO.textoApagado }}>{datos.conexiones.telegram ? 'asistente activo' : 'sin configurar'}</span>
+            </span>
           </span>
-        ))}
-        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 ${datos.conexiones.telegram ? 'border-[#2a2a2a] text-[#c8c8c8]' : 'border-[#2a2a2a] text-[#555555]'}`}>
-          📲 Telegram{datos.conexiones.telegram ? '' : ' (sin configurar)'}
-        </span>
-        {!datos.conexiones.google_configurado && <span className="text-[#555555]">Google sin configurar en Vercel</span>}
-        <Link href="/settings/conexiones" className="text-[#7F77DD] hover:underline">Settings → Conexiones</Link>
-      </div>
+          {!datos.conexiones.google_configurado && <span className="text-[11px] self-center" style={{ color: CLARO.textoApagado }}>Google sin configurar en Vercel</span>}
+        </div>
+      </Tarjeta>
 
       {/* The same 💬 chat as the board: the bot's engine, in a side panel. */}
       <ChatPanel onChanged={cargar} />
