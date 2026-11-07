@@ -74,33 +74,43 @@ interface Regla {
 }
 
 /** What the lists and rules decide before any model. Null → nothing deterministic. */
-export function clasificarPorReglas(c: EntradaCorreo, cuenta: Pick<CuentaCorreo, 'vip' | 'ruido' | 'solo_app' | 'reglas'>): Regla | null {
+/** Fase 12 (fallo #1): the fixed part of `razon` — the rule that fired — in the account's language. */
+const RAZON_ES = { silencio: 'silencio', alerta: 'alerta', solo_app: 'solo app', vip: 'regla VIP', ruido: 'regla ruido', regla_solo_app: 'regla solo app', chelsea: 'regla → Chelsea', gabby: 'regla → Gabby', archivar: 'regla archivar', registrar: 'regla registrar', pago: 'pago fallido / AMEX (regla)' } as const
+const RAZON_EN: Record<keyof typeof RAZON_ES, string> = { silencio: 'silence', alerta: 'alert', solo_app: 'app only', vip: 'VIP rule', ruido: 'noise rule', regla_solo_app: 'app-only rule', chelsea: 'rule → Chelsea', gabby: 'rule → Gabby', archivar: 'archive rule', registrar: 'record rule', pago: 'failed payment / AMEX (rule)' }
+
+export function razonRegla(clave: keyof typeof RAZON_ES, idioma: IdiomaCorreo = 'es'): string {
+  return idioma === 'en' ? RAZON_EN[clave] : RAZON_ES[clave]
+}
+
+/** What the lists and rules decide before any model. Null → nothing deterministic. */
+export function clasificarPorReglas(c: EntradaCorreo, cuenta: Pick<CuentaCorreo, 'vip' | 'ruido' | 'solo_app' | 'reglas'> & { idioma?: IdiomaCorreo }): Regla | null {
+  const r = (clave: keyof typeof RAZON_ES, match?: string) => `${razonRegla(clave, cuenta.idioma ?? 'es')}${match ? `: ${match}` : ''}`
   const nivel = nivelDe(cuenta, c.de_email)
-  if (nivel?.nivel === 'silencio') return { fija: { urgencia: 'baja', tipo: 'notificacion', categoria: 'informativo', confianza: 1 }, estado: 'registrado', sinLlm: true, alerta: false, razon: `silencio: ${nivel.match}` }
-  if (nivel?.nivel === 'alerta') return { fija: { urgencia: 'alta', confianza: 1 }, sinLlm: false, alerta: true, vip: true, razon: `alerta: ${nivel.match}` }
-  if (nivel?.nivel === 'solo_app') return { fija: {}, sinLlm: false, alerta: false, soloApp: true, razon: `solo app: ${nivel.match}` }
+  if (nivel?.nivel === 'silencio') return { fija: { urgencia: 'baja', tipo: 'notificacion', categoria: 'informativo', confianza: 1 }, estado: 'registrado', sinLlm: true, alerta: false, razon: r('silencio', nivel.match) }
+  if (nivel?.nivel === 'alerta') return { fija: { urgencia: 'alta', confianza: 1 }, sinLlm: false, alerta: true, vip: true, razon: r('alerta', nivel.match) }
+  if (nivel?.nivel === 'solo_app') return { fija: {}, sinLlm: false, alerta: false, soloApp: true, razon: r('solo_app', nivel.match) }
   const regla = reglaQueAplica(cuenta.reglas, { de_email: c.de_email, asunto: c.asunto })
   if (regla) {
     switch (regla.accion) {
       case 'vip':
-        return { fija: { urgencia: 'alta', confianza: 1 }, sinLlm: false, alerta: true, vip: true, razon: `regla VIP: ${regla.match}` }
+        return { fija: { urgencia: 'alta', confianza: 1 }, sinLlm: false, alerta: true, vip: true, razon: r('vip', regla.match) }
       case 'ruido':
-        return { fija: { urgencia: 'baja', tipo: 'notificacion', categoria: 'informativo', confianza: 1 }, estado: 'registrado', sinLlm: true, alerta: false, razon: `regla ruido: ${regla.match}` }
+        return { fija: { urgencia: 'baja', tipo: 'notificacion', categoria: 'informativo', confianza: 1 }, estado: 'registrado', sinLlm: true, alerta: false, razon: r('ruido', regla.match) }
       case 'solo_app':
         // By subject ("^accepted:" = calendar replies): the model classifies it, it never alerts.
-        return { fija: {}, sinLlm: false, alerta: false, soloApp: true, razon: `regla solo app: ${regla.match}` }
+        return { fija: {}, sinLlm: false, alerta: false, soloApp: true, razon: r('regla_solo_app', regla.match) }
       case 'para_chelsea':
-        return { fija: { urgencia: 'media', tipo: 'fyi', categoria: 'operativo', confianza: 1 }, estado: 'para_chelsea', sinLlm: true, alerta: regla.alerta === true, razon: `regla → Chelsea: ${regla.match}` }
+        return { fija: { urgencia: 'media', tipo: 'fyi', categoria: 'operativo', confianza: 1 }, estado: 'para_chelsea', sinLlm: true, alerta: regla.alerta === true, razon: r('chelsea', regla.match) }
       case 'lo_hago_yo':
-        return { fija: { urgencia: 'media', tipo: 'pedido_de_tarea', categoria: 'operativo', confianza: 1 }, estado: 'lo_hago_yo', sinLlm: true, alerta: regla.alerta === true, razon: `regla → Gabby: ${regla.match}` }
+        return { fija: { urgencia: 'media', tipo: 'pedido_de_tarea', categoria: 'operativo', confianza: 1 }, estado: 'lo_hago_yo', sinLlm: true, alerta: regla.alerta === true, razon: r('gabby', regla.match) }
       case 'archivar':
-        return { fija: { urgencia: 'baja', tipo: 'notificacion', categoria: 'informativo', confianza: 1 }, estado: 'archivado', sinLlm: true, alerta: false, razon: `regla archivar: ${regla.match}` }
+        return { fija: { urgencia: 'baja', tipo: 'notificacion', categoria: 'informativo', confianza: 1 }, estado: 'archivado', sinLlm: true, alerta: false, razon: r('archivar', regla.match) }
       case 'registrar':
-        return { fija: { urgencia: 'baja', tipo: 'fyi', categoria: 'informativo', confianza: 1 }, estado: 'registrado', sinLlm: true, alerta: false, razon: `regla registrar: ${regla.match}` }
+        return { fija: { urgencia: 'baja', tipo: 'fyi', categoria: 'informativo', confianza: 1 }, estado: 'registrado', sinLlm: true, alerta: false, razon: r('registrar', regla.match) }
     }
   }
   const texto = `${c.asunto ?? ''}\n${(c.cuerpo_texto ?? '').slice(0, 600)}`
-  if (RE_PAGO_FALLIDO.test(texto)) return { fija: { urgencia: 'alta', tipo: 'pago', categoria: 'facturacion_pagos', confianza: 0.9 }, sinLlm: true, alerta: false, razon: 'pago fallido / AMEX (regla)' }
+  if (RE_PAGO_FALLIDO.test(texto)) return { fija: { urgencia: 'alta', tipo: 'pago', categoria: 'facturacion_pagos', confianza: 0.9 }, sinLlm: true, alerta: false, razon: r('pago') }
   return null
 }
 
@@ -108,9 +118,13 @@ export function clasificarPorReglas(c: EntradaCorreo, cuenta: Pick<CuentaCorreo,
 
 export function systemPromptClasificador(idioma: IdiomaCorreo = 'es'): string {
   const extra = instruccionIdioma(idioma)
+  // Fase 12 (fallo #1): the language rule goes FIRST and the RESUMEN / RAZON
+  // lines name the language themselves — "en español" further down used to
+  // win over an instruction appended at the end.
+  const lengua = idioma === 'en' ? 'INGLÉS' : 'español'
   return [
     'Eres el clasificador de correo de una agencia de marketing (Interactive Marketing, Cancún) que atiende clientes en EE. UU. Lees UN correo y respondes SOLO un JSON, nada más.',
-    '',
+    ...(extra ? [extra, ''] : ['']),
     'JSON: {"urgencia":"alta|media|baja","tipo":"necesita_respuesta|pedido_de_tarea|fyi|notificacion|marketing|reunion|pago","categoria":"cliente|facturacion_pagos|operativo|plataformas|informativo|promocional|personal","confianza":0.0-1.0,"resumen":"…","razon":"…"}',
     '',
     'URGENCIA (lo que más importa acertar):',
@@ -122,11 +136,10 @@ export function systemPromptClasificador(idioma: IdiomaCorreo = 'es'): string {
     'TIPO: necesita_respuesta = una persona espera contestación; pedido_de_tarea = pide hacer algo concreto (cambiar, crear, enviar, revisar); reunion = propone/confirma una cita o llamada; pago = factura, cobro, recibo, pago fallido; marketing = promoción/newsletter; notificacion = automático de una plataforma; fyi = informa, no pide nada.',
     'CATEGORIA: cliente (de un cliente de la agencia), facturacion_pagos, operativo (proveedores, equipo, logística), plataformas (Google Ads, Meta, SEO, hosting, dominios, herramientas), informativo, promocional, personal.',
     '',
-    'RESUMEN: UNA línea en español, máximo 25 palabras, concreta: quién quiere qué y para cuándo. Si recibes "RESÚMENES PREVIOS DEL HILO", resume SOLO lo nuevo de este correo (qué cambió, qué pide ahora), sin repetir lo anterior.',
-    'RAZON: una frase corta de por qué esa urgencia y ese tipo.',
+    `RESUMEN: UNA línea en ${lengua}, máximo 25 palabras, concreta: quién quiere qué y para cuándo. Si recibes "RESÚMENES PREVIOS DEL HILO", resume SOLO lo nuevo de este correo (qué cambió, qué pide ahora), sin repetir lo anterior.`,
+    `RAZON: una frase corta en ${lengua} de por qué esa urgencia y ese tipo.`,
     'CONFIANZA: 0.9+ si es obvio; 0.5 o menos si dudas entre dos opciones.',
     'No inventes nada que no esté en el correo.',
-    ...(extra ? ['', extra] : []),
   ].join('\n')
 }
 
@@ -175,9 +188,40 @@ export function userPromptClasificador(c: EntradaCorreo): string {
   return lines.join('\n')
 }
 
+/**
+ * Fase 12 (fallo #1): does this line read as Spanish? Counts frequent Spanish
+ * function words that English never uses; two or more → Spanish. Cheap and
+ * good enough for a one-line summary.
+ */
+export function pareceEspanol(texto: string): boolean {
+  const m = texto.toLowerCase().match(/\b(que|para|con|una|del|los|las|está|están|pide|piden|envía|informa|informan|confirma|solicita|sobre|cuándo|cuando|porque|también|hoy|mañana|pronto|listo|lista|cliente|correo|respuesta|avance|sin|ya|muy|más)\b/g)
+  return (m?.length ?? 0) >= 2
+}
+
+/** One short pass that turns a Spanish summary/reason into English. Fixed timeout; on failure the original stays. */
+async function traducirAlIngles(target: LlmTarget, clas: Clasificacion): Promise<Clasificacion> {
+  try {
+    const r = await llamarLlm(
+      target,
+      'You translate two short Spanish lines about an email into natural English. Answer ONLY JSON: {"resumen":"…","razon":"…"}. Keep names, numbers and dates exactly. No quotes inside the values.',
+      JSON.stringify({ resumen: clas.resumen, razon: clas.razon }),
+      { maxTokens: 200, timeoutMs: 8_000, json: true }
+    )
+    const j = extraerJson(r.text)
+    const resumen = str(j.resumen)
+    const razon = str(j.razon)
+    return { ...clas, resumen: resumen ? resumen.replace(/\s+/g, ' ').slice(0, 240) : clas.resumen, razon: razon ? razon.slice(0, 240) : clas.razon }
+  } catch (err) {
+    console.warn(`[correo] traducir resumen: ${mensajeError(err)} — queda como vino`)
+    return clas
+  }
+}
+
 export async function clasificarConLlm(c: EntradaCorreo, target: LlmTarget = llmConfigCorreo(), idioma: IdiomaCorreo = 'es'): Promise<Clasificacion & { modelo: string; tokensIn: number; tokensOut: number; ms: number }> {
   const r = await llamarLlm(target, systemPromptClasificador(idioma), userPromptClasificador(c), { maxTokens: MAX_TOKENS, timeoutMs: TIMEOUT_MS, json: true })
-  const clas = validarClasificacion(extraerJson(r.text), c.asunto ?? '(sin asunto)')
+  let clas = validarClasificacion(extraerJson(r.text), c.asunto ?? '(sin asunto)')
+  // The owner of an English account pastes the summary as is: a Spanish one is useless to her.
+  if (idioma === 'en' && (pareceEspanol(clas.resumen) || pareceEspanol(clas.razon))) clas = await traducirAlIngles(target, clas)
   return { ...clas, modelo: nombreModelo(target), tokensIn: r.tokensIn, tokensOut: r.tokensOut, ms: r.ms }
 }
 
@@ -204,7 +248,8 @@ export async function clasificar(c: EntradaCorreo, cuenta: Pick<CuentaCorreo, 'v
     // Ajuste 6-1: the row (and the alert built from it) gets a generic
     // reason by KIND, never the provider's text — a key once travelled that way.
     console.error(`[correo] clasificar falló (${asunto.slice(0, 40)}): ${mensajeError(err)}`)
-    const final: Clasificacion = { ...base, ...(regla?.fija ?? {}), razon: `${regla ? `${regla.razon} · ` : ''}⚠️ clasificador no disponible (${tipoDeFallo(err)})` }
+    const aviso = cuenta.idioma === 'en' ? 'classifier unavailable' : 'clasificador no disponible'
+    const final: Clasificacion = { ...base, ...(regla?.fija ?? {}), razon: `${regla ? `${regla.razon} · ` : ''}⚠️ ${aviso} (${tipoDeFallo(err)})` }
     return { clas: final, estado: regla?.estado ?? 'nuevo', alertaForzada: regla?.alerta ?? false, vip, soloApp, modelo: null, tokensIn: 0, tokensOut: 0, ms: 0 }
   }
 }

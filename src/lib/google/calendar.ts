@@ -133,6 +133,70 @@ export async function crearEventoPago(p: PagoEvento): Promise<string> {
   return crear(cuerpoPago(p))
 }
 
+// ── Fase 12: READ one day of the connected calendar ──────────────────────
+// The "Agenda de hoy" of the Dashboard de vida shows the events of the
+// connected Google Calendar next to the tasks with an hour and the payments.
+// Reading only: nothing is created, moved or deleted here — Calendar still
+// WRITES on request only (fase 5). calendar.events already covers reads.
+
+export interface EventoDia {
+  id: string
+  titulo: string
+  /** 'HH:MM' Cancún, or null for an all-day event. */
+  hora: string | null
+  /** 'HH:MM' Cancún, or null. */
+  fin: string | null
+  todoElDia: boolean
+  link: string | null
+  /** Where the event comes from, as Calendar reports it (the account's primary calendar). */
+  calendario: string | null
+}
+
+function horaCancun(iso: string): string {
+  return new Intl.DateTimeFormat('en-GB', { timeZone: CANCUN_TZ, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso)).replace(/^24:/, '00:')
+}
+
+/**
+ * The events of the Cancún civil day `ymd`, in start order, from the primary
+ * calendar of the account with Calendar on. Recurring events arrive expanded
+ * (one row per instance). Throws GoogleError when there is no connection or
+ * Google refuses; the caller decides how silent to be.
+ */
+export async function eventosDelDia(ymd: string): Promise<EventoDia[]> {
+  const conn = await conexionActiva()
+  if (!conn) throw new GoogleError('no hay cuenta de Google conectada (Settings → Conexiones)')
+  const token = await accessToken(conn)
+  const q = new URLSearchParams({
+    timeMin: new Date(`${ymd}T00:00:00-05:00`).toISOString(),
+    timeMax: new Date(`${addDays(ymd, 1)}T00:00:00-05:00`).toISOString(),
+    singleEvents: 'true',
+    orderBy: 'startTime',
+    maxResults: '50',
+    timeZone: CANCUN_TZ,
+  })
+  const res = await fetch(`${BASE}?${q.toString()}`, { cache: 'no-store', headers: { Authorization: `Bearer ${token}` } })
+  const json = await res.json().catch(() => null)
+  if (!res.ok) throw new GoogleError(json?.error?.message ?? `Calendar HTTP ${res.status}`)
+  const items = Array.isArray(json?.items) ? (json.items as Record<string, unknown>[]) : []
+  return items
+    .filter((e) => e.status !== 'cancelled')
+    .map((e) => {
+      const start = (e.start ?? {}) as { dateTime?: string; date?: string }
+      const end = (e.end ?? {}) as { dateTime?: string; date?: string }
+      const todoElDia = !start.dateTime
+      return {
+        id: String(e.id ?? ''),
+        titulo: String(e.summary ?? '(sin título)'),
+        hora: start.dateTime ? horaCancun(start.dateTime) : null,
+        fin: end.dateTime ? horaCancun(end.dateTime) : null,
+        todoElDia,
+        link: typeof e.htmlLink === 'string' ? e.htmlLink : null,
+        calendario: conn.email ?? null,
+      }
+    })
+    .filter((e) => e.id)
+}
+
 export async function actualizarEventoPago(eventId: string, p: PagoEvento): Promise<boolean> {
   const json = await llamar('PUT', `/${encodeURIComponent(eventId)}`, cuerpoPago(p))
   return json !== null

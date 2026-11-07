@@ -1,9 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Fase 9: the board lives at /hoy (the address the Telegram alarms link
-  // to); the root just sends you there.
+  // Fase 12: the root opens the Dashboard de vida. The board keeps its
+  // address (/hoy): the Telegram alarms link there.
   async redirects() {
-    return [{ source: '/', destination: '/hoy', permanent: false }]
+    return [{ source: '/', destination: '/resumen', permanent: false }]
   },
   async headers() {
     return [

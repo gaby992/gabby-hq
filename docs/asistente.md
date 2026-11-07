@@ -21,7 +21,9 @@ sección y **no se empieza una fase hasta validar la anterior**.
 | 6c | Correo: tres niveles por remitente (🔇 Silencio · 📋 Solo app · 🔔 Alerta), "Reaplicar reglas", aprender desde el bot ("el 5 es silencio"), "Reclasificar sin modelo", regla `^asunto` → Solo app, idioma por cuenta | ✅ Construida — pendiente de validar (correr el SQL 6c) |
 | 7 | De comandos a conversación: memoria, sugerencias, "organízame", personalidad | ✅ Construida — pendiente de validar |
 | 9 | Tablero por horizonte en /hoy (Hoy sí o sí · Mañana · Esta semana · Esperando · Después · Correos), arrastrar tarjetas, estado "esperando", alarma de las 8 reordenada | ✅ Construida — pendiente de validar (correr el SQL 9) |
-| 9b | Tablero: franja de KPIs, vista Calendario (semana / mes, pagos recurrentes, arrastrar a un día), badge "sin empresa" editable, "la 5 es de PD" | ✅ Construida — pendiente de validar |
+| 9b | Tablero: franja de KPIs, vista Calendario (semana / mes, pagos recurrentes, arrastrar a un día), badge "sin empresa" editable, "la 5 es de PD" | ✅ Validada |
+| 9c | El asistente habla: menú de botones, foto del tablero, resumen en líneas, preguntas narradas, chat 💬 en la web | ✅ Validada |
+| 12 | Dashboard de vida: pantalla Resumen (agenda con Google Calendar en lectura, prioridades, correos, notas, KPIs, "Resumen diario"), menú lateral blanco/azul, pantallas Calendario y Notas, alerta de correo en el idioma de la cuenta | ✅ Construida — pendiente de validar |
 
 ---
 
@@ -2918,6 +2920,164 @@ sin base de datos, con el loader `scripts/pruebas-loader.mjs`): los cuatro
 mensajes de producción de arriba están ahí, más las formas de pedir correos,
 lo que no lo es, el menú, el tablero y las preguntas naturales. Falla con
 código 1 si algo se rompe.
+
+---
+
+## 12. Fase 12 — Dashboard de vida (pantalla Resumen + menú lateral)
+
+**Idea.** Una sola página que reúne el día: la agenda por hora, las
+prioridades, los correos que piden respuesta, las notas "por dónde iba", los
+números del tablero y el estado de las conexiones. Es lo que el reel "5
+proyectos de Claude" llama *Dashboard de vida*; aquí ya existía casi todo —
+el tablero (fase 9), las narraciones (9c), el correo (6), Calendar (5) — y
+esta fase lo pone junto en la pantalla de entrada. El bot sigue siendo la
+puerta principal; esta pantalla es el vistazo.
+
+### 12a. Qué hace
+
+**A) Menú lateral blanco con acento azul** (`src/components/Sidebar.tsx`).
+Fijo a la izquierda en la compu, cajón bajo una barra blanca en el teléfono.
+El resto de la app conserva su tema oscuro. Entradas:
+
+```
+🏠 Resumen (/resumen)   🗂 Tablero (/hoy)   📅 Calendario (/calendario)
+📧 Correos (/correo)    📝 Notas (/notas)   ⚙️ Settings (/settings)
+Más: ☑️ Tasks · 📡 Radar · 🗃 Inbox IM          ↩ Sign out
+```
+
+La raíz (`/`) abre **Resumen**. `/hoy` conserva su dirección (las alarmas de
+Telegram enlazan ahí) y es la pantalla **Tablero**, con *Prioridad* (la
+matriz) y *Empresas* (los bloques con notas) como pestañas; **Calendario**
+es la vista de la fase 9b como pantalla propia (`/calendario`). Las dos son
+el mismo componente (`src/components/PantallaHoy.tsx`, con `modo`), así que
+arrastrar, el panel de edición y el chat 💬 funcionan igual en ambas. Un
+valor viejo `hoy.vista = calendario` guardado en el navegador cae al tablero.
+El título de la app pasa a «GabbyHQ · Dashboard de vida».
+
+**B) Pantalla Resumen** (`src/app/(app)/resumen/page.tsx`, datos de
+`GET /api/resumen` → `src/lib/asistente/resumen.ts`):
+
+- **Cabecera**: «Buenos días / tardes / noches, {nombre_persona} ☀️» + la
+  fecha larga, y el botón **📋 Resumen diario**: muestra en un panel el
+  MISMO texto de la alarma de las 8 (`buildManana`, sin etiquetas de
+  Telegram) con el botón **📲 Enviar a Telegram**, que lo manda al chat como
+  lista a demanda (`enviarLista(chatIdWeb(), 'manana')`, tipo `lista`, así
+  «la 3 lista» funciona sobre él en Telegram). Ruta `POST /api/resumen/diario`
+  (`{}` = ver, `{"enviar": true}` = enviar).
+- **Franja de KPIs** (🔥 Hoy sí o sí · 🔺 Vencidas · ⏳ Esperando · 📧
+  Correos), con la misma regla de columnas del tablero (`panoramaDe` +
+  `columnaCorreo`); cada número enlaza a su columna en `/hoy`.
+- **Agenda de hoy** (columna izquierda, orden por hora): tareas con hora de
+  hoy (▫️ o ★), pagos recurrentes que caen hoy (💳 a las 9:00, con su
+  monto) y los **eventos de hoy del Google Calendar** de la cuenta con
+  Calendar activo, **solo lectura** (📆, con enlace al evento). Calendar sigue
+  escribiendo solo a pedido (regla de la fase 5): aquí no se crea, mueve ni
+  borra nada. Los eventos que la propia app creó (el de una tarea o el de un
+  pago, por su `gcal_event_id`; las instancias recurrentes se reconocen por
+  el id base antes del `_`) no se repiten. Al final, **Sin hora**: las tareas
+  de hoy sin `due_time` y los eventos de todo el día. Si Google no responde
+  (sin conexión, token rechazado, caído) la sección simplemente no trae
+  eventos y una línea gris lo dice; nunca un error.
+- **Prioridades principales** (columna derecha): hasta 5, con checkbox =
+  completar (`POST /api/hoy` acción `completar`, lo mismo que «listo»). Es el
+  ranking de «¿qué sigue?» (`calcularQueSigue`: Ahora → Después → por
+  vencer esta semana), con el porqué en gris (hace 9 días · urgente ★ ·
+  vence 05/11).
+- **Correos que piden respuesta**: hasta 6 (`correosQueEsperan`: alta,
+  necesita respuesta, pedido de tarea), cada uno con los cuatro botones de
+  siempre (📨 Para Chelsea · 🙋 Lo hago yo · ➕ Tarea · 🗄 Archivar →
+  `PATCH /api/correo`) y el «hace…» en el idioma de su cuenta.
+- **📝 Por dónde iba**: la primera línea de cada nota viva, en el orden de
+  empresas, con su edad; enlace a Notas.
+- **Conexiones**: un chip por cuenta de Google (📅 Calendar / 📧 Correo) y
+  uno de Telegram, en gris si falta algo; solo se muestra el email y si está
+  activo, nunca tokens ni ids.
+- **Móvil**: una sola columna en este orden: KPIs → Agenda → Prioridades →
+  Correos → Notas.
+- El chat 💬 (9c-E) también está aquí; tras cada respuesta la página se
+  recarga.
+
+**C) Pantalla Notas** (`/notas`): la nota viva de cada empresa con el mismo
+editor del tablero (`CompanyNote`; el bot escribe la misma fila con «nota
+IM: …») y, bajo cada una, su historial (`notas_historial`, plegado).
+
+**D) Lectura de Calendar** (`eventosDelDia` en `src/lib/google/calendar.ts`):
+`GET …/calendars/primary/events?timeMin&timeMax&singleEvents=true&orderBy=startTime`
+sobre el día civil de Cancún, con el token de la conexión que tiene Calendar
+activo. El scope `calendar.events` ya permitía leer; no hubo que reconectar.
+
+**E) Fallo #1 (5 nov): la alerta individual de correo en el idioma de la cuenta.**
+La alerta de IM Chelsea seguía en español aunque la lista (9c-2) ya salía
+en inglés: el resumen y la razón los escribe el **clasificador**, y su
+prompt decía «RESUMEN: UNA línea en español» antes de la instrucción de
+idioma que iba al final — el modelo obedecía la primera. Ahora
+(`src/lib/correo/clasificar.ts`):
+
+1. La regla de idioma va **primero** en el prompt y las líneas RESUMEN y
+   RAZON nombran el idioma («en INGLÉS» para una cuenta `en`).
+2. Red de seguridad: si la cuenta es `en` y el resumen o la razón **parecen
+   español** (`pareceEspanol`: dos o más palabras funcionales del español),
+   una segunda llamada corta los traduce (8 s; si falla, queda como vino).
+3. La parte fija de la razón — la regla que disparó («alerta: tottatl.com»,
+   «regla VIP: …») — sale en el idioma de la cuenta (`razonRegla`: «alert:»,
+   «VIP rule:», «silence:», …). También el aviso «classifier unavailable».
+
+`npm run pruebas` comprueba el prompt en los dos idiomas, el detector con la
+alerta real del 5 nov y las razones de regla.
+
+### 12b. Lo que hay que hacer a mano
+
+Nada en Supabase ni en Vercel. Al desplegar, la raíz pasa a `/resumen`.
+Si al abrir Resumen la agenda no trae eventos de Calendar, revisar en
+Settings → Conexiones que una cuenta tenga 📅 Calendar activo; si Google
+pidió reconectar, «Desconectar» y «Conectar» de nuevo esa cuenta.
+
+### 12c. Env vars que agrega esta fase
+
+Ninguna.
+
+### 12d. Cómo probar que funciona
+
+1. Abrir `gabby-hq.vercel.app`: debe caer en Resumen con el menú blanco/azul
+   a la izquierda (en el teléfono, barra blanca con ☰).
+2. Crear un evento de prueba HOY en el Google Calendar de la cuenta conectada
+   (p. ej. «Prueba 4 pm») → recargar Resumen → aparece en Agenda con 📆 y
+   enlace; una tarea con hora de hoy y un pago que caiga hoy aparecen con ▫️/★
+   y 💳.
+3. Marcar el checkbox de una prioridad → desaparece y el KPI baja; en
+   Telegram «¿qué cerré hoy?» la nombra.
+4. «📋 Resumen diario» → el panel muestra el texto de la alarma de las 8;
+   «📲 Enviar a Telegram» → llega al bot como lista; «la 1 lista» funciona
+   sobre ella.
+5. Un correo con 🙋 Lo hago yo desde la tarjeta → crea la tarea y sale de la
+   lista.
+6. Menú: Tablero abre `/hoy` con las pestañas Tablero | Prioridad | Empresas;
+   Calendario abre `/calendario` con Semana | Mes; Notas permite editar y ver
+   el historial.
+7. Fallo #1: el siguiente correo VIP de IM Chelsea llega con resumen y razón
+   en inglés («alert: tottatl.com · …»).
+
+### 12e. Qué puede fallar y dónde verlo
+
+| Síntoma | Causa probable | Dónde verlo |
+| --- | --- | --- |
+| Agenda sin eventos y la línea «no pude leer Google Calendar» | Ninguna cuenta con 📅 activo, o token rechazado | Logs de Vercel `[resumen] calendar: …`; Settings → Conexiones |
+| Un evento sale dos veces | La tarea/pago lo creó pero `gcal_event_id` no coincide con el id base | Comparar `gcal_event_id` de la tarea con el id del evento |
+| «Resumen diario» tarda | `pulir` (LLM) hasta 8 s + Supabase | Igual que la alarma de las 8; el texto fijo sale si el modelo falla |
+| «Enviar a Telegram» da 400 | `ALLOWED_CHAT_IDS` vacío | Vercel → env vars |
+| Resumen de un correo de Chelsea sigue en español | El modelo ignoró el prompt y la traducción falló | Logs `[correo] traducir resumen: …`; `cuentas_correo.idioma` de la cuenta |
+
+### 12f. Versión curso (Nivel 1, sin código)
+
+Lo mismo dentro de un **Proyecto de Claude** o un **Gem de Gemini**: en las
+instrucciones del proyecto va el Prompt Maestro y una sección «Mi día» con
+tres listas que la alumna mantiene a mano (pendientes con fecha, pagos del
+mes, personas a las que espera). Cada mañana escribe «dashboard» y el
+asistente responde con la misma estructura de esta pantalla: KPIs en una
+línea, agenda de hoy por hora, 3–5 prioridades, a quién espera y una
+recomendación 👉. Lo que aquí hace Supabase lo hace la memoria del proyecto;
+lo que aquí hace Google Calendar lo hace ella pegando su agenda del día (o
+una captura). Sin alarmas ni correo: eso es el Nivel 2.
 
 ---
 

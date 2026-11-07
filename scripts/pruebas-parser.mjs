@@ -170,6 +170,19 @@ ok('¿qué cerré ayer? → pregunta libre', parse('¿qué cerré ayer?').kind =
   ok('9c-2 resumen de correos sin asuntos', !textoEn.includes('Contrato de servicios') && !es.join(' ').includes('Contrato de servicios'))
 }
 
+// ── Fase 12 (fallo #1): the classifier's summary and reason come out in the account's language ──
+{
+  const { systemPromptClasificador, pareceEspanol, razonRegla } = await import('@/lib/correo/clasificar')
+  const en = systemPromptClasificador('en')
+  const es = systemPromptClasificador('es')
+  ok('fase 12: prompt en → RESUMEN y RAZON en INGLÉS', /RESUMEN: UNA línea en INGLÉS/.test(en) && /RAZON: una frase corta en INGLÉS/.test(en) && !/en español/.test(en), en.slice(0, 400))
+  ok('fase 12: prompt en → la regla de idioma va primero', en.split('\n')[1].startsWith('IDIOMA:'), en.split('\n')[1])
+  ok('fase 12: prompt es → RESUMEN en español', /RESUMEN: UNA línea en español/.test(es) && !/IDIOMA:/.test(es))
+  ok('fase 12: pareceEspanol detecta la alerta real', pareceEspanol('Andrew confirma que el chef profile está listo y que Chelsea enviará pronto la imagen redimensionada.'))
+  ok('fase 12: pareceEspanol deja pasar inglés', !pareceEspanol('Andrew confirms the chef profile is ready and Chelsea will send the resized image soon.'))
+  ok('fase 12: razón de regla en inglés', razonRegla('alerta', 'en') === 'alert' && razonRegla('vip', 'en') === 'VIP rule' && razonRegla('alerta', 'es') === 'alerta')
+}
+
 if (fallos > 0) {
   console.error(`\n${fallos} prueba(s) fallaron`)
   process.exit(1)
