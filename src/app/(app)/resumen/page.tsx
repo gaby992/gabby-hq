@@ -37,7 +37,7 @@ function Empresa({ empresa }: { empresa: { name: string; color: string } | null 
 /** A white card of the light palette (the reference's panels). */
 function Tarjeta({ titulo, children, accion, className = '' }: { titulo: string; children: React.ReactNode; accion?: React.ReactNode; className?: string }) {
   return (
-    <section className={`rounded-xl shadow-sm ${className}`} style={{ backgroundColor: CLARO.tarjeta, border: `1px solid ${CLARO.borde}` }}>
+    <section className={`rounded-xl ${className}`} style={{ backgroundColor: CLARO.tarjeta, border: `1px solid ${CLARO.borde}` }}>
       <header className="flex items-center justify-between gap-2 px-5 pt-4 pb-2">
         <h2 className="text-[13px] font-semibold" style={{ color: CLARO.texto }}>{titulo}</h2>
         {accion}
@@ -137,11 +137,11 @@ export default function ResumenPage() {
   }
 
   if (!datos && !error) return <div className="text-sm py-8 text-center" style={{ color: CLARO.textoSuave }}>Loading...</div>
-  if (!datos) return <p className="text-xs text-red-500">No se pudo cargar: {error}</p>
+  if (!datos) return <p className="text-xs text-red-400">No se pudo cargar: {error}</p>
 
   const kpis = [
-    { emoji: '🔥', label: 'Hoy sí o sí', n: datos.kpis.hoy, color: '#E5484D', href: '/hoy#col-hoy' },
-    { emoji: '🔺', label: 'Vencidas', n: datos.kpis.vencidas, color: '#E5484D', href: '/hoy#col-hoy' },
+    { emoji: '🔥', label: 'Hoy sí o sí', n: datos.kpis.hoy, color: '#f87171', href: '/hoy#col-hoy' },
+    { emoji: '🔺', label: 'Vencidas', n: datos.kpis.vencidas, color: '#f87171', href: '/hoy#col-hoy' },
     { emoji: '⏳', label: 'Esperando', n: datos.kpis.esperando, color: CLARO.acento, href: '/hoy#col-esperando' },
     { emoji: '📧', label: 'Correos', n: datos.kpis.correos, color: '#1D9E75', href: '/hoy#col-correos' },
   ]
@@ -174,22 +174,20 @@ export default function ResumenPage() {
           onClick={() => void completar(p.id)}
           disabled={busy}
           title="Completar"
-          className="mt-0.5 flex-shrink-0 w-[18px] h-[18px] rounded-[5px] border-2 transition-colors disabled:opacity-40 hover:bg-[#EEEBFF]"
-          style={{ borderColor: busy ? CLARO.acento : '#C9C7DD', backgroundColor: busy ? CLARO.acento : 'transparent' }}
+          className="mt-0.5 flex-shrink-0 w-[18px] h-[18px] rounded-[5px] border-2 transition-colors disabled:opacity-40 hover:bg-[#262626]"
+          style={{ borderColor: busy ? CLARO.acento : '#555555', backgroundColor: busy ? CLARO.acento : 'transparent' }}
         />
         <div className={`min-w-0 flex-1 ${busy ? 'opacity-50' : ''}`}>
           <p className="text-[13px] leading-5" style={{ color: CLARO.texto }}>{p.text}</p>
           <div className="flex items-center gap-1.5 mt-0.5">
             <Empresa empresa={p.empresa} />
-            {p.importante && <span className="text-[10px] text-[#D9A400]">★</span>}
+            {p.importante && <span className="text-[10px] text-[#EF9F27]">★</span>}
             {p.porque && <span className="text-[10px]" style={{ color: CLARO.textoSuave }}>{p.porque}</span>}
           </div>
         </div>
       </li>
     )
   }
-
-  const divisor = { borderColor: CLARO.borde }
 
   return (
     <div className="space-y-5">
@@ -204,22 +202,22 @@ export default function ResumenPage() {
         <button
           onClick={() => (diario === null ? void pedirDiario(false) : setDiario(null))}
           disabled={diarioCargando}
-          className="px-4 py-2 text-[13px] font-semibold rounded-lg text-white shadow-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
+          className="px-4 py-2 text-[13px] font-semibold rounded-lg text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
           style={{ backgroundColor: CLARO.acento }}
         >
           {diarioCargando ? 'Armando…' : diario === null ? 'Resumen diario' : 'Cerrar resumen'}
         </button>
       </div>
 
-      {(error || mensaje) && <p className={`text-xs ${error ? 'text-red-500' : 'text-emerald-600'}`}>{error ?? mensaje}</p>}
+      {(error || mensaje) && <p className={`text-xs ${error ? 'text-red-400' : 'text-emerald-400'}`}>{error ?? mensaje}</p>}
 
       {/* ── Resumen diario: the same text the 8:00 alarm sends, on demand ── */}
       {diario !== null && (
-        <section className="rounded-xl px-5 py-4 space-y-3 shadow-sm" style={{ backgroundColor: CLARO.acentoSuave, border: `1px solid #D9D3FF` }}>
+        <section className="rounded-xl px-5 py-4 space-y-3 shadow-sm" style={{ backgroundColor: CLARO.acentoSuave, border: `1px solid ${CLARO.acento}66` }}>
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-[13px] font-semibold" style={{ color: CLARO.acento }}>Resumen diario</h2>
             <div className="flex items-center gap-2">
-              {diarioEnviado && <span className="text-[11px] text-emerald-600">{diarioEnviado}</span>}
+              {diarioEnviado && <span className="text-[11px] text-emerald-400">{diarioEnviado}</span>}
               <button
                 onClick={() => void pedirDiario(true)}
                 disabled={diarioCargando}
@@ -237,7 +235,7 @@ export default function ResumenPage() {
       {/* ── KPIs ── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {kpis.map((k) => (
-          <Link key={k.label} href={k.href} className="rounded-xl px-4 py-3 shadow-sm hover:shadow transition-shadow" style={{ backgroundColor: CLARO.tarjeta, border: `1px solid ${CLARO.borde}` }}>
+          <Link key={k.label} href={k.href} className="rounded-xl px-4 py-3 hover:border-[#555555] transition-colors" style={{ backgroundColor: CLARO.tarjeta, border: `1px solid ${CLARO.borde}` }}>
             <p className="text-[11px] font-medium" style={{ color: CLARO.textoSuave }}>{k.emoji} {k.label}</p>
             <p className="text-2xl font-bold leading-tight" style={{ color: k.n === 0 ? CLARO.textoApagado : k.color }}>{k.n}</p>
           </Link>
@@ -251,11 +249,11 @@ export default function ResumenPage() {
             <p className="text-sm" style={{ color: CLARO.textoApagado }}>Nada con hora hoy{datos.calendar_fallo ? ' (no pude leer Google Calendar)' : ''}.</p>
           ) : (
             <>
-              <ul className="divide-y" style={divisor}>{datos.agenda.map(renderItem)}</ul>
+              <ul className="divide-y divide-[#2a2a2a]">{datos.agenda.map(renderItem)}</ul>
               {datos.sin_hora.length > 0 && (
                 <>
-                  <p className="mt-2 pt-2 border-t text-[10px] uppercase tracking-wide" style={{ ...divisor, color: CLARO.textoApagado }}>Sin hora</p>
-                  <ul className="divide-y" style={divisor}>{datos.sin_hora.map(renderItem)}</ul>
+                  <p className="mt-2 pt-2 border-t border-[#2a2a2a] text-[10px] uppercase tracking-wide" style={{ color: CLARO.textoApagado }}>Sin hora</p>
+                  <ul className="divide-y divide-[#2a2a2a]">{datos.sin_hora.map(renderItem)}</ul>
                 </>
               )}
               {datos.calendar_fallo && <p className="mt-2 text-[11px]" style={{ color: CLARO.textoApagado }}>No pude leer Google Calendar ahora; la agenda muestra solo tareas y pagos.</p>}
@@ -267,7 +265,7 @@ export default function ResumenPage() {
           {datos.prioridades.length === 0 ? (
             <p className="text-sm" style={{ color: CLARO.textoApagado }}>Nada vencido ni urgente 🎉</p>
           ) : (
-            <ul className="divide-y" style={divisor}>{datos.prioridades.map(renderPrioridad)}</ul>
+            <ul className="divide-y divide-[#2a2a2a]">{datos.prioridades.map(renderPrioridad)}</ul>
           )}
         </Tarjeta>
       </div>
@@ -278,7 +276,7 @@ export default function ResumenPage() {
           {datos.correos.length === 0 ? (
             <p className="text-sm" style={{ color: CLARO.textoApagado }}>Nadie espera respuesta ✨</p>
           ) : (
-            <ul className="divide-y" style={divisor}>
+            <ul className="divide-y divide-[#2a2a2a]">
               {datos.correos.map((c) => {
                 const busy = ocupadas.has(c.id)
                 const u = c.urgencia ?? 'media'
@@ -298,8 +296,8 @@ export default function ResumenPage() {
                             onClick={() => void decidirCorreo(c, a)}
                             disabled={busy}
                             title={CORREO_ACCION_LABELS[a]}
-                            className="w-7 h-7 text-[12px] rounded-md disabled:opacity-40 transition-colors hover:bg-[#EEEBFF]"
-                            style={{ backgroundColor: '#F4F5FA', border: `1px solid ${CLARO.borde}` }}
+                            className="w-7 h-7 text-[12px] rounded-md disabled:opacity-40 transition-colors hover:bg-[#262626]"
+                            style={{ backgroundColor: CLARO.hover, border: `1px solid ${CLARO.borde}` }}
                           >
                             {ICONO_ACCION[a]}
                           </button>
@@ -340,7 +338,7 @@ export default function ResumenPage() {
             <span
               key={c.email}
               className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs"
-              style={{ border: `1px solid ${CLARO.borde}`, color: c.activa ? CLARO.texto : CLARO.textoApagado, backgroundColor: '#FAFAFD' }}
+              style={{ border: `1px solid ${CLARO.borde}`, color: c.activa ? CLARO.texto : CLARO.textoApagado, backgroundColor: CLARO.chip }}
               title={c.email}
             >
               <span className="text-base leading-none">{c.calendar && c.correo ? '📅✉️' : c.calendar ? '📅' : c.correo ? '✉️' : '○'}</span>
@@ -350,7 +348,7 @@ export default function ResumenPage() {
               </span>
             </span>
           ))}
-          <span className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs" style={{ border: `1px solid ${CLARO.borde}`, color: datos.conexiones.telegram ? CLARO.texto : CLARO.textoApagado, backgroundColor: '#FAFAFD' }}>
+          <span className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs" style={{ border: `1px solid ${CLARO.borde}`, color: datos.conexiones.telegram ? CLARO.texto : CLARO.textoApagado, backgroundColor: CLARO.chip }}>
             <span className="text-base leading-none">📲</span>
             <span>
               <span className="block font-medium leading-tight">Telegram</span>
