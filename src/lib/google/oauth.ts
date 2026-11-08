@@ -207,6 +207,15 @@ export interface ErrorGoogleExplicado {
   texto: string
   /** True when the fix is Settings → Conexiones → Reconectar. */
   reconectar: boolean
+  /** Ajuste 14a: when the fix is somewhere else (the Google console), the link that opens it. */
+  url?: string
+  /** What the button that opens `url` should say. */
+  urlTexto?: string
+}
+
+/** The console link Google puts inside its own "API not enabled" message. */
+function urlDeGoogle(m: string): string | undefined {
+  return m.match(/https:\/\/console\.(?:developers|cloud)\.google\.com\/[^\s)]+/)?.[0]?.replace(/[.,]$/, '')
 }
 
 export function urlConexiones(): string {
@@ -218,6 +227,16 @@ export function explicarErrorGoogle(err: unknown, email?: string | null): ErrorG
   const quien = email ? ` de ${email}` : ''
   if (/no hay cuenta de google conectada/i.test(m)) {
     return { texto: 'No tengo ninguna cuenta de Google con Calendar activo. Conéctala en Settings → Conexiones y márcale Calendar.', reconectar: true }
+  }
+  // Ajuste 14a (7 nov): el proyecto de Google es nuevo y la API de Calendar
+  // nunca se prendió. No es un permiso: no sirve reconectar.
+  if (/has not been used in project|accessNotConfigured|SERVICE_DISABLED|api .{0,30}(?:is )?disabled/i.test(m)) {
+    return {
+      texto: 'La API de Google Calendar no está activada en tu proyecto de Google. Hay que prenderla una sola vez (entra con gabrielarangel169, dale Habilitar y espera 2 minutos). No es un problema de permisos: reconectar no lo arregla.',
+      reconectar: false,
+      url: urlDeGoogle(m) ?? 'https://console.cloud.google.com/apis/library/calendar-json.googleapis.com',
+      urlTexto: '🔛 Activar Calendar API',
+    }
   }
   if (/unauthorized_client|^unauthorized$|\bunauthorized\b/i.test(m)) {
     return { texto: `Google ya no acepta el permiso guardado${quien}: se dio con una configuración anterior de la app. Reconecta la cuenta y vuelve a pedírmelo.`, reconectar: true }
@@ -231,13 +250,19 @@ export function explicarErrorGoogle(err: unknown, email?: string | null): ErrorG
   if (/faltan GOOGLE_CLIENT_ID/i.test(m)) {
     return { texto: 'Falta la configuración de Google en Vercel (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET o APP_ENCRYPTION_KEY).', reconectar: false }
   }
-  return { texto: `Google Calendar no respondió bien (${m}). Si se repite, reconecta la cuenta.`, reconectar: false }
+  // Lo que no sabemos explicar va corto: una línea, no el párrafo de Google.
+  const corto = m.split(/(?<=\.)\s/)[0].replace(/https?:\/\/\S+/g, '').trim().slice(0, 140)
+  return { texto: `Google Calendar no respondió bien${quien ? ` para la cuenta${quien}` : ''}: ${corto || m.slice(0, 140)}. Si se repite, reconecta la cuenta.`, reconectar: false }
 }
 
 /** The warning line the bot shows when Calendar failed, with the fix as a link. */
 export function avisoCalendar(err: unknown, email?: string | null): string {
   const e = explicarErrorGoogle(err, email)
-  const link = e.reconectar ? ` <a href="${urlConexiones()}">🔗 Reconectar Google</a>` : ''
+  const link = e.url
+    ? ` <a href="${e.url}">${e.urlTexto ?? 'abrir'}</a>`
+    : e.reconectar
+      ? ` <a href="${urlConexiones()}">🔗 Reconectar Google</a>`
+      : ''
   return `⚠️ No pude ponerlo en Calendar. ${e.texto}${link}`
 }
 
@@ -258,7 +283,7 @@ export async function avisosConexiones(): Promise<string[]> {
         await accessToken(conn)
       } catch (err) {
         const e = explicarErrorGoogle(err, conn.email)
-        out.push(`🔌 ${e.texto}${e.reconectar ? ` <a href="${urlConexiones()}">Reconectar</a>` : ''}`)
+        out.push(`🔌 ${e.texto}${e.url ? ` <a href="${e.url}">${e.urlTexto ?? 'abrir'}</a>` : e.reconectar ? ` <a href="${urlConexiones()}">Reconectar</a>` : ''}`)
       }
     }
     return out

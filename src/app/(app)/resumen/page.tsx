@@ -251,7 +251,9 @@ export default function ResumenPage() {
               {datos.calendar_fallo && (
                 <p className="mt-2 text-[11px] text-amber-400">
                   ⚠️ {datos.calendar_error?.texto ?? 'No pude leer Google Calendar ahora.'}
-                  {datos.calendar_error?.reconectar && <> <Link href="/settings/conexiones" className="underline">Reconectar</Link></>}
+                  {datos.calendar_error?.url
+                    ? <> <a href={datos.calendar_error.url} target="_blank" rel="noreferrer" className="underline">{datos.calendar_error.urlTexto ?? 'abrir'}</a></>
+                    : datos.calendar_error?.reconectar ? <> <Link href="/settings/conexiones" className="underline">Reconectar</Link></> : null}
                 </p>
               )}
             </>
@@ -267,7 +269,9 @@ export default function ResumenPage() {
               {datos.calendar_fallo && (
                 <p className="mt-2 text-[11px] text-amber-400">
                   ⚠️ {datos.calendar_error?.texto ?? 'No pude leer Google Calendar ahora; la agenda muestra solo tareas y pagos.'}
-                  {datos.calendar_error?.reconectar && <> <Link href="/settings/conexiones" className="underline">Reconectar</Link></>}
+                  {datos.calendar_error?.url
+                    ? <> <a href={datos.calendar_error.url} target="_blank" rel="noreferrer" className="underline">{datos.calendar_error.urlTexto ?? 'abrir'}</a></>
+                    : datos.calendar_error?.reconectar ? <> <Link href="/settings/conexiones" className="underline">Reconectar</Link></> : null}
                 </p>
               )}
             </>

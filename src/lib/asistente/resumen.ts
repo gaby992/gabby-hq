@@ -62,7 +62,7 @@ export interface Resumen {
   /** True when the connected calendar could not be read (the section is simply shorter). */
   calendar_fallo: boolean
   /** Fase 12b: why, in plain words, and whether Reconectar fixes it. */
-  calendar_error: { texto: string; reconectar: boolean } | null
+  calendar_error: { texto: string; reconectar: boolean; url?: string; urlTexto?: string } | null
   prioridades: Prioridad[]
   correos: CorreoResumen[]
   notas: { company_id: string; empresa: string; color: string; nota: string; updated_at: string }[]
@@ -167,7 +167,7 @@ export async function cargarResumen(today: string = cancunYmd()): Promise<Resume
     })
   }
   let calendarFallo = false
-  let calendarError: { texto: string; reconectar: boolean } | null = null
+  let calendarError: Resumen['calendar_error'] = null
   if (googleConfigurado()) {
     try {
       const eventos: EventoDia[] = await eventosDelDia(today)

@@ -207,6 +207,9 @@ ok('¿qué cerré ayer? → pregunta libre', parse('¿qué cerré ayer?').kind =
   ok('12b: describirRepeticion', describirRepeticion({ cada: 'semana', dias: ['JU'], hasta: '2026-12-01' }, '2026-11-12') === 'los jueves hasta el 1 de dic' && describirRepeticion({ cada: 'semana', dias: ['SA'], veces: 8 }, '2026-11-14') === 'los sábados, 8 veces' && describirRepeticion({ cada: 'semana', dias: ['VI'] }, '2026-11-13') === 'los viernes, hasta que avises', describirRepeticion({ cada: 'semana', dias: ['JU'], hasta: '2026-12-01' }, '2026-11-12'))
   const u = explicarErrorGoogle(new Error('Unauthorized'), 'gabrielarangel169@gmail.com')
   ok('12b: "Unauthorized" explicado con reconectar', u.reconectar && /otra configuración|Reconecta/.test(u.texto) && !/unauthorized/i.test(u.texto), u.texto)
+  const api = explicarErrorGoogle(new Error('Google Calendar API has not been used in project 158862810174 before or it is disabled. Enable it by visiting https://console.developers.google.com/apis/api/calendar-json.googleapis.com/overview?project=158862810174 then retry.'))
+  ok('14a: API apagada = activar, no reconectar', !api.reconectar && /no está activada/.test(api.texto) && api.url?.includes('calendar-json.googleapis.com'), `${api.texto} · ${api.url}`)
+  ok('14a: el error raro sale corto y sin URL', !/https?:/.test(explicarErrorGoogle(new Error('Something weird happened at https://x.y/z and more text')).texto))
   const g = explicarErrorGoogle(new Error('invalid_grant'))
   ok('12b: invalid_grant = caducó', g.reconectar && /caducó/.test(g.texto), g.texto)
 }
