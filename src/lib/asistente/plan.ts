@@ -26,7 +26,10 @@ import { enviarTablero } from './tablero-imagen'
 import { enviarQueSigue } from './que-sigue'
 import { dejarDeEsperar, enviarListaEsperando, moverTarea } from './esperando'
 import { confirmacionAlarma, crearRecordatorio, instanteDe } from './recordatorios'
-import { confirmacion, guardarTarea } from './tareas'
+import { cargarEmpresas, confirmacion, guardarTarea } from './tareas'
+import { sinHtml } from './html'
+import { responderDeDocumentos } from '@/lib/documentos/buscar'
+import { recibirNota } from '@/lib/documentos/entrada'
 import { agregarACalendar, cuandoDe } from '@/lib/google/sync'
 import { crearEventoLibre, describirRepeticion, primeraFechaEn } from '@/lib/google/calendar'
 import { avisoCalendar } from '@/lib/google/oauth'
@@ -228,7 +231,7 @@ function emparejarCrear(acciones: AccionResuelta[], ctx: ContextoInterprete): Ac
 const ICONO: Record<AccionLlm['tipo'], string> = {
   completar: '✅', cancelar: '🗑', borrar: '❌', posponer: '➡️', renombrar: '✏️', cambiar: '✏️', crear: '➕',
   nota_empresa: '📝', nota_tarea: '📎', alarma: '⏰', pregunta: '❓', que_sigue: '🎯', lista: '📋', calendar: '📅',
-  pagos_listar: '💳', dividir: '🪜', siguiente_paso: '🪜', correo: '📧', esperar: '⏳', esperando: '⏳', tablero: '🖥', despues: '📦', correos_lista: '📧', evento: '📆', desconocido: '🤷',
+  pagos_listar: '💳', dividir: '🪜', siguiente_paso: '🪜', correo: '📧', esperar: '⏳', esperando: '⏳', tablero: '🖥', despues: '📦', correos_lista: '📧', evento: '📆', documentos: '📂', documento_nota: '🧠', desconocido: '🤷',
 }
 
 function fechaDicha(ymd: string, today: string): string {
@@ -295,6 +298,8 @@ function frase(a: AccionResuelta, today: string, conTarea: boolean): string {
     case 'tablero': return 'Mandar la foto del tablero'
     case 'correos_lista': return `Mandar los correos${a.cuenta ? ` de ${a.cuenta}` : ''}${a.importante ? ' (lo importante)' : ''}`
     case 'despues': return `Pasar a Después (sin fecha)${tt}`
+    case 'documentos': return `Buscar en el archivero «${corto(a.texto, 60)}»`
+    case 'documento_nota': return `Archivar el dato «${corto(a.texto, 60)}»`
     case 'desconocido': return `No entendí «${corto(a.texto, 60)}»`
   }
 }
@@ -710,6 +715,16 @@ export async function ejecutarUna(chatId: number, a: AccionResuelta): Promise<st
       if (a.cuenta && hits.length !== 1) return hits.length === 0 ? `No tengo una cuenta de correo «${a.cuenta}».` : `«${a.cuenta}» puede ser ${hits.map((c) => c.nombre).join(' o ')}: dime cuál.`
       await enviarListaCorreos(chatId, hits[0] ?? null, { importante: a.importante === true })
       return '📧 (correos enviados arriba)'
+    }
+    case 'documentos': {
+      // Fase 14: la respuesta trae su enlace firmado; aquí va en texto plano
+      // porque una línea de plan se manda sin HTML.
+      const r = await responderDeDocumentos(a.texto)
+      return sinHtml(r.texto)
+    }
+    case 'documento_nota': {
+      const s = await recibirNota(chatId, a.texto, await cargarEmpresas())
+      return sinHtml(s.texto)
     }
     case 'desconocido':
       return `🤷 No entendí «${corto(a.texto, 60)}»`

@@ -72,6 +72,18 @@ Es lo mismo que manda el bot con `/ayuda todo`. La guía técnica está en [asis
 - `el correo de Andrew lo hago yo · el 15 para Chelsea · archiva los de marketing de hoy` — decide correos sin botones: lo hago yo / tarea crean la tarea con el Ref del correo; archivar lo saca del inbox de Gmail; varios a la vez pasan por el plan. Un correo respondido o pasado a Chelsea conserva [Lo hago yo] 48 h en su alerta
 - `me da flojera armar el equipo de marketing` — la parte en 3-5 pasos (subtareas) y te dice solo el primero; "siguiente paso" avanza
 
+## 📂 Archivero (segundo cerebro)
+
+- `(le mandas un PDF o una foto)` — lo guarda en privado, lo lee y te propone la ficha (título, categoría, empresa, vencimiento, monto) con 💾 Guardar y ✏️ Corregir. Nada se archiva hasta que tocas Guardar
+- `(varias fotos seguidas)` — te pregunta si son páginas del mismo documento y las junta en uno solo
+- `(una versión nueva de algo que ya tienes)` — te pregunta si reemplaza a la anterior; la vieja queda en el historial, no se borra, y el vencimiento que cuenta es el nuevo
+- `el título es Póliza del carro 2027` — después de ✏️ Corregir: cambia solo eso y te muestra la ficha otra vez. También «vence el 15 de marzo», «es de IM», «categoría seguros», «quítale el vencimiento»
+- `guarda: el seguro del carro es con GNP, se paga en marzo` — un dato suelto, sin archivo: entra al archivero y sale en las búsquedas igual que un documento
+- `¿con quién tengo el seguro del carro?` — te contesta con el dato exacto y el enlace para abrir el documento (el enlace caduca en una hora)
+- `¿cuánto pago de alquiler? · ¿cuándo vence mi pasaporte?` — lo mismo: busca en el texto de los PDF, no solo en los títulos
+- `mándame el contrato de Bonampak` — te manda ese documento con su enlace
+- `(archivo de más de 20 MB)` — Telegram no deja bajarlo: te lo dice y te manda a subirlo en GabbyHQ → Archivos
+
 ## ℹ️ Otros
 
 - `/ayuda` — el resumen corto; "/ayuda todo" manda esta guía completa

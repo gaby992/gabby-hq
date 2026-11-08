@@ -25,6 +25,7 @@ const PRINCIPAL: Item[] = [
   { href: '/calendario', label: 'Calendario', icon: '▣', activo: (p) => p === '/calendario' },
   { href: '/correo', label: 'Correos', icon: '✉', activo: (p) => p.startsWith('/correo') },
   { href: '/notas', label: 'Notas', icon: '✎', activo: (p) => p === '/notas' },
+  { href: '/archivos', label: 'Archivos', icon: '🗂', activo: (p) => p === '/archivos' },
   { href: '/settings', label: 'Settings', icon: '⚙', activo: (p) => p.startsWith('/settings') },
 ]
 

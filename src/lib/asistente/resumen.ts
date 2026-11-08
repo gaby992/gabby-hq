@@ -20,6 +20,7 @@ import { cargarPanorama, type Panorama } from './narracion'
 import { listarPagos } from './pagos'
 import { calcularQueSigue } from './que-sigue'
 import { allowedChatIds } from './telegram'
+import { chipsVencimientos, type ChipVencimiento } from '@/lib/documentos/vencimientos'
 
 /** One line of the agenda. Sorted by `hora`; the ones without an hour go to "Sin hora". */
 export interface ItemAgenda {
@@ -65,6 +66,8 @@ export interface Resumen {
   prioridades: Prioridad[]
   correos: CorreoResumen[]
   notas: { company_id: string; empresa: string; color: string; nota: string; updated_at: string }[]
+  /** Fase 14: lo que vence en los próximos 45 días (contratos, pólizas, identificaciones). */
+  vencimientos: ChipVencimiento[]
   conexiones: {
     google_configurado: boolean
     cuentas: { email: string; calendar: boolean; correo: boolean; activa: boolean }[]
@@ -108,7 +111,7 @@ function kpisDe(p: Panorama): Resumen['kpis'] {
 
 export async function cargarResumen(today: string = cancunYmd()): Promise<Resumen> {
   const db = createServerClient()
-  const [cfg, panorama, pagos, queSigue, cuentas, correosRaw, conexionesRes] = await Promise.all([
+  const [cfg, panorama, pagos, queSigue, cuentas, correosRaw, conexionesRes, vencimientos] = await Promise.all([
     cargarConfig(),
     cargarPanorama(today),
     listarPagos().catch((err) => {
@@ -122,6 +125,8 @@ export async function cargarResumen(today: string = cancunYmd()): Promise<Resume
     cargarCuentas().catch(() => []),
     correosQueEsperan({ max: MAX_CORREOS }),
     db.from('conexiones_google').select('email, activa, usa_calendar, usa_gmail').order('conectado_en', { ascending: false }),
+    // Fase 14: sin el SQL de la fase 14 esto vuelve vacío y el Resumen sigue igual.
+    chipsVencimientos(today),
   ])
   const { companies, tasks, notas } = panorama
 
@@ -231,6 +236,7 @@ export async function cargarResumen(today: string = cancunYmd()): Promise<Resume
     prioridades,
     correos,
     notas: notasOut,
+    vencimientos,
     conexiones: {
       google_configurado: googleConfigurado(),
       cuentas: conexiones,
@@ -240,12 +246,5 @@ export async function cargarResumen(today: string = cancunYmd()): Promise<Resume
   }
 }
 
-/** Telegram HTML → the same text without tags, for the web. */
-export function sinHtml(html: string): string {
-  return html
-    .replace(/<a href="([^"]*)">([^<]*)<\/a>/g, '$2 ($1)')
-    .replace(/<\/?(?:b|i|code|s)>/g, '')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&amp;/g, '&')
-}
+/** Telegram HTML → the same text without tags, for the web (fase 14: shared in html.ts). */
+export { sinHtml } from './html'

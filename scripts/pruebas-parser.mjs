@@ -211,6 +211,77 @@ ok('¿qué cerré ayer? → pregunta libre', parse('¿qué cerré ayer?').kind =
   ok('12b: invalid_grant = caducó', g.reconectar && /caducó/.test(g.texto), g.texto)
 }
 
+// ── Fase 14: segundo cerebro (documentos) ────────────────────────────────
+{
+  const { normalizarCategoria, montoTexto } = await import('@/lib/documentos/tipos')
+  const { numero, clavesDe, parecido, limpiarPropuesta } = await import('@/lib/documentos/ficha')
+  const { consultaDe, pareceDeDocumentos } = await import('@/lib/documentos/buscar')
+  const { leerNotaCerebro } = await import('@/lib/documentos/entrada')
+  const { cuandoVence, toca } = await import('@/lib/documentos/vencimientos')
+  const { rutaPara } = await import('@/lib/documentos/almacen')
+  const { validarAcciones } = await import('@/lib/asistente/interprete')
+
+  ok('14: categorías del modelo caen en las ocho',
+    normalizarCategoria('Seguros') === 'Seguros' &&
+    normalizarCategoria('seguro de auto') === 'Seguros' &&
+    normalizarCategoria('insurance') === 'Seguros' &&
+    normalizarCategoria('recibo de luz') === 'Facturas y recibos' &&
+    normalizarCategoria('lease') === 'Alquiler' &&
+    normalizarCategoria('pasaporte') === 'Documentos e IDs' &&
+    normalizarCategoria('cualquier cosa') === 'Otros')
+
+  ok('14: montos con cualquier formato',
+    numero('1,250.00') === 1250 &&
+    numero('$18.400,50') === 18400.5 &&
+    numero(' MXN 7 500 ') === 7500 &&
+    numero('sin monto') === null &&
+    numero(null) === null,
+    `${numero('1,250.00')} · ${numero('$18.400,50')} · ${numero(' MXN 7 500 ')}`)
+
+  ok('14: montoTexto', montoTexto(18400.5, 'MXN') === '$18,400.50 MXN' && montoTexto(null, 'MXN') === null)
+
+  ok('14: una renovación se reconoce por el título',
+    parecido('Póliza del carro GNP 2027', 'Póliza del carro GNP 2026') >= 0.5 &&
+    parecido('Recibo CFE octubre', 'Póliza del carro GNP 2026') < 0.5,
+    `${parecido('Póliza del carro GNP 2027', 'Póliza del carro GNP 2026')}`)
+  ok('14: las palabras de relleno no cuentan', !clavesDe('contrato de la nueva poliza').includes('contrato') && clavesDe('Seguro GNP carro').length === 3, JSON.stringify(clavesDe('contrato de la nueva poliza')))
+
+  ok('14: la pregunta se queda solo con lo buscable',
+    consultaDe('¿con quién tengo el seguro del carro?') === 'seguro carro' &&
+    consultaDe('¿cuánto pago de alquiler?') === 'alquiler',
+    `«${consultaDe('¿con quién tengo el seguro del carro?')}» · «${consultaDe('¿cuánto pago de alquiler?')}»`)
+  ok('14: huele a papeles', pareceDeDocumentos('¿cuándo vence mi pasaporte?') && pareceDeDocumentos('la póliza del carro') && !pareceDeDocumentos('¿qué tengo pendiente de IM?'))
+
+  ok('14: "guarda: …" es una nota del cerebro',
+    leerNotaCerebro('guarda: el seguro del carro es con GNP, se paga en marzo') === 'el seguro del carro es con GNP, se paga en marzo' &&
+    leerNotaCerebro('anota en el cerebro: la renta se paga el día 5') === 'la renta se paga el día 5' &&
+    leerNotaCerebro('guarda: listo') === null &&
+    leerNotaCerebro('llamar a Juan mañana') === null,
+    String(leerNotaCerebro('anota en el cerebro: la renta se paga el día 5')))
+
+  ok('14: avisos a 30 / 7 / 1 y todos los días si ya venció',
+    toca(30) && toca(7) && toca(1) && toca(0) && toca(-5) && !toca(29) && !toca(2))
+  ok('14: cómo se dice el vencimiento', cuandoVence(0) === 'hoy' && cuandoVence(1) === 'mañana' && cuandoVence(30) === 'en 30 días' && cuandoVence(-3) === 'hace 3 días')
+
+  ok('14: la ruta del archivo se limpia', /^2026\/11\/\d+-poliza-gnp\.pdf$/.test(rutaPara('Póliza GNP.pdf', '2026-11-07')), rutaPara('Póliza GNP.pdf', '2026-11-07'))
+
+  const p = limpiarPropuesta(
+    { titulo: 'Póliza del carro GNP 2026', categoria: 'seguro', empresa: 'Personal', vence: '2027-03-15', monto: '18,400.50', moneda: 'pesos', se_renueva: true },
+    { empresas: ['IM', 'PD', 'DATAVIA', 'Personal', 'Chelsea'], hoy: '2026-11-07' }
+  )
+  ok('14: la ficha queda limpia', p.categoria === 'Seguros' && p.empresa === 'Personal' && p.vence === '2027-03-15' && p.monto === 18400.5 && p.moneda === 'MXN' && p.se_renueva === true, JSON.stringify(p))
+  const sinEmpresa = limpiarPropuesta({ titulo: 'Acta', empresa: 'Acme Corp' }, { empresas: ['IM', 'PD'], hoy: '2026-11-07' })
+  ok('14: una empresa que no es suya se descarta', sinEmpresa.empresa === null, JSON.stringify(sinEmpresa))
+
+  const acc = validarAcciones({ acciones: [
+    { tipo: 'documentos', texto: '¿con quién tengo el seguro del carro?' },
+    { tipo: 'documento_nota', texto: 'la renta se paga el día 5' },
+    { tipo: 'documentos' },
+  ] })
+  ok('14: el intérprete distingue preguntar y archivar',
+    acc[0].tipo === 'documentos' && acc[1].tipo === 'documento_nota' && acc[2].tipo === 'desconocido', JSON.stringify(acc))
+}
+
 if (fallos > 0) {
   console.error(`\n${fallos} prueba(s) fallaron`)
   process.exit(1)

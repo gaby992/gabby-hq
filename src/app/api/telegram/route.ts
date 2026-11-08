@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { isAllowedChat } from '@/lib/asistente/telegram'
 import { conCanal } from '@/lib/asistente/canal'
-import { ERROR_GENERICO, handleCallback, handleText, handleVoice, reply, type TelegramAudio } from '@/lib/asistente/motor'
+import { ERROR_GENERICO, handleCallback, handleDocumento, handleText, handleVoice, reply, type TelegramAudio } from '@/lib/asistente/motor'
+import { fotoMasGrande } from '@/lib/documentos/entrada'
 
 // Telegram → here (webhook). The engine lives in src/lib/asistente/motor.ts
 // (fase 9c: the web chat shares it); this file only reads the update and
@@ -37,7 +38,13 @@ export async function POST(request: Request) {
   await conCanal({ tipo: 'telegram' }, async () => {
     try {
       const audio: TelegramAudio | undefined = message.voice ?? message.audio
-      if (audio?.file_id) {
+      // Fase 14 (segundo cerebro): a PDF or a photo goes to the archivero.
+      const foto = fotoMasGrande(message.photo ?? [])
+      if (message.document?.file_id) {
+        await handleDocumento(chatId, message.document, { caption: message.caption ?? null })
+      } else if (foto) {
+        await handleDocumento(chatId, foto, { caption: message.caption ?? null, esFoto: true })
+      } else if (audio?.file_id) {
         await handleVoice(chatId, audio)
       } else if (typeof message.text === 'string') {
         await handleText(chatId, message.text.trim(), null)

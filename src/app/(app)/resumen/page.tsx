@@ -344,6 +344,31 @@ export default function ResumenPage() {
         </Tarjeta>
       </div>
 
+      {/* ── Fase 14: lo que vence (contratos, pólizas, identificaciones) ── */}
+      {datos.vencimientos.length > 0 && (
+        <Tarjeta titulo="Por vencer" accion={<Enlace href="/archivos">Ver archivos</Enlace>}>
+          <div className="flex flex-wrap gap-2">
+            {datos.vencimientos.map((v) => {
+              const color = v.dias < 0 ? '#f87171' : v.dias <= 7 ? '#fb923c' : v.dias <= 30 ? '#facc15' : CLARO.textoSuave
+              return (
+                <Link
+                  key={v.id}
+                  href="/archivos"
+                  className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] hover:opacity-80 transition-opacity"
+                  style={{ backgroundColor: CLARO.chip, border: `1px solid ${color}55`, color: CLARO.texto }}
+                  title={`${v.categoria} · vence ${v.vence}`}
+                >
+                  <span>{v.emoji}</span>
+                  <span className="max-w-[220px] truncate">{v.titulo}</span>
+                  <span style={{ color }}>{v.dias < 0 ? `venció ${v.cuando}` : `vence ${v.cuando}`}</span>
+                  {v.monto && <span style={{ color: CLARO.textoApagado }}>{v.monto}</span>}
+                </Link>
+              )
+            })}
+          </div>
+        </Tarjeta>
+      )}
+
       {/* ── Herramientas conectadas ── */}
       <Tarjeta titulo="Herramientas conectadas" accion={<Enlace href="/settings/conexiones">+ Agregar</Enlace>}>
         <div className="flex flex-wrap gap-2">

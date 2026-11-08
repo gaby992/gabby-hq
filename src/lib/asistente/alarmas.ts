@@ -21,6 +21,9 @@ import { mensajeError } from '@/lib/errores'
 import { cargarPanorama, resumenManana, resumenTarde } from './narracion'
 import { enviarTablero } from './tablero-imagen'
 import { tecladoMenu } from './menu'
+import { avisoVencimientos, tituloRenovar } from '@/lib/documentos/vencimientos'
+import type { Documento as DocumentoVence } from '@/lib/documentos/tipos'
+import { inlineKeyboard } from './telegram'
 
 // The numbering record (bot_alarmas) lives in registro-listas.ts; re-exported so the old imports keep working.
 export { guardarAlarma, ultimaAlarma, type AlarmaItem, type AlarmaTipo } from './registro-listas'
@@ -59,6 +62,8 @@ interface Mensaje {
   items: AlarmaItem[]
   /** Evening only: how many were closed today (fase 7-E decides "día difícil"). */
   cerradas?: number
+  /** Fase 14: the documents whose vencimiento the message warned about, for the "renovar" buttons. */
+  vencimientos?: DocumentoVence[]
 }
 
 function appUrl(): string {
@@ -348,11 +353,30 @@ export async function buildManana(today: string = cancunYmd()): Promise<Mensaje>
   const { bloques, semana, despues } = seccionesTablero(tasks, companies, today, items, { vacioHoy: '— nada vencido ni urgente 🎉' })
   blocks.push(...bloques)
   blocks.push(await seccionCorreos(items.length, items))
+  // Fase 14: lo que vence (30 / 7 / 1 día, y todos los días si ya se pasó) va ANTES del pie,
+  // porque renovar un seguro vencido pesa más que el total de tareas.
+  const vence = await avisoVencimientos(today)
+  if (vence) blocks.push(vence.texto)
   blocks.push(pieTotales(tasks, semana, despues))
   // Fase 12b: if Google refuses a connection, the morning says so with the fix — before anything silently stops.
   const conexiones = await avisosConexiones()
   if (conexiones.length > 0) blocks.push(conexiones.join('\n'))
-  return { text: blocks.join('\n\n'), items }
+  return { text: blocks.join('\n\n'), items, vencimientos: vence?.documentos ?? [] }
+}
+
+/**
+ * Fase 14: under the morning list, one button per vencimiento so the warning
+ * can become a task in one tap. Best effort: a failure here never costs the
+ * alarm.
+ */
+async function enviarBotonesVencimientos(chatId: number, docs: DocumentoVence[] | undefined, tag: string): Promise<void> {
+  if (!docs || docs.length === 0) return
+  try {
+    const filas = docs.slice(0, 4).map((d) => [{ text: `➕ ${tituloRenovar(d).slice(0, 40)}`, callback_data: `dv:${d.id}` }])
+    await sendTelegram(chatId, '¿Lo convierto en tarea?', { tag: `${tag}-vencimientos`, replyMarkup: inlineKeyboard(filas) })
+  } catch (err) {
+    console.error(`[${tag}] botones de vencimientos: ${mensajeError(err)}`)
+  }
 }
 
 export async function buildTarde(today: string = cancunYmd()): Promise<Mensaje> {
@@ -423,6 +447,7 @@ export async function enviarLista(chatId: number, tipo: 'manana' | 'tarde' | 'pe
   const built = tipo === 'tarde' ? await buildTarde() : tipo === 'pendientes' && company ? await buildPendientes(company) : await buildManana()
   const messageId = await sendTelegram(chatId, built.text, { html: true, tag: `lista-${tipo}` })
   await guardarAlarma('lista', built.items, { chat_id: chatId, message_id: messageId, texto: built.text })
+  await enviarBotonesVencimientos(chatId, built.vencimientos, `lista-${tipo}`)
   return built.items.length
 }
 
@@ -465,6 +490,8 @@ export async function ejecutarAlarma(tipo: AlarmaTipo, opts: { test?: boolean } 
       // Fase 9c-A: the persistent menu rides on the alarm, so it is always there.
       const id = await sendTelegram(chat, text, { html: true, tag, replyMarkup: tecladoMenu() })
       if (!primero) primero = { chat_id: chat, message_id: id }
+      // Fase 14: los vencimientos del día, con su botón para hacerlos tarea.
+      await enviarBotonesVencimientos(chat, built.vencimientos, tag)
     }
     // Ajuste 6-7: the close records its numbers like the morning (and where it went, for in-place strikes).
     await guardarAlarma(tipo, built.items, primero ? { ...primero, texto: text } : null)

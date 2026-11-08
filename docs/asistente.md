@@ -25,6 +25,7 @@ sección y **no se empieza una fase hasta validar la anterior**.
 | 9c | El asistente habla: menú de botones, foto del tablero, resumen en líneas, preguntas narradas, chat 💬 en la web | ✅ Validada |
 | 12 | Dashboard de vida: pantalla Resumen clara (agenda con Google Calendar en lectura, prioridades, correos, notas, KPIs, "Resumen diario", herramientas conectadas), menú lateral índigo/morado, pantallas Calendario y Notas, alerta de correo en el idioma de la cuenta | ✅ Construida — pendiente de validar |
 | 12b | El asistente explica sus errores (Google en lenguaje normal + enlace para reconectar), eventos libres y repetidos en Calendar por voz, preguntas sobre lo que él mismo dijo, sin "Ojo" tras un tropiezo, botón Probar en Conexiones, chequeo de conexiones en la alarma de las 8 | ✅ Construida — pendiente de validar |
+| 14 | Segundo cerebro: documentos (PDF y fotos) al bucket privado, ficha propuesta por el modelo con Guardar/Corregir, varias fotos = un documento, renovaciones con historial, notas sin archivo, preguntas con enlace firmado, vencimientos a 30/7/1 días con botón de renovar, pantalla Archivos | ✅ Construida — pendiente de validar |
 
 ---
 
@@ -3146,6 +3147,131 @@ toque reconectar.
 líneas 📆 → Hacer todo → tres eventos repetidos en Calendar con sus enlaces.
 "¿cómo que está sin autorización?" después de un aviso → explicación y qué
 hacer. Probar en Conexiones → ✓ en las cuatro cuentas.
+
+---
+
+## 14. Fase 14 — Segundo cerebro (documentos)
+
+**El problema.** Los papeles que de verdad importan —el contrato de
+alquiler, la póliza del carro, el pasaporte, los recibos— viven repartidos
+entre el correo, la galería del teléfono y carpetas de Drive. Cuando hace
+falta un dato ("¿con quién tengo el seguro?", "¿cuánto es la renta?") hay
+que ir a buscarlo, y los vencimientos no avisan: se enteran tarde.
+
+**La idea.** Que GabbyHQ sea el archivero. Ella le manda el PDF o la foto
+por Telegram, el bot lo lee, propone la ficha y lo guarda; después le
+pregunta en palabras normales y le contesta con el dato exacto y el enlace
+para abrir el papel. Y lo que vence, avisa a 30, 7 y 1 día.
+
+### 14a. Lo que se guarda
+
+Dos tablas y un bucket privado (`sql/2026-11-asistente-fase14-documentos.sql`):
+
+| Pieza | Para qué |
+| --- | --- |
+| Bucket `documentos` (privado) | Los archivos. Nada es público: cada enlace se **firma** y caduca en 1 hora, así que un mensaje reenviado no sirve mañana. |
+| `documentos` | La ficha: título, categoría, empresa, ruta, tipo, páginas, texto extraído, resumen, fecha del documento, vencimiento, monto, moneda, se renueva, notas, `reemplaza_a`, `historial`, origen. |
+| `documentos.busqueda` | Columna generada (`tsvector` en español) con título + categoría + resumen + notas + **el texto del PDF**, con índice GIN. Es lo que hace que la pregunta se responda al instante. |
+| `documentos_borradores` | Lo que el bot propuso y espera su 💾, y el grupo de fotos que se está armando. Vive 24 h. |
+
+Las ocho categorías son fijas: Contratos · Alquiler · Seguros · Finanzas ·
+Facturas y recibos · Salud · Documentos e IDs · Otros. La misma lista
+alimenta los botones, los filtros de la web y el prompt.
+
+### 14b. Cómo entra
+
+1. **PDF o foto por Telegram.** El archivo se sube al bucket, se lee su
+   texto (capa de texto con `pdf-parse`; si es un escaneo o una foto, el
+   modelo lo transcribe con visión) y el modelo llena la ficha. Lo que ella
+   escribió como caption **manda sobre el título**.
+2. **La ficha se muestra, no se guarda.** "📥 Esto entendí" + [💾 Guardar]
+   [✏️ Corregir]. Un vencimiento mal leído avisaría el día equivocado todo
+   un año, así que nada se escribe hasta que ella toca Guardar.
+3. **Corregir** es una línea en voz o texto: "el título es Póliza del carro
+   2027", "vence el 15 de marzo", "es de IM", "quítale el vencimiento". El
+   modelo cambia **solo eso** y vuelve a mostrar la ficha.
+4. **Varias fotos = un documento.** Si llega otra foto dentro de 5 minutos
+   y la ficha anterior sigue esperando, pregunta "¿es página del mismo
+   documento?". [📎 Sí] las junta en una sola ficha; [📄 No] arranca una
+   nueva y la anterior **sigue esperando su 💾 en su propio mensaje** (cada
+   botón lleva el id de su borrador, así que pueden esperar varias a la vez).
+5. **Renovaciones.** Si lo que llega se parece a algo que ya existe (misma
+   categoría, misma empresa, título parecido), pregunta si lo reemplaza.
+   [🔄 Sí] marca la vieja como `historial = true` —no se borra— y el
+   vencimiento que cuenta es el nuevo.
+6. **Notas sin archivo.** "guarda: el seguro del carro es con GNP, se paga
+   en marzo" entra al archivero como una fila sin ruta, con su categoría y
+   su empresa, y sale en las mismas búsquedas.
+7. **Más de 20 MB.** Telegram no deja bajarle a un bot archivos de más de
+   20 MB: el bot lo dice en claro y manda el enlace a GabbyHQ → Archivos.
+
+### 14c. Cómo se pregunta
+
+Postgres busca primero, el modelo contesta después y **solo** con lo que
+dicen esos documentos. La respuesta cierra con la línea del documento y su
+enlace firmado, para poder abrirlo y verificar.
+
+- "¿con quién tengo el seguro del carro?" → el dato + 🛡 Póliza … · abrir
+- "¿cuánto pago de alquiler?" · "¿cuándo vence mi pasaporte?"
+- "mándame el contrato de Bonampak"
+- Si no hay nada: "📂 No tengo nada guardado sobre eso. Mándame el PDF…"
+
+Entra por tres puertas: el intérprete (`documentos`), una pregunta normal
+que huele a papeles (si el archivero tiene algo, contesta él; si no, sigue
+el camino de siempre) y el chat de la web.
+
+### 14d. Vencimientos
+
+- La alarma de las **8:00** trae el bloque "⏳ Por vencer" a los 30, 7 y 1
+  día, y **todos los días** una vez pasado, con un botón por documento:
+  **➕ Tarea de renovar** (crea la tarea urgente ★ con la fecha del
+  vencimiento y la empresa del documento).
+- El **Resumen** los muestra como chips de colores (rojo vencido, naranja ≤7,
+  amarillo ≤30) en los próximos 45 días.
+
+### 14e. La pantalla Archivos
+
+Oscura, como el resto de GabbyHQ. Buscar (incluye el texto de los PDF),
+filtrar por categoría y empresa, ver el historial, subir (uno o varios
+archivos, con "son páginas de un mismo documento") o guardar un dato sin
+archivo, y por fila: ver · descargar · editar (título, categoría, empresa,
+fechas, monto, moneda, se renueva, resumen, notas) · al historial · borrar.
+
+### 14f. Lo que NO hace
+
+- No rasteriza un PDF escaneado de varias páginas para pasarlo por visión:
+  guarda lo poco que encuentre y lo dice ("no pude leer el texto… revísala").
+- No busca dentro de un video ni de un Word: por ahora PDF y fotos.
+- No manda el archivo como adjunto por Telegram: manda el enlace firmado.
+
+### 14g. Versión curso
+
+El trozo vendible de esta fase, para "IA después de los 40":
+
+- **La clase:** "Tu segundo cerebro en WhatsApp/Telegram". Le mandas una
+  foto de un papel y lo encuentras un año después preguntando en voz.
+- **Lo que se enseña, en orden:** (1) un depósito privado con enlaces que
+  caducan —por qué un archivo público es un problema—; (2) sacar el texto
+  de un PDF gratis, y usar visión **solo** cuando el PDF es un escaneo;
+  (3) la ficha la propone la IA, la confirma la persona: el patrón
+  "propón, no guardes" como regla de diseño, no como detalle; (4) buscar
+  con el buscador de la base (barato, instantáneo) y dejar que el modelo
+  **solo redacte** la respuesta con lo encontrado; (5) los vencimientos
+  como el verdadero valor: un archivo que avisa vale más que un archivo
+  ordenado.
+- **Lo que el alumno se lleva:** el SQL, el prompt de la ficha, el prompt
+  de la respuesta y la regla de las tres preguntas del bot (¿misma página?
+  ¿reemplaza? ¿lo guardo?).
+
+### 14h. Prueba (definición de "terminado")
+
+1. Guardar **3 documentos reales** por Telegram (un PDF, una foto, un dato
+   dictado con "guarda: …") y que las tres fichas salgan bien.
+2. Hacer **una pregunta** sobre uno de ellos y recibir el dato correcto con
+   el enlace que abre el documento.
+3. Ver el **vencimiento** como chip en el Resumen y en Archivos.
+4. Que la alarma de las 8 **avise** del vencimiento que toque y que el botón
+   ➕ cree la tarea de renovar.
 
 ## 10. Cómo replicarlo para otra persona
 

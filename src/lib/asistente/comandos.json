@@ -246,6 +246,49 @@
       ]
     },
     {
+      "id": "archivero",
+      "emoji": "📂",
+      "titulo": "Archivero (segundo cerebro)",
+      "lineas": [
+        {
+          "ejemplo": "(le mandas un PDF o una foto)",
+          "que": "lo guarda en privado, lo lee y te propone la ficha (título, categoría, empresa, vencimiento, monto) con 💾 Guardar y ✏️ Corregir. Nada se archiva hasta que tocas Guardar"
+        },
+        {
+          "ejemplo": "(varias fotos seguidas)",
+          "que": "te pregunta si son páginas del mismo documento y las junta en uno solo"
+        },
+        {
+          "ejemplo": "(una versión nueva de algo que ya tienes)",
+          "que": "te pregunta si reemplaza a la anterior; la vieja queda en el historial, no se borra, y el vencimiento que cuenta es el nuevo"
+        },
+        {
+          "ejemplo": "el título es Póliza del carro 2027",
+          "que": "después de ✏️ Corregir: cambia solo eso y te muestra la ficha otra vez. También «vence el 15 de marzo», «es de IM», «categoría seguros», «quítale el vencimiento»"
+        },
+        {
+          "ejemplo": "guarda: el seguro del carro es con GNP, se paga en marzo",
+          "que": "un dato suelto, sin archivo: entra al archivero y sale en las búsquedas igual que un documento"
+        },
+        {
+          "ejemplo": "¿con quién tengo el seguro del carro?",
+          "que": "te contesta con el dato exacto y el enlace para abrir el documento (el enlace caduca en una hora)"
+        },
+        {
+          "ejemplo": "¿cuánto pago de alquiler? · ¿cuándo vence mi pasaporte?",
+          "que": "lo mismo: busca en el texto de los PDF, no solo en los títulos"
+        },
+        {
+          "ejemplo": "mándame el contrato de Bonampak",
+          "que": "te manda ese documento con su enlace"
+        },
+        {
+          "ejemplo": "(archivo de más de 20 MB)",
+          "que": "Telegram no deja bajarlo: te lo dice y te manda a subirlo en GabbyHQ → Archivos"
+        }
+      ]
+    },
+    {
       "id": "otros",
       "emoji": "ℹ️",
       "titulo": "Otros",

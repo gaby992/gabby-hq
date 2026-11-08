@@ -68,6 +68,13 @@ export type AccionLlm =
   | { tipo: 'correos_lista'; cuenta?: string; importante?: boolean }
   /** Fase 9c-D: "deja X para después" / "quítale la fecha" → 📦 Después (no date). */
   | { tipo: 'despues'; ref: string }
+  /**
+   * Fase 14 (segundo cerebro): preguntar al archivero ("¿con quién tengo el
+   * seguro del carro?", "mándame el contrato de Bonampak", "¿cuánto pago de alquiler?").
+   */
+  | { tipo: 'documentos'; texto: string }
+  /** Fase 14: guardar un dato suelto, sin archivo ("el seguro del carro es con GNP, se paga en marzo"). */
+  | { tipo: 'documento_nota'; texto: string }
   | { tipo: 'desconocido'; texto: string }
 
 export interface FiltroCorreo {
@@ -84,7 +91,8 @@ export type TipoAccionLlm = AccionLlm['tipo']
 const TIPOS: TipoAccionLlm[] = [
   'completar', 'cancelar', 'borrar', 'posponer', 'renombrar', 'cambiar', 'crear',
   'nota_empresa', 'nota_tarea', 'alarma', 'pregunta', 'que_sigue', 'lista', 'calendar',
-  'pagos_listar', 'dividir', 'siguiente_paso', 'correo', 'esperar', 'esperando', 'tablero', 'despues', 'correos_lista', 'evento', 'desconocido',
+  'pagos_listar', 'dividir', 'siguiente_paso', 'correo', 'esperar', 'esperando', 'tablero', 'despues', 'correos_lista', 'evento',
+  'documentos', 'documento_nota', 'desconocido',
 ]
 
 const ACCIONES_CORREO: CorreoAccion[] = ['chelsea', 'yo', 'tarea', 'archivar']
@@ -296,6 +304,13 @@ export function systemPrompt(today: string, cfg: AsistenteConfig = { nombre_pers
     '- {"tipo":"correos_lista",("cuenta":"…"),("importante":true)}  → cualquier forma de pedir VER correos: "mándame los correos de Chelsea", "qué llegó al buzón de PD", "lo más importante del correo de IM", "qué necesita respuesta en mi correo". ' +
       'OJO: ahí "Chelsea"/"PD"/"IM" es el BUZÓN (una cuenta de correo), NUNCA la empresa ni sus tareas; cuenta = ese nombre tal cual lo dijo. "lo más importante" / "urgentes" / "qué necesita respuesta" → importante:true. Esto NUNCA es "lista" (lista es de TAREAS)',
     '- {"tipo":"despues","ref":REF}  → "deja X para después", "X para después", "quítale la fecha a X", "pásala a Después", "esa no corre": la tarea queda sin fecha en 📦 Después. NO es cancelar ni posponer a un día',
+    '- {"tipo":"documentos","texto":"…"}  → preguntas sobre sus PAPELES guardados (el archivero / segundo cerebro): ' +
+      '"¿con quién tengo el seguro del carro?", "¿cuánto pago de alquiler?", "¿cuándo vence mi pasaporte?", "mándame el contrato de Bonampak", "¿qué dice la póliza de la cobertura?", ' +
+      '"busca el recibo de la CFE de octubre", "¿tengo guardado el contrato de DATAVIA?", "qué documentos tengo de seguros". texto = la pregunta tal cual. ' +
+      'OJO: esto es sobre CONTRATOS, PÓLIZAS, FACTURAS, RECIBOS, IDENTIFICACIONES y datos archivados, NUNCA sobre tareas (eso es "pregunta") ni correos (eso es "correos_lista")',
+    '- {"tipo":"documento_nota","texto":"…"}  → guardar un DATO para siempre en el archivero, sin archivo: ' +
+      '"el seguro del carro es con GNP y se paga en marzo", "guarda que la renta se paga el día 5", "apunta en el cerebro: el contador se llama Luis, tel 998…", "archiva este dato: …". ' +
+      'texto = el dato completo tal cual lo dijo. Esto NO es una tarea ni una nota de empresa: es información que querrá consultar después',
     '- {"tipo":"desconocido","texto":"…"}  → saludos, comentarios o algo que no es ninguna de las anteriores',
     '',
     'REF = a qué tarea se refiere: el id entre corchetes del contexto ("#3" = número de la última alarma, "t12" = otra tarea abierta), ' +
@@ -601,6 +616,12 @@ export function validarAcciones(raw: unknown): AccionLlm[] {
         break
       case 'despues':
         if (ref) out.push({ tipo, ref })
+        break
+      case 'documentos':
+      case 'documento_nota':
+        // Fase 14: sin texto no hay ni pregunta ni dato que archivar.
+        if (texto) out.push({ tipo, texto })
+        else out.push({ tipo: 'desconocido', texto: 'no entendí qué buscar en el archivero' })
         break
       case 'pregunta':
       case 'desconocido':

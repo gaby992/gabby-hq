@@ -72,6 +72,26 @@ import {
   type BorradorParsed,
 } from '@/lib/asistente/borradores'
 import { cargarEmpresas, confirmacion, guardarTarea, pregunta } from '@/lib/asistente/tareas'
+import {
+  TELEGRAM_MAX_BYTES,
+  avisoDemasiadoGrande,
+  borradorDocPorId,
+  borradorDocVigente,
+  corregir as corregirFicha,
+  COMO_CORREGIR_DOC,
+  guardar as guardarFicha,
+  leerNotaCerebro,
+  recibirArchivo,
+  recibirNota,
+  separarPaginas,
+  unirPaginas,
+  actualizarBorradorDoc,
+  type Salida as SalidaDoc,
+} from '@/lib/documentos/entrada'
+import { documentoPorId } from '@/lib/documentos/ficha'
+import { tituloRenovar } from '@/lib/documentos/vencimientos'
+import { buscarDocumentos, pareceDeDocumentos, responderDeDocumentos } from '@/lib/documentos/buscar'
+import { sinHtml } from '@/lib/asistente/html'
 import { responderPregunta } from '@/lib/asistente/pregunta'
 import { enviarQueSigue } from '@/lib/asistente/que-sigue'
 import { enviarLista } from '@/lib/asistente/alarmas'
@@ -374,6 +394,57 @@ async function responderRelectura(chatId: number, r: Relectura, texto: string, p
   await reply(chatId, joinLines(prefix, 'Perdón, lo leí mal. ¿Me lo dices otra vez completo?'))
 }
 
+/**
+ * Fase 14: a question about her papers ("¿con quién tengo el seguro del
+ * carro?") is answered from the archivero, with the signed link. Returns
+ * false when it is not that kind of question or nothing is filed yet, and
+ * the usual answer takes over.
+ */
+async function respuestaDelArchivero(chatId: number, texto: string, prefix: string | null): Promise<boolean> {
+  if (!pareceDeDocumentos(texto)) return false
+  try {
+    const hits = await buscarDocumentos({ q: texto, max: 1 })
+    if (hits.length === 0) return false
+    if (prefix) await reply(chatId, prefix)
+    const r = await responderDeDocumentos(texto)
+    await reply(chatId, r.texto, undefined, true)
+    return true
+  } catch (err) {
+    console.warn(`[bot] archivero: ${mensajeError(err)}`)
+    return false
+  }
+}
+
+/**
+ * Fase 14: she tapped [✏️ Corregir] on a ficha — this message is the
+ * correction ("el título es X", "vence el 15 de marzo"). "olvídalo" lets it
+ * go. Returns true when the message was the correction.
+ */
+async function correccionDeFicha(chatId: number, text: string, prefix: string | null): Promise<boolean> {
+  let b
+  try {
+    b = await borradorDocVigente(chatId)
+  } catch {
+    return false
+  }
+  if (!b || b.estado !== 'corrigiendo') return false
+  // A correction is answered right away; after half an hour it is a new message.
+  if (Date.now() - new Date(b.creado).getTime() > 30 * 60 * 1000) return false
+  if (/^(?:olv[ií]dalo|olvidalo|d[eé]jalo|dejalo|cancela(?:lo)?|nada|despu[eé]s|luego)\b/i.test(text.trim())) {
+    await actualizarBorradorDoc(b.id, { estado: 'propuesto' })
+    await reply(chatId, joinLines(prefix, `Ok, lo dejo como estaba. La ficha de «${b.propuesta.titulo}» sigue esperando tu 💾 arriba.`))
+    return true
+  }
+  try {
+    if (prefix) await reply(chatId, prefix)
+    await enviarSalidaDoc(chatId, await corregirFicha(b, text, await cargarEmpresas()))
+  } catch (err) {
+    console.error(`[bot] corregir ficha: ${mensajeError(err)}`)
+    await reply(chatId, `⚠️ No pude aplicar la corrección: ${motivoParaUsuario(err)}`)
+  }
+  return true
+}
+
 export async function handleText(chatId: number, text: string, prefix: string | null) {
   if (!text) {
     await reply(chatId, joinLines(prefix, 'No entendí nada. ¿Me lo repites?'))
@@ -384,6 +455,19 @@ export async function handleText(chatId: number, text: string, prefix: string | 
   // Fase 7: the thread remembers what she said (the transcription, for a voice note).
   await guardarTurno(chatId, 'user', text)
   if (await salidaOrganizar(chatId, text)) return
+  // Fase 14: una ficha esperando corrección se lleva el siguiente mensaje.
+  if (await correccionDeFicha(chatId, text, prefix)) return
+  // Fase 14: "guarda: el seguro del carro es con GNP" → al cerebro, sin archivo.
+  const dato = leerNotaCerebro(text)
+  if (dato) {
+    try {
+      await enviarSalidaDoc(chatId, await recibirNota(chatId, dato, await cargarEmpresas()))
+    } catch (err) {
+      console.error(`[bot] nota cerebro: ${mensajeError(err)}`)
+      await reply(chatId, `⚠️ No pude archivar el dato: ${motivoParaUsuario(err)}`)
+    }
+    return
+  }
   // Ajuste 9c-1: "¿cuál cuenta?" is waiting and she types the name ("IM Chelsea") → that mailbox.
   const esperaCuenta = await borradorVigente(chatId)
   if (esperaCuenta && 'tipo' in esperaCuenta.parsed && esperaCuenta.parsed.tipo === 'cuenta_correo') {
@@ -505,6 +589,8 @@ export async function handleText(chatId: number, text: string, prefix: string | 
       return
     }
     case 'pregunta': {
+      // Fase 14: si la pregunta huele a papeles, el archivero va primero (si no hay nada, sigue el camino normal).
+      if (await respuestaDelArchivero(chatId, parsed.texto, prefix)) return
       // Fase 9c-D: the known questions ("¿qué tengo hoy?", "¿cómo va IM?", "¿qué tengo estancado?"…) get prose + a short list + a proposal, no model.
       const narrada = await responderNarrada(chatId, parsed.texto)
       if (narrada) {
@@ -805,6 +891,23 @@ async function handleLibre(chatId: number, text: string, parsed: Parsed, prefix:
       return
     }
   }
+  // Fase 14: el archivero contesta con enlace firmado, así que va en HTML y no por ejecutarUna.
+  if (a.tipo === 'documentos') {
+    if (prefix) await reply(chatId, prefix)
+    const r = await responderDeDocumentos(a.texto)
+    await reply(chatId, r.texto, undefined, true)
+    return
+  }
+  if (a.tipo === 'documento_nota') {
+    if (prefix) await reply(chatId, prefix)
+    try {
+      await enviarSalidaDoc(chatId, await recibirNota(chatId, a.texto, companies))
+    } catch (err) {
+      console.error(`[bot] documento_nota: ${mensajeError(err)}`)
+      await reply(chatId, `⚠️ No pude archivar el dato: ${motivoParaUsuario(err)}`)
+    }
+    return
+  }
   if (a.candidatos && a.candidatos.length > 0) {
     const nonce = await borradorConNonce(chatId, text, { tipo: 'elegir', accion: a, candidatos: a.candidatos.map((t) => t.id) })
     await reply(chatId, joinLines(prefix, '¿Cuál?'), inlineKeyboard(botonesElegir(a.candidatos, nonce).map((b) => [b])))
@@ -835,7 +938,8 @@ async function handleLibre(chatId: number, text: string, parsed: Parsed, prefix:
     await reply(chatId, joinLines(prefix, `¿A qué hora te aviso «${a.texto}» ${dia}?`), botonesHora(nonce))
     return
   }
-  await reply(chatId, joinLines(prefix, await ejecutarUna(chatId, a)))
+  // Fase 14: una línea puede traer un enlace (📆 Calendar, 🔗 Reconectar): sin HTML se manda como texto, no como etiqueta.
+  await reply(chatId, joinLines(prefix, sinHtml(await ejecutarUna(chatId, a))))
   if (a.tarea) await guardarTurno(chatId, 'assistant', `[${a.tipo}] ${a.tarea.text}`, { tareas: [{ id: a.tarea.id, text: a.tarea.text }] })
   if (a.tipo === 'completar' && a.tarea) await sugerir(chatId, await trasCompletar(chatId, await cargarConfig(), a.tarea.id))
 }
@@ -866,6 +970,132 @@ export async function handleVoice(chatId: number, audio: TelegramAudio) {
   await handleText(chatId, texto, `🎤 Entendí: «${texto}»`)
 }
 
+// ── Fase 14: documents (segundo cerebro) ─────────────────────────────────
+
+/** Everything the brain says carries HTML (titles in bold, signed links). */
+async function enviarSalidaDoc(chatId: number, s: SalidaDoc): Promise<void> {
+  await reply(chatId, s.texto, s.botones, true)
+}
+
+export interface TelegramDocumento {
+  file_id: string
+  file_name?: string
+  mime_type?: string
+  file_size?: number
+}
+
+/**
+ * A PDF or a photo arrived. It is stored, read, and its ficha comes back with
+ * [💾 Guardar] [✏️ Corregir]. Nothing is written to `documentos` until she
+ * taps Guardar.
+ */
+export async function handleDocumento(
+  chatId: number,
+  file: TelegramDocumento,
+  opts: { caption?: string | null; esFoto?: boolean } = {}
+) {
+  const nombre = file.file_name ?? (opts.esFoto ? 'foto.jpg' : 'documento')
+  if ((file.file_size ?? 0) > TELEGRAM_MAX_BYTES) {
+    await reply(chatId, avisoDemasiadoGrande(nombre, file.file_size ?? 0), undefined, true)
+    return
+  }
+  // The read + the model take a while: say something first so she knows it landed.
+  await reply(chatId, opts.esFoto ? '📷 Déjame leer la foto…' : `📄 Déjame leer «${nombre}»…`)
+  const empresas = await cargarEmpresas()
+  try {
+    const { bytes, path } = await downloadTelegramFile(file.file_id)
+    const tipo = file.mime_type ?? (opts.esFoto ? 'image/jpeg' : tipoPorExtension(path))
+    const s = await recibirArchivo(chatId, {
+      bytes,
+      nombre: file.file_name ?? path.split('/').pop() ?? nombre,
+      tipo,
+      pista: opts.caption ?? null,
+      esFoto: opts.esFoto,
+    }, empresas)
+    await enviarSalidaDoc(chatId, s)
+  } catch (err) {
+    console.error(`[bot] documento: ${mensajeError(err)}`)
+    await reply(chatId, `⚠️ No pude archivarlo: ${motivoParaUsuario(err)}. Vuelve a mandarlo, o súbelo en ${appUrl()}/archivos.`)
+  }
+}
+
+/** Telegram does not send a mime type for every file; the extension is enough. */
+function tipoPorExtension(path: string): string {
+  const ext = path.split('.').pop()?.toLowerCase() ?? ''
+  if (ext === 'pdf') return 'application/pdf'
+  if (ext === 'png') return 'image/png'
+  if (ext === 'webp') return 'image/webp'
+  if (ext === 'heic' || ext === 'heif') return `image/${ext}`
+  if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg'
+  return 'application/octet-stream'
+}
+
+/**
+ * The brain's buttons: Guardar · Corregir · misma/otra página · renovación ·
+ * "tarea de renovar" under a vencimiento. Returns false when `data` is not one
+ * of them, so the usual button handling continues.
+ */
+async function procesarBotonDoc(chatId: number, data: string): Promise<boolean> {
+  const m = data.match(/^(dg|dc|dm|do|dr|dn|dv):([0-9a-f-]{36})$/)
+  if (!m) return false
+  const [, kind, id] = m
+  const empresas = await cargarEmpresas()
+
+  // A vencimiento → a task ("Renovar la póliza del carro").
+  if (kind === 'dv') {
+    const d = await documentoPorId(id)
+    if (!d) {
+      await reply(chatId, 'Ese documento ya no está en el archivero.')
+      return true
+    }
+    const g = await guardarTarea({
+      text: tituloRenovar(d),
+      priority: 'urgente',
+      company_id: d.company_id,
+      company_name: null,
+      importante: true,
+      due_date: d.vence,
+      due_time: null,
+      calendar: false,
+    })
+    await guardarTurno(chatId, 'assistant', `[creada] ${tituloRenovar(d)}`, { tareas: [{ id: g.id, text: tituloRenovar(d) }] })
+    await reply(chatId, `✓ Tarea creada: «${tituloRenovar(d)}»${d.vence ? ` · vence ${formatVenceEs(d.vence)}` : ''} · urgente ★`)
+    return true
+  }
+
+  const b = await borradorDocPorId(id)
+  if (!b) {
+    await reply(chatId, 'Esa ficha ya expiró (24 h) o ya la guardaste. Mándame el archivo otra vez si hace falta.')
+    return true
+  }
+  try {
+    if (kind === 'dg') {
+      await enviarSalidaDoc(chatId, await guardarFicha(b, empresas))
+      return true
+    }
+    if (kind === 'dc') {
+      await actualizarBorradorDoc(b.id, { estado: 'corrigiendo' })
+      await reply(chatId, COMO_CORREGIR_DOC)
+      return true
+    }
+    if (kind === 'dm') {
+      await enviarSalidaDoc(chatId, await unirPaginas(b, empresas))
+      return true
+    }
+    if (kind === 'do') {
+      await enviarSalidaDoc(chatId, await separarPaginas(b, empresas))
+      return true
+    }
+    // La renovación: reemplaza a la anterior, o se guarda aparte.
+    await enviarSalidaDoc(chatId, await guardarFicha(b, empresas, { reemplazar: kind === 'dr' }))
+    return true
+  } catch (err) {
+    console.error(`[bot] botón documento ${kind}: ${mensajeError(err)}`)
+    await reply(chatId, `⚠️ No pude: ${motivoParaUsuario(err)}`)
+    return true
+  }
+}
+
 // ── Inline buttons ───────────────────────────────────────────────────────
 
 export interface CallbackQuery {
@@ -894,6 +1124,18 @@ export async function handleCallback(cq: CallbackQuery) {
 export async function procesarBoton(chatId: number, messageId: number | null, data: string) {
   const quitarBotones = async () => {
     if (messageId) await removeInlineKeyboard(chatId, messageId)
+  }
+
+  // ── Fase 14: the brain's buttons (their id is the draft, not a nonce) ──
+  if (/^(?:dg|dc|dm|do|dr|dn|dv):/.test(data)) {
+    try {
+      await quitarBotones()
+      if (await procesarBotonDoc(chatId, data)) return
+    } catch (err) {
+      console.error(`[bot] callback documento: ${mensajeError(err)}`)
+      await reply(chatId, ERROR_GENERICO)
+      return
+    }
   }
 
   // ── A sent reminder: [✅ Listo] [⏰ +1h] [📅 Mañana] — no draft involved ──
@@ -1038,7 +1280,7 @@ export async function procesarBoton(chatId: number, messageId: number | null, da
         return
       }
       await borrarBorrador(borrador.id)
-      await reply(chatId, await ejecutarPlan(chatId, parsed.acciones))
+      await reply(chatId, sinHtml(await ejecutarPlan(chatId, parsed.acciones)))
       const tocadas = parsed.acciones.filter((a) => a.tarea && !a.error).map((a) => ({ id: a.tarea!.id, text: a.tarea!.text }))
       if (tocadas.length > 0) await guardarTurno(chatId, 'assistant', `[plan] ${tocadas.length} tareas`, { tareas: tocadas })
       return
