@@ -4,6 +4,7 @@
 // that "pasa 2,5" can resolve those numbers later, whatever the list looks
 // like by then.
 
+import { avisosConexiones } from '@/lib/google/oauth'
 import { createServerClient } from '@/lib/supabase-server'
 import type { Company, NotaEmpresa, Task } from '@/types'
 import { CHELSEA_COMPANY_NAME } from '@/lib/chelsea'
@@ -348,6 +349,9 @@ export async function buildManana(today: string = cancunYmd()): Promise<Mensaje>
   blocks.push(...bloques)
   blocks.push(await seccionCorreos(items.length, items))
   blocks.push(pieTotales(tasks, semana, despues))
+  // Fase 12b: if Google refuses a connection, the morning says so with the fix — before anything silently stops.
+  const conexiones = await avisosConexiones()
+  if (conexiones.length > 0) blocks.push(conexiones.join('\n'))
   return { text: blocks.join('\n\n'), items }
 }
 

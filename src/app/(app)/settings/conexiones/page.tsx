@@ -71,6 +71,23 @@ export default function ConexionesPage() {
     load()
   }
 
+  // Fase 12b: ask Google whether the stored permission still works.
+  const [probando, setProbando] = useState<string | null>(null)
+  const [resultadoPrueba, setResultadoPrueba] = useState<Record<string, { ok: boolean; texto: string; reconectar?: boolean }>>({})
+  async function probar(id: string) {
+    setProbando(id)
+    try {
+      const res = await fetch('/api/google/conexiones/probar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) })
+      const json = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`)
+      setResultadoPrueba((prev) => ({ ...prev, [id]: { ok: json.ok === true, texto: json.texto, reconectar: json.reconectar === true } }))
+    } catch (err) {
+      setResultadoPrueba((prev) => ({ ...prev, [id]: { ok: false, texto: err instanceof Error ? err.message : String(err) } }))
+    } finally {
+      setProbando(null)
+    }
+  }
+
   async function desconectar(id: string) {
     setConfirmando(null)
     const res = await fetch('/api/google/conexiones', {
@@ -161,6 +178,14 @@ export default function ConexionesPage() {
                   >
                     📧 Correo {c.usa_gmail ? 'on' : 'off'}
                   </button>
+                  <button
+                    onClick={() => probar(c.id)}
+                    disabled={probando === c.id}
+                    title="Pregunta a Google si el permiso guardado sigue funcionando"
+                    className="px-2.5 py-1 rounded-md text-[#888888] hover:text-[#e8e8e8] hover:bg-[#2a2a2a] transition-colors disabled:opacity-50"
+                  >
+                    {probando === c.id ? 'Probando…' : 'Probar'}
+                  </button>
                   <a href="/api/google/oauth/start" className="px-2.5 py-1 rounded-md text-[#888888] hover:text-[#e8e8e8] hover:bg-[#2a2a2a] transition-colors">
                     Reconectar
                   </a>
@@ -179,6 +204,12 @@ export default function ConexionesPage() {
                     </button>
                   )}
                 </div>
+                {resultadoPrueba[c.id] && (
+                  <p className={`mt-1.5 text-xs ${resultadoPrueba[c.id].ok ? 'text-emerald-400' : 'text-amber-400'}`}>
+                    {resultadoPrueba[c.id].ok ? '✓ ' : '⚠️ '}{resultadoPrueba[c.id].texto}
+                    {resultadoPrueba[c.id].reconectar && <> <a href="/api/google/oauth/start" className="underline">Reconectar ahora</a></>}
+                  </p>
+                )}
               </li>
             ))}
           </ul>

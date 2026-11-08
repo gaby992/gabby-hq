@@ -203,3 +203,100 @@ export async function actualizarEventoPago(eventId: string, p: PagoEvento): Prom
 }
 
 export { GoogleError }
+
+// ── Fase 12b: a free event, once or repeating ─────────────────────────────
+// "Ponme en el calendario Love on Hire los jueves a las 2 pm hasta el 1 de
+// diciembre, nota GL" is not a task: it goes straight to Calendar, with an
+// RRULE when it repeats. Nothing is written in Supabase for it.
+
+export type DiaSemana = 'LU' | 'MA' | 'MI' | 'JU' | 'VI' | 'SA' | 'DO'
+const BYDAY: Record<DiaSemana, string> = { LU: 'MO', MA: 'TU', MI: 'WE', JU: 'TH', VI: 'FR', SA: 'SA', DO: 'SU' }
+export const DIA_LARGO: Record<DiaSemana, string> = { LU: 'lunes', MA: 'martes', MI: 'miércoles', JU: 'jueves', VI: 'viernes', SA: 'sábados', DO: 'domingos' }
+const DIAS_ORDEN: DiaSemana[] = ['DO', 'LU', 'MA', 'MI', 'JU', 'VI', 'SA']
+
+export interface Repeticion {
+  cada: 'dia' | 'semana' | 'mes'
+  /** Weekly: the weekdays. Empty → the weekday of the first date. */
+  dias?: DiaSemana[]
+  /** Last day, inclusive ('YYYY-MM-DD'). */
+  hasta?: string
+  /** Or a fixed number of times. */
+  veces?: number
+}
+
+export interface EventoLibre {
+  titulo: string
+  /** First (or only) date. */
+  fecha: string
+  /** 'HH:MM' or null for all-day. */
+  hora: string | null
+  duracion_min?: number
+  nota?: string | null
+  repetir?: Repeticion | null
+}
+
+/** The weekday code of a 'YYYY-MM-DD'. */
+export function diaSemanaDe(ymd: string): DiaSemana {
+  const [y, m, d] = ymd.split('-').map(Number)
+  return DIAS_ORDEN[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]
+}
+
+/** The first date on or after `desde` that falls on one of `dias`. */
+export function primeraFechaEn(desde: string, dias: DiaSemana[]): string {
+  let f = desde
+  for (let i = 0; i < 7; i++) {
+    if (dias.includes(diaSemanaDe(f))) return f
+    f = addDays(f, 1)
+  }
+  return desde
+}
+
+export function rrule(r: Repeticion, primera: string): string {
+  const parts = [`FREQ=${r.cada === 'dia' ? 'DAILY' : r.cada === 'mes' ? 'MONTHLY' : 'WEEKLY'}`]
+  if (r.cada === 'semana') {
+    const dias = r.dias && r.dias.length > 0 ? r.dias : [diaSemanaDe(primera)]
+    parts.push(`BYDAY=${dias.map((d) => BYDAY[d]).join(',')}`)
+  }
+  if (r.veces && r.veces > 0) parts.push(`COUNT=${Math.min(r.veces, 400)}`)
+  // UNTIL is inclusive of the whole Cancún day: 23:59:59 local = 04:59:59Z next day.
+  else if (r.hasta) parts.push(`UNTIL=${addDays(r.hasta, 1).replace(/-/g, '')}T045959Z`)
+  return `RRULE:${parts.join(';')}`
+}
+
+export function cuerpoEventoLibre(e: EventoLibre): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    summary: e.titulo,
+    description: [e.nota ? `Nota: ${e.nota}` : null, `Creado desde el asistente de GabbyHQ · ${appUrl()}/calendario`].filter(Boolean).join('\n'),
+    reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: AVISO_MIN }] },
+    source: { title: 'GabbyHQ', url: `${appUrl()}/calendario` },
+  }
+  if (e.hora) {
+    const start = new Date(`${e.fecha}T${e.hora}:00-05:00`)
+    const end = new Date(start.getTime() + (e.duracion_min ?? 60) * 60_000)
+    body.start = { dateTime: start.toISOString(), timeZone: CANCUN_TZ }
+    body.end = { dateTime: end.toISOString(), timeZone: CANCUN_TZ }
+  } else {
+    body.start = { date: e.fecha }
+    body.end = { date: addDays(e.fecha, 1) }
+  }
+  if (e.repetir) body.recurrence = [rrule(e.repetir, e.fecha)]
+  return body
+}
+
+/** Creates the free event; returns its id and the link to open it. */
+export async function crearEventoLibre(e: EventoLibre): Promise<{ id: string; link: string | null }> {
+  const json = await llamar('POST', '', cuerpoEventoLibre(e))
+  const id = String(json?.id ?? '')
+  if (!id) throw new GoogleError('Calendar no devolvió id del evento')
+  return { id, link: typeof json?.htmlLink === 'string' ? json.htmlLink : null }
+}
+
+/** "jueves 2:00 pm · cada semana hasta 1 dic" — how the plan and the confirmation describe a repetition. */
+export function describirRepeticion(r: Repeticion | null | undefined, primera: string): string {
+  if (!r) return ''
+  const dias = r.cada === 'semana' ? (r.dias && r.dias.length > 0 ? r.dias : [diaSemanaDe(primera)]).map((d) => DIA_LARGO[d]).join(' y ') : ''
+  const base = r.cada === 'dia' ? 'todos los días' : r.cada === 'mes' ? 'cada mes' : `los ${dias}`
+  if (r.veces) return `${base}, ${r.veces} veces`
+  if (r.hasta) return `${base} hasta el ${Number(r.hasta.slice(8, 10))} de ${['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'][Number(r.hasta.slice(5, 7)) - 1]}`
+  return `${base}, hasta que avises`
+}

@@ -4,6 +4,7 @@
 import { createServerClient } from '@/lib/supabase-server'
 import { construirContexto } from './contexto'
 import { llmConfig, preguntarLlm } from './llm'
+import { historial, renderHistorial } from './conversacion'
 import { cargarConfig, personaPrompt, type AsistenteConfig } from './config'
 import { mensajeError } from '@/lib/errores'
 
@@ -21,7 +22,10 @@ export const SYSTEM_PROMPT =
   'responde solo con la lista: MÁXIMO 8 ítems, uno por línea, compactos, así: "- título · empresa · fecha" ' +
   '(usa "sin fecha" si no tiene). Para tareas cerradas, la fecha es la de cierre, p. ej. "- título · IM · cerrada jue 29 oct". ' +
   'Si en el contexto hay más de 8, cierra con una línea exacta "+N más en GabbyHQ" ' +
-  'donde N es cuántos faltan. Si la pregunta no pide lista, responde en prosa, máximo 5 líneas, sin encabezados.'
+  'donde N es cuántos faltan. Si la pregunta no pide lista, responde en prosa, máximo 5 líneas, sin encabezados.\n' +
+  'Si la pregunta es sobre algo que TÚ dijiste antes (un aviso ⚠️, un error, una propuesta: "¿cómo que sin autorización?", "explícame", "¿por qué falló?"), ' +
+  'mira la CONVERSACIÓN RECIENTE, explica con palabras simples qué pasó y qué debe hacer ella para arreglarlo (si el aviso trae un enlace, dile que lo use). ' +
+  'Nunca repitas el texto técnico ni digas que no entiendes a qué se refiere.'
 
 /** Hard cap after the model answers: 8 items + the "+N más" line. */
 const MAX_LINEAS = 9
@@ -73,8 +77,10 @@ export async function responderPregunta(chatId: number, pregunta: string): Promi
   try {
     const cfg = llmConfig()
     modelo = `${cfg.provider}:${cfg.model}`
-    const [ctx, cfgPersona] = await Promise.all([construirContexto(), cargarConfig()])
-    const user = `CONTEXTO:\n${ctx.text}\n\nPREGUNTA: ${q}`
+    const [ctx, cfgPersona, turnos] = await Promise.all([construirContexto(), cargarConfig(), historial(chatId)])
+    // Fase 12b: the recent thread, so "¿cómo que sin autorización?" can be answered about the bot's own last message.
+    const hilo = renderHistorial(turnos.slice(-8), () => null)
+    const user = `CONTEXTO:\n${ctx.text}${hilo ? `\n\n${hilo}` : ''}\n\nPREGUNTA: ${q}`
     const r = await preguntarLlm(systemPromptPregunta(cfgPersona), user, { maxTokens: MAX_TOKENS, timeoutMs: TIMEOUT_MS })
     const respuesta = r.text ? acotar(r.text) : RESPUESTA_TRABADA
     console.log(`[pregunta] ok · ${modelo} · ctx ${ctx.chars} chars · in ${r.tokensIn} · out ${r.tokensOut} · ${r.ms} ms`)

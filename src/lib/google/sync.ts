@@ -8,7 +8,7 @@ import { createServerClient } from '@/lib/supabase-server'
 import type { Priority } from '@/types'
 import { formatFechaHoraEs, formatVenceEs, cancunInstant } from '@/lib/asistente/cancun'
 import { actualizarEvento, borrarEvento, crearEvento, type TareaEvento } from './calendar'
-import { googleConfigurado } from './oauth'
+import { avisoCalendar, googleConfigurado } from './oauth'
 import { mensajeError } from '@/lib/errores'
 
 interface Row {
@@ -43,7 +43,8 @@ function errorMsg(err: unknown): string {
 
 function aviso(err: unknown): ResultadoSync {
   console.error(`[calendar] ${errorMsg(err)}`)
-  return { estado: 'error', aviso: `⚠️ sin evento en Calendar: ${errorMsg(err)}` }
+  // Fase 12b: explained, with the link that fixes it — never "Unauthorized" on its own.
+  return { estado: 'error', aviso: avisoCalendar(err) }
 }
 
 function comoEvento(r: Row): TareaEvento {

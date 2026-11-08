@@ -246,7 +246,15 @@ export default function ResumenPage() {
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
         <Tarjeta titulo="Agenda de hoy" className="lg:col-span-3" accion={<Enlace href="/calendario">Ver calendario</Enlace>}>
           {datos.agenda.length === 0 && datos.sin_hora.length === 0 ? (
-            <p className="text-sm" style={{ color: CLARO.textoApagado }}>Nada con hora hoy{datos.calendar_fallo ? ' (no pude leer Google Calendar)' : ''}.</p>
+            <>
+              <p className="text-sm" style={{ color: CLARO.textoApagado }}>Nada con hora hoy.</p>
+              {datos.calendar_fallo && (
+                <p className="mt-2 text-[11px] text-amber-400">
+                  ⚠️ {datos.calendar_error?.texto ?? 'No pude leer Google Calendar ahora.'}
+                  {datos.calendar_error?.reconectar && <> <Link href="/settings/conexiones" className="underline">Reconectar</Link></>}
+                </p>
+              )}
+            </>
           ) : (
             <>
               <ul className="divide-y divide-[#2a2a2a]">{datos.agenda.map(renderItem)}</ul>
@@ -256,7 +264,12 @@ export default function ResumenPage() {
                   <ul className="divide-y divide-[#2a2a2a]">{datos.sin_hora.map(renderItem)}</ul>
                 </>
               )}
-              {datos.calendar_fallo && <p className="mt-2 text-[11px]" style={{ color: CLARO.textoApagado }}>No pude leer Google Calendar ahora; la agenda muestra solo tareas y pagos.</p>}
+              {datos.calendar_fallo && (
+                <p className="mt-2 text-[11px] text-amber-400">
+                  ⚠️ {datos.calendar_error?.texto ?? 'No pude leer Google Calendar ahora; la agenda muestra solo tareas y pagos.'}
+                  {datos.calendar_error?.reconectar && <> <Link href="/settings/conexiones" className="underline">Reconectar</Link></>}
+                </p>
+              )}
             </>
           )}
         </Tarjeta>

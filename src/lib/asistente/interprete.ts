@@ -20,6 +20,7 @@ import { correosRecientes, quienCorto, type CorreoLite } from '@/lib/correo/pend
 import type { CorreoAccion, CorreoTipo, CorreoUrgencia, NivelRemitente } from '@/types'
 import { esNivel } from '@/lib/correo/niveles'
 import { mensajeError } from '@/lib/errores'
+import type { DiaSemana, Repeticion } from '@/lib/google/calendar'
 
 export const MAX_TOKENS = 900
 export const TIMEOUT_MS = 20_000
@@ -38,6 +39,11 @@ export type AccionLlm =
   | { tipo: 'cambiar'; ref: string; prioridad?: Priority; empresa?: string; fecha?: string; hora?: string; calendar?: boolean }
   | { tipo: 'crear'; titulo: string; empresa?: string; prioridad?: Priority; fecha?: string; hora?: string; importante?: boolean; calendar?: boolean }
   | { tipo: 'calendar'; ref: string; hora?: string; todo_el_dia?: boolean }
+  /**
+   * Fase 12b: a free Calendar event — not a task — once or repeating:
+   * "ponme en el calendario Love on Hire los jueves a las 2 pm hasta el 1 de diciembre, nota GL".
+   */
+  | { tipo: 'evento'; titulo: string; fecha: string; hora?: string; duracion_min?: number; nota?: string; repetir?: Repeticion }
   | { tipo: 'pagos_listar'; empresa?: string; semana?: boolean }
   | { tipo: 'dividir'; ref: string }
   | { tipo: 'siguiente_paso'; ref?: string }
@@ -78,7 +84,7 @@ export type TipoAccionLlm = AccionLlm['tipo']
 const TIPOS: TipoAccionLlm[] = [
   'completar', 'cancelar', 'borrar', 'posponer', 'renombrar', 'cambiar', 'crear',
   'nota_empresa', 'nota_tarea', 'alarma', 'pregunta', 'que_sigue', 'lista', 'calendar',
-  'pagos_listar', 'dividir', 'siguiente_paso', 'correo', 'esperar', 'esperando', 'tablero', 'despues', 'correos_lista', 'desconocido',
+  'pagos_listar', 'dividir', 'siguiente_paso', 'correo', 'esperar', 'esperando', 'tablero', 'despues', 'correos_lista', 'evento', 'desconocido',
 ]
 
 const ACCIONES_CORREO: CorreoAccion[] = ['chelsea', 'yo', 'tarea', 'archivar']
@@ -256,7 +262,12 @@ export function systemPrompt(today: string, cfg: AsistenteConfig = { nombre_pers
     '- {"tipo":"crear","titulo":"…",("empresa":"…"),("prioridad":"urgente|normal|cuando"),("fecha":"YYYY-MM-DD"),("hora":"HH:MM"),("importante":true)}  → tarea nueva. ' +
       'La fecha ("para el viernes", "el 15 de noviembre", "en 3 días", "mañana") y la hora ("3pm", "a las 10") NUNCA van en el título: van en fecha/hora. ' +
       'Si dice "y ponla en calendar" / "agrégala al calendario" / "en la agenda", pon "calendar":true y quítalo del título. Sin eso, la tarea NO va a Calendar aunque tenga hora',
-    '- {"tipo":"calendar","ref":REF,("hora":"HH:MM"),("todo_el_dia":true)}  → "pon en calendar la de TOTT", "agrega al calendario el 3", "la anterior al calendar": crear el evento de una tarea que ya existe',
+    '- {"tipo":"calendar","ref":REF,("hora":"HH:MM"),("todo_el_dia":true)}  → "pon en calendar la de TOTT", "agrega al calendario el 3", "la anterior al calendar": crear el evento de una tarea que YA EXISTE en la lista (ref obligatorio)',
+    '- {"tipo":"evento","titulo":"…","fecha":"YYYY-MM-DD",("hora":"HH:MM"),("duracion_min":60),("nota":"…"),("repetir":{"cada":"dia|semana|mes",("dias":["LU","MA","MI","JU","VI","SA","DO"]),("hasta":"YYYY-MM-DD"),("veces":8)})}  → ' +
+      'un EVENTO en Google Calendar que NO es una tarea de la lista: "ponme en el calendario X el jueves a las 2", "agrega a google calendar una alarma/evento para X", "evento los viernes a las 2 pm hasta el 1 de diciembre", ' +
+      '"ocho sábados a las 2 pm" (repetir cada semana, dias ["SA"], veces 8), "todos los viernes hasta que te avise" (repetir cada semana, dias ["VI"], sin hasta ni veces), ' +
+      '"desde el jueves 12 hasta dic 1" (fecha = ese jueves, repetir cada semana dias ["JU"] hasta 2026-12-01). "nota: GL" / "nota GL" → nota. ' +
+      'Cada título distinto es SU PROPIA acción evento. Si la frase habla de "google calendar", "calendario" o "evento" y da un título nuevo, es evento, NUNCA crear ni calendar sobre una tarea existente, y NUNCA busques una tarea parecida',
     '- {"tipo":"pagos_listar",("empresa":"…"),("semana":true)}  → "pagos de IM", "qué pagos tengo", "qué pagos hay esta semana" (semana:true). ' +
       'Los pagos recurrentes solo se CONSULTAN por aquí; crearlos, cambiarlos o quitarlos se hace en la web (Settings): si lo pide, responde "desconocido" con texto "los pagos se administran en Settings → Pagos recurrentes"',
     '- {"tipo":"nota_empresa","empresa":"…","texto":"…","modo":"reemplazar|agregar"}  → "nota de IM: …", "apunta en PD que …" (agregar si dice agrega/suma/además)',
@@ -303,6 +314,9 @@ export function systemPrompt(today: string, cfg: AsistenteConfig = { nombre_pers
       '("la de marketing a las 10", "lo de WSH mejor el viernes", "la de Chelsea es de IM"), devuelve SOLO la acción corregida: "cambiar"/"posponer" con el ref de esa tarea si existe, ' +
       'o "crear" con el MISMO título del plan y solo el campo nuevo si era tarea nueva. No repitas las demás líneas ni las alarmas del plan. ' +
       'NUNCA devuelvas "borrar", "cancelar" ni "completar" por "quita X", "esa no", "déjala", "sin X": eso solo saca la línea del plan.',
+    'PLAN MAL ENTENDIDO: si tu último turno fue un plan y ella dice que entendiste mal ("no hablé de X", "eso no era", "no, me refería a…") y vuelve a decir lo que quiere, ' +
+      'devuelve SOLO las acciones de lo que dice AHORA, completas, como si fuera un mensaje nuevo (el plan anterior se descarta solo). No mezcles nada del plan anterior.',
+    'PREGUNTAS SOBRE TI: "¿cómo que está sin autorización?", "explícame", "¿por qué falló?", "¿qué quisiste decir?", "¿y eso?" tras un aviso ⚠️ tuyo → "pregunta" con el texto tal cual (NO "desconocido"): ella pregunta por algo que TÚ dijiste.',
     'CONVERSACIÓN: si el mensaje es una respuesta corta a tu último turno ("sí", "dale", "la segunda", "esa no, la otra", "lo mismo para PD", "¿y lo de ayer?", "cambia la hora a las 4"), ' +
       'resuélvelo con la CONVERSACIÓN RECIENTE del contexto: "la segunda" = la 2ª tarea mencionada en tu último mensaje (ahí viene su ref); "esa no, la otra" = la otra tarea mencionada; ' +
       '"lo mismo para PD" = repite la última acción que ella pidió, con empresa PD; "cambia la hora a las 4" = cambiar hora de la última tarea creada o mencionada. ' +
@@ -355,6 +369,32 @@ function hora(v: unknown): string | undefined {
   const mi = Number(m[2])
   if (h > 23 || mi > 59) return undefined
   return `${String(h).padStart(2, '0')}:${m[2]}`
+}
+
+const DIAS_SEMANA: DiaSemana[] = ['LU', 'MA', 'MI', 'JU', 'VI', 'SA', 'DO']
+const DIA_POR_NOMBRE: Record<string, DiaSemana> = {
+  lunes: 'LU', lu: 'LU', mo: 'LU', monday: 'LU',
+  martes: 'MA', ma: 'MA', tu: 'MA', tuesday: 'MA',
+  miercoles: 'MI', mi: 'MI', we: 'MI', wednesday: 'MI',
+  jueves: 'JU', ju: 'JU', th: 'JU', thursday: 'JU',
+  viernes: 'VI', vi: 'VI', fr: 'VI', friday: 'VI',
+  sabado: 'SA', sabados: 'SA', sa: 'SA', saturday: 'SA',
+  domingo: 'DO', domingos: 'DO', do: 'DO', su: 'DO', sunday: 'DO',
+}
+
+/** Fase 12b: the model's "repetir" → a clean Repeticion (or undefined when it is not one). */
+export function repeticion(v: unknown): Repeticion | undefined {
+  if (!v || typeof v !== 'object') return undefined
+  const r = v as Record<string, unknown>
+  const cadaRaw = str(r.cada)?.toLowerCase() ?? ''
+  const cada: Repeticion['cada'] | null = /^d[ií]a|daily/.test(cadaRaw) ? 'dia' : /^sem|week/.test(cadaRaw) ? 'semana' : /^mes|month/.test(cadaRaw) ? 'mes' : null
+  if (!cada) return undefined
+  const dias = Array.isArray(r.dias)
+    ? (r.dias.map((d) => DIA_POR_NOMBRE[normalizar(String(d)).replace(/[^a-z]/g, '')]).filter((d): d is DiaSemana => !!d && DIAS_SEMANA.includes(d)))
+    : []
+  const hasta = fecha(r.hasta)
+  const veces = typeof r.veces === 'number' && r.veces > 0 ? Math.min(Math.round(r.veces), 400) : undefined
+  return { cada, dias: dias.length > 0 ? Array.from(new Set(dias)) : undefined, hasta: veces ? undefined : hasta, veces }
 }
 
 /**
@@ -490,6 +530,18 @@ export function validarAcciones(raw: unknown): AccionLlm[] {
       case 'calendar':
         if (ref) out.push({ tipo, ref, hora: hora(a.hora), todo_el_dia: a.todo_el_dia === true })
         break
+      case 'evento': {
+        const titulo = str(a.titulo) ?? str(a.texto)
+        const f = fecha(a.fecha)
+        if (!titulo || !f) {
+          out.push({ tipo: 'desconocido', texto: titulo ? `evento «${titulo}»: no sé qué día` : 'evento sin título' })
+          break
+        }
+        const rep = repeticion(a.repetir)
+        const dur = typeof a.duracion_min === 'number' && a.duracion_min >= 5 && a.duracion_min <= 1440 ? Math.round(a.duracion_min) : undefined
+        out.push({ tipo, titulo, fecha: f, hora: hora(a.hora), duracion_min: dur, nota: str(a.nota), repetir: rep })
+        break
+      }
       case 'pagos_listar':
         out.push({ tipo, empresa: str(a.empresa), semana: a.semana === true })
         break

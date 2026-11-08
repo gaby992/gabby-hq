@@ -6,25 +6,82 @@
       "emoji": "👀",
       "titulo": "Ver",
       "lineas": [
-        { "ejemplo": "/hoy", "que": "la lista completa de hoy, por empresa (la misma de las 8:00)" },
-        { "ejemplo": "cierre", "que": "el cierre del día (el mismo de las 6:00 pm)" },
-        { "ejemplo": "¿qué sigue?", "que": "una tarea para ahora, tres después, tres por vencer y tus notas recientes" },
-        { "ejemplo": "solo urgentes", "que": "lo mismo, sin la parte de \"por vencer\"" },
-        { "ejemplo": "qué vence esta semana", "que": "solo lo que vence de aquí al domingo" },
-        { "ejemplo": "qué sigue de IM", "que": "lo mismo, pero solo de esa empresa" },
-        { "ejemplo": "/pendientes IM", "que": "todo lo abierto de IM, numerado" },
-        { "ejemplo": "¿qué tengo hoy? · ¿qué me queda pendiente?", "que": "te lo cuenta en un párrafo (qué no puede esperar, qué lleva más de un mes vencido, cuántos correos piden respuesta) y debajo la lista corta numerada; cierra proponiendo por dónde arrancar. También el botón 📋 Hoy del menú" },
-        { "ejemplo": "¿qué tengo mañana?", "que": "lo de mañana narrado y numerado (botón 📅 Mañana)" },
-        { "ejemplo": "¿qué hay esta semana?", "que": "por día, de lunes a domingo, con lo vencido que arrastras" },
-        { "ejemplo": "¿cómo va IM?", "que": "el estado de una empresa en prosa: abiertas, vencidas, esperando, correos pendientes y la nota \"por dónde iba\"" },
-        { "ejemplo": "¿qué tengo estancado?", "que": "tareas sin moverse en 14+ días y lo que lleva 3+ días esperando; te propone pasarlas a Después como plan [✅ Hacer todo] [✏️ No, corrijo], y corriges (\"cancela la 2\", \"la 3 déjala\")" },
-        { "ejemplo": "mándame el tablero", "que": "una foto del tablero (KPIs + Hoy sí o sí · Mañana · Esperando · Correos) con el botón 🖥 Abrir tablero; también llega sola antes de la alarma de las 8 y del cierre (botón 🖥 Tablero)" },
-        { "ejemplo": "qué tengo esperando", "que": "a quién esperas y desde cuándo, en prosa, y debajo la lista ⏳ numerada (botón ⏳ Esperando); no entra en \"qué sigue\" ni en \"Hoy sí o sí\"" },
-        { "ejemplo": "correos · correos de Chelsea · lo más importante de los correos de PD · mi correo de IM", "que": "cualquier frase que mencione correos pide correos (nunca tareas): te cuenta en un párrafo cuántos hay, cuáles urgen y quién espera respuesta, y debajo la lista numerada por urgencia; \"Chelsea\" ahí es el buzón IM Chelsea (coincidencia parcial sobre el nombre o el email de la cuenta; si hay varias, botones). \"lo más importante\" / \"urgentes\" / \"qué necesita respuesta\" deja solo alta + necesita respuesta. Luego \"el 3 lo hago yo\", \"el 2 para Chelsea\", \"archiva el 5\". La línea se tacha sola cuando se resuelve" },
-        { "ejemplo": "el 5 es silencio · el 5 es solo app · el 5 es alerta", "que": "aprende ese remitente (su dominio, o el email si es gmail/outlook) en la lista de esa cuenta y aplica el nivel al correo; \"archiva el 5 y márcalo como silencio\" hace las dos cosas. Si ya estaba en otra lista, lo mueve y te lo dice" },
-        { "ejemplo": "¿qué cerré ayer?", "que": "pregunta libre: te contesta con tus tareas y notas (también \"? qué tengo hoy\")" },
-        { "ejemplo": "mis alarmas", "que": "tus alarmas pendientes, numeradas" },
-        { "ejemplo": "pagos de IM", "que": "los pagos recurrentes de esa empresa; \"qué pagos hay esta semana\" filtra" }
+        {
+          "ejemplo": "/hoy",
+          "que": "la lista completa de hoy, por empresa (la misma de las 8:00)"
+        },
+        {
+          "ejemplo": "cierre",
+          "que": "el cierre del día (el mismo de las 6:00 pm)"
+        },
+        {
+          "ejemplo": "¿qué sigue?",
+          "que": "una tarea para ahora, tres después, tres por vencer y tus notas recientes"
+        },
+        {
+          "ejemplo": "solo urgentes",
+          "que": "lo mismo, sin la parte de \"por vencer\""
+        },
+        {
+          "ejemplo": "qué vence esta semana",
+          "que": "solo lo que vence de aquí al domingo"
+        },
+        {
+          "ejemplo": "qué sigue de IM",
+          "que": "lo mismo, pero solo de esa empresa"
+        },
+        {
+          "ejemplo": "/pendientes IM",
+          "que": "todo lo abierto de IM, numerado"
+        },
+        {
+          "ejemplo": "¿qué tengo hoy? · ¿qué me queda pendiente?",
+          "que": "te lo cuenta en un párrafo (qué no puede esperar, qué lleva más de un mes vencido, cuántos correos piden respuesta) y debajo la lista corta numerada; cierra proponiendo por dónde arrancar. También el botón 📋 Hoy del menú"
+        },
+        {
+          "ejemplo": "¿qué tengo mañana?",
+          "que": "lo de mañana narrado y numerado (botón 📅 Mañana)"
+        },
+        {
+          "ejemplo": "¿qué hay esta semana?",
+          "que": "por día, de lunes a domingo, con lo vencido que arrastras"
+        },
+        {
+          "ejemplo": "¿cómo va IM?",
+          "que": "el estado de una empresa en prosa: abiertas, vencidas, esperando, correos pendientes y la nota \"por dónde iba\""
+        },
+        {
+          "ejemplo": "¿qué tengo estancado?",
+          "que": "tareas sin moverse en 14+ días y lo que lleva 3+ días esperando; te propone pasarlas a Después como plan [✅ Hacer todo] [✏️ No, corrijo], y corriges (\"cancela la 2\", \"la 3 déjala\")"
+        },
+        {
+          "ejemplo": "mándame el tablero",
+          "que": "una foto del tablero (KPIs + Hoy sí o sí · Mañana · Esperando · Correos) con el botón 🖥 Abrir tablero; también llega sola antes de la alarma de las 8 y del cierre (botón 🖥 Tablero)"
+        },
+        {
+          "ejemplo": "qué tengo esperando",
+          "que": "a quién esperas y desde cuándo, en prosa, y debajo la lista ⏳ numerada (botón ⏳ Esperando); no entra en \"qué sigue\" ni en \"Hoy sí o sí\""
+        },
+        {
+          "ejemplo": "correos · correos de Chelsea · lo más importante de los correos de PD · mi correo de IM",
+          "que": "cualquier frase que mencione correos pide correos (nunca tareas): te cuenta en un párrafo cuántos hay, cuáles urgen y quién espera respuesta, y debajo la lista numerada por urgencia; \"Chelsea\" ahí es el buzón IM Chelsea (coincidencia parcial sobre el nombre o el email de la cuenta; si hay varias, botones). \"lo más importante\" / \"urgentes\" / \"qué necesita respuesta\" deja solo alta + necesita respuesta. Luego \"el 3 lo hago yo\", \"el 2 para Chelsea\", \"archiva el 5\". La línea se tacha sola cuando se resuelve"
+        },
+        {
+          "ejemplo": "el 5 es silencio · el 5 es solo app · el 5 es alerta",
+          "que": "aprende ese remitente (su dominio, o el email si es gmail/outlook) en la lista de esa cuenta y aplica el nivel al correo; \"archiva el 5 y márcalo como silencio\" hace las dos cosas. Si ya estaba en otra lista, lo mueve y te lo dice"
+        },
+        {
+          "ejemplo": "¿qué cerré ayer?",
+          "que": "pregunta libre: te contesta con tus tareas y notas (también \"? qué tengo hoy\")"
+        },
+        {
+          "ejemplo": "mis alarmas",
+          "que": "tus alarmas pendientes, numeradas"
+        },
+        {
+          "ejemplo": "pagos de IM",
+          "que": "los pagos recurrentes de esa empresa; \"qué pagos hay esta semana\" filtra"
+        }
       ]
     },
     {
@@ -32,17 +89,50 @@
       "emoji": "➕",
       "titulo": "Agregar",
       "lineas": [
-        { "ejemplo": "urgente IM llamar a Juan mañana 3pm", "que": "tarea con urgencia, empresa, fecha y hora, en el orden que quieras" },
-        { "ejemplo": "para PD: mandar propuesta el viernes", "que": "otra forma de decir la empresa" },
-        { "ejemplo": "revisar contrato el 15 de noviembre", "que": "si falta empresa o urgencia, te pregunta con botones" },
-        { "ejemplo": "IM revisar propuesta el viernes y ponla en calendar", "que": "además crea el evento en Google Calendar (sin hora, te pregunta a qué hora)" },
-        { "ejemplo": "alarma mañana 9am revisar pagos", "que": "alarma propia: te llega un ⏰ a esa hora (no es una tarea)" },
-        { "ejemplo": "recuérdame el viernes a las 10 llamar al contador", "que": "lo mismo, dicho de otra forma; \"avísame en 2 horas …\" también" },
-        { "ejemplo": "nota IM: vamos por la propuesta 2", "que": "la nota \"por dónde iba\" de IM (reemplaza la que había)" },
-        { "ejemplo": "nota IM + ya respondió el cliente", "que": "agrega una línea a esa nota; \"nota IM:\" sola la borra" },
-        { "ejemplo": "nota en paypal: ya mandé el de marzo", "que": "comentario con fecha al pie de esa tarea" },
-        { "ejemplo": "radar probar Notion para clientes", "que": "una idea para el Radar, no una tarea" },
-        { "ejemplo": "🎤 audio", "que": "todo lo de arriba dictado (máximo 2 minutos); te repite lo que entendió" }
+        {
+          "ejemplo": "urgente IM llamar a Juan mañana 3pm",
+          "que": "tarea con urgencia, empresa, fecha y hora, en el orden que quieras"
+        },
+        {
+          "ejemplo": "para PD: mandar propuesta el viernes",
+          "que": "otra forma de decir la empresa"
+        },
+        {
+          "ejemplo": "revisar contrato el 15 de noviembre",
+          "que": "si falta empresa o urgencia, te pregunta con botones"
+        },
+        {
+          "ejemplo": "IM revisar propuesta el viernes y ponla en calendar",
+          "que": "además crea el evento en Google Calendar (sin hora, te pregunta a qué hora)"
+        },
+        {
+          "ejemplo": "alarma mañana 9am revisar pagos",
+          "que": "alarma propia: te llega un ⏰ a esa hora (no es una tarea)"
+        },
+        {
+          "ejemplo": "recuérdame el viernes a las 10 llamar al contador",
+          "que": "lo mismo, dicho de otra forma; \"avísame en 2 horas …\" también"
+        },
+        {
+          "ejemplo": "nota IM: vamos por la propuesta 2",
+          "que": "la nota \"por dónde iba\" de IM (reemplaza la que había)"
+        },
+        {
+          "ejemplo": "nota IM + ya respondió el cliente",
+          "que": "agrega una línea a esa nota; \"nota IM:\" sola la borra"
+        },
+        {
+          "ejemplo": "nota en paypal: ya mandé el de marzo",
+          "que": "comentario con fecha al pie de esa tarea"
+        },
+        {
+          "ejemplo": "radar probar Notion para clientes",
+          "que": "una idea para el Radar, no una tarea"
+        },
+        {
+          "ejemplo": "🎤 audio",
+          "que": "todo lo de arriba dictado (máximo 2 minutos); te repite lo que entendió"
+        }
       ]
     },
     {
@@ -50,18 +140,54 @@
       "emoji": "✅",
       "titulo": "Actuar sobre tareas",
       "lineas": [
-        { "ejemplo": "listo 3", "que": "la cierra (también \"el 3 ya está\", \"listo paypal\")" },
-        { "ejemplo": "pasa 2,5", "que": "las pasa a mañana; \"pasa todo\" mueve toda la lista" },
-        { "ejemplo": "pasa el 5 al lunes", "que": "a otro día: mañana, el viernes, en 3 días, el 15 de noviembre…" },
-        { "ejemplo": "9 cancelar, no se va a hacer", "que": "queda cerrada con la nota \"cancelada — no se va a hacer\"; no se borra" },
-        { "ejemplo": "borra 3", "que": "la elimina de verdad, siempre con botón de confirmación (también \"bórrala\")" },
-        { "ejemplo": "11 se llama URo pendiente", "que": "le cambia el título" },
-        { "ejemplo": "paypal urgente", "que": "cambia la urgencia; \"paypal para el viernes\" la fecha; \"paypal es de PD\" la empresa; \"paypal mañana 3pm\" fecha y hora" },
-        { "ejemplo": "la 5 es de PD", "que": "le pone empresa a una tarea \"sin empresa\" (o se la cambia) por su número de la última lista; en la web, el badge gris \"sin empresa\" de la tarjeta abre el selector" },
-        { "ejemplo": "pon en calendar la de TOTT", "que": "crea el evento de una tarea que ya existe" },
-        { "ejemplo": "la de TOTT está esperando a Andrew", "que": "la deja en ⏳ Esperando con \"de quién\" (también \"la 3 esperando a Juan\"); \"la de TOTT ya no espera\" / \"la 3 vuelve a mí\" la retoma" },
-        { "ejemplo": "la anterior es urgente", "que": "\"la anterior\" = la última tarea de la que hablaste" },
-        { "ejemplo": "quita alarma 2", "que": "borra una alarma propia (número de \"mis alarmas\")" }
+        {
+          "ejemplo": "listo 3",
+          "que": "la cierra (también \"el 3 ya está\", \"listo paypal\")"
+        },
+        {
+          "ejemplo": "pasa 2,5",
+          "que": "las pasa a mañana; \"pasa todo\" mueve toda la lista"
+        },
+        {
+          "ejemplo": "pasa el 5 al lunes",
+          "que": "a otro día: mañana, el viernes, en 3 días, el 15 de noviembre…"
+        },
+        {
+          "ejemplo": "9 cancelar, no se va a hacer",
+          "que": "queda cerrada con la nota \"cancelada — no se va a hacer\"; no se borra"
+        },
+        {
+          "ejemplo": "borra 3",
+          "que": "la elimina de verdad, siempre con botón de confirmación (también \"bórrala\")"
+        },
+        {
+          "ejemplo": "11 se llama URo pendiente",
+          "que": "le cambia el título"
+        },
+        {
+          "ejemplo": "paypal urgente",
+          "que": "cambia la urgencia; \"paypal para el viernes\" la fecha; \"paypal es de PD\" la empresa; \"paypal mañana 3pm\" fecha y hora"
+        },
+        {
+          "ejemplo": "la 5 es de PD",
+          "que": "le pone empresa a una tarea \"sin empresa\" (o se la cambia) por su número de la última lista; en la web, el badge gris \"sin empresa\" de la tarjeta abre el selector"
+        },
+        {
+          "ejemplo": "pon en calendar la de TOTT",
+          "que": "crea el evento de una tarea que ya existe"
+        },
+        {
+          "ejemplo": "la de TOTT está esperando a Andrew",
+          "que": "la deja en ⏳ Esperando con \"de quién\" (también \"la 3 esperando a Juan\"); \"la de TOTT ya no espera\" / \"la 3 vuelve a mí\" la retoma"
+        },
+        {
+          "ejemplo": "la anterior es urgente",
+          "que": "\"la anterior\" = la última tarea de la que hablaste"
+        },
+        {
+          "ejemplo": "quita alarma 2",
+          "que": "borra una alarma propia (número de \"mis alarmas\")"
+        }
       ]
     },
     {
@@ -69,18 +195,54 @@
       "emoji": "🧾",
       "titulo": "Varias de una vez",
       "lineas": [
-        { "ejemplo": "1 listo · 3 terminado · 2, 5 hechas", "que": "cierra esos números de la última lista que te mandé (la de las 8, el cierre, \"qué sigue\", una pedida o la de correos), sin pasar por el modelo" },
-        { "ejemplo": "1 terminado / 9 cancelar no se va hacer / 11 se llama URo, pasar para mañana / 12 pasar para mañana", "que": "te muestra el plan numerado y esperas [✅ Hacer todo] o [✏️ No, corrijo]; nada se ejecuta antes" },
-        { "ejemplo": "el 3 ya está y pasa el 4 al lunes", "que": "dos órdenes en una frase, separadas por \"y\", comas o barras" },
-        { "ejemplo": "alarma mañana 3pm revisar pagos y agrégala como tarea", "que": "una alarma y una tarea a la vez" },
-        { "ejemplo": "el 2 es urgente y es de IM", "que": "varios cambios a la misma tarea en una línea" },
-        { "ejemplo": "sí · la segunda · esa no, la otra · lo mismo para PD", "que": "el bot recuerda lo último que hablaron (30 min): respuestas cortas funcionan" },
-        { "ejemplo": "organízame", "que": "repasa tus pendientes uno por uno con botones (también \"no sé por dónde empezar\", \"estoy abrumada\"); \"para\" sale" },
-        { "ejemplo": "olvida lo anterior", "que": "limpia la conversación y empieza de cero" },
-        { "ejemplo": "mañana los correos de Chelsea, el miércoles armar el equipo de marketing y el jueves pasar $500 a WSH", "que": "tu semana en un mensaje: la arma por día, sin duplicar lo que ya existía, y te la muestra para que digas \"así queda\"" },
-        { "ejemplo": "quita el marketing repetido · déjala donde estaba · la de marketing a las 10 · olvídalo", "que": "corrige el plan antes de aprobarlo: te muestra solo lo que cambia y vuelve a preguntar; nunca borra ni completa una tarea por una corrección" },
-        { "ejemplo": "el correo de Andrew lo hago yo · el 15 para Chelsea · archiva los de marketing de hoy", "que": "decide correos sin botones: lo hago yo / tarea crean la tarea con el Ref del correo; archivar lo saca del inbox de Gmail; varios a la vez pasan por el plan. Un correo respondido o pasado a Chelsea conserva [Lo hago yo] 48 h en su alerta" },
-        { "ejemplo": "me da flojera armar el equipo de marketing", "que": "la parte en 3-5 pasos (subtareas) y te dice solo el primero; \"siguiente paso\" avanza" }
+        {
+          "ejemplo": "1 listo · 3 terminado · 2, 5 hechas",
+          "que": "cierra esos números de la última lista que te mandé (la de las 8, el cierre, \"qué sigue\", una pedida o la de correos), sin pasar por el modelo"
+        },
+        {
+          "ejemplo": "1 terminado / 9 cancelar no se va hacer / 11 se llama URo, pasar para mañana / 12 pasar para mañana",
+          "que": "te muestra el plan numerado y esperas [✅ Hacer todo] o [✏️ No, corrijo]; nada se ejecuta antes"
+        },
+        {
+          "ejemplo": "el 3 ya está y pasa el 4 al lunes",
+          "que": "dos órdenes en una frase, separadas por \"y\", comas o barras"
+        },
+        {
+          "ejemplo": "alarma mañana 3pm revisar pagos y agrégala como tarea",
+          "que": "una alarma y una tarea a la vez"
+        },
+        {
+          "ejemplo": "el 2 es urgente y es de IM",
+          "que": "varios cambios a la misma tarea en una línea"
+        },
+        {
+          "ejemplo": "sí · la segunda · esa no, la otra · lo mismo para PD",
+          "que": "el bot recuerda lo último que hablaron (30 min): respuestas cortas funcionan"
+        },
+        {
+          "ejemplo": "organízame",
+          "que": "repasa tus pendientes uno por uno con botones (también \"no sé por dónde empezar\", \"estoy abrumada\"); \"para\" sale"
+        },
+        {
+          "ejemplo": "olvida lo anterior",
+          "que": "limpia la conversación y empieza de cero"
+        },
+        {
+          "ejemplo": "mañana los correos de Chelsea, el miércoles armar el equipo de marketing y el jueves pasar $500 a WSH",
+          "que": "tu semana en un mensaje: la arma por día, sin duplicar lo que ya existía, y te la muestra para que digas \"así queda\""
+        },
+        {
+          "ejemplo": "quita el marketing repetido · déjala donde estaba · la de marketing a las 10 · olvídalo",
+          "que": "corrige el plan antes de aprobarlo: te muestra solo lo que cambia y vuelve a preguntar; nunca borra ni completa una tarea por una corrección"
+        },
+        {
+          "ejemplo": "el correo de Andrew lo hago yo · el 15 para Chelsea · archiva los de marketing de hoy",
+          "que": "decide correos sin botones: lo hago yo / tarea crean la tarea con el Ref del correo; archivar lo saca del inbox de Gmail; varios a la vez pasan por el plan. Un correo respondido o pasado a Chelsea conserva [Lo hago yo] 48 h en su alerta"
+        },
+        {
+          "ejemplo": "me da flojera armar el equipo de marketing",
+          "que": "la parte en 3-5 pasos (subtareas) y te dice solo el primero; \"siguiente paso\" avanza"
+        }
       ]
     },
     {
@@ -88,13 +250,34 @@
       "emoji": "ℹ️",
       "titulo": "Otros",
       "lineas": [
-        { "ejemplo": "/ayuda", "que": "el resumen corto; \"/ayuda todo\" manda esta guía completa" },
-        { "ejemplo": "/menu · /ocultar", "que": "el menú fijo bajo el teclado: 📋 Hoy · 📅 Mañana · ⏳ Esperando · 📧 Correos · 🎯 ¿Qué sigue? · 🖥 Tablero. Cada botón es una de estas preguntas; aparece solo con el primer mensaje y con cada alarma de las 8" },
-        { "ejemplo": "botones", "que": "aparecen cuando falta empresa o urgencia, cuando varias tareas coinciden, antes de borrar, y en cada ⏰ (Listo · +1h · Mañana)" },
-        { "ejemplo": "eso no son correos, son tareas · no, me refería a los correos de PD", "que": "corrige cómo leyó tu último mensaje: lo reconoce («Tienes razón, lo leí mal») y lo reintenta con la otra lectura, sin tomarlo como una orden nueva" },
-        { "ejemplo": "\"No te entendí\"", "que": "si no capta la frase, te pregunta si es una tarea nueva, una orden o una alarma" },
-        { "ejemplo": "hora de Cancún", "que": "\"hoy\", \"mañana\" y las horas van en hora de Cancún; \"el viernes\" siempre es el próximo viernes" },
-        { "ejemplo": "en la web", "que": "/hoy (tablero por horizonte: Hoy sí o sí · Mañana · Esta semana · Esperando · Después · Correos, arrastra las tarjetas; pestañas Prioridad, Empresas y Calendario; ¿Qué sigue?; y el chat 💬 abajo a la derecha: el mismo asistente que en Telegram, misma conversación, mismos planes con botones; el tablero se refresca solo), /tasks (tareas y notas), /correo, /settings (empresas, Conexiones de Google, Pagos recurrentes)" }
+        {
+          "ejemplo": "/ayuda",
+          "que": "el resumen corto; \"/ayuda todo\" manda esta guía completa"
+        },
+        {
+          "ejemplo": "/menu · /ocultar",
+          "que": "el menú fijo bajo el teclado: 📋 Hoy · 📅 Mañana · ⏳ Esperando · 📧 Correos · 🎯 ¿Qué sigue? · 🖥 Tablero. Cada botón es una de estas preguntas; aparece solo con el primer mensaje y con cada alarma de las 8"
+        },
+        {
+          "ejemplo": "botones",
+          "que": "aparecen cuando falta empresa o urgencia, cuando varias tareas coinciden, antes de borrar, y en cada ⏰ (Listo · +1h · Mañana)"
+        },
+        {
+          "ejemplo": "eso no son correos, son tareas · no, me refería a los correos de PD",
+          "que": "corrige cómo leyó tu último mensaje: lo reconoce («Tienes razón, lo leí mal») y lo reintenta con la otra lectura, sin tomarlo como una orden nueva"
+        },
+        {
+          "ejemplo": "\"No te entendí\"",
+          "que": "si no capta la frase, te pregunta si es una tarea nueva, una orden o una alarma"
+        },
+        {
+          "ejemplo": "hora de Cancún",
+          "que": "\"hoy\", \"mañana\" y las horas van en hora de Cancún; \"el viernes\" siempre es el próximo viernes"
+        },
+        {
+          "ejemplo": "en la web",
+          "que": "/hoy (tablero por horizonte: Hoy sí o sí · Mañana · Esta semana · Esperando · Después · Correos, arrastra las tarjetas; pestañas Prioridad, Empresas y Calendario; ¿Qué sigue?; y el chat 💬 abajo a la derecha: el mismo asistente que en Telegram, misma conversación, mismos planes con botones; el tablero se refresca solo), /tasks (tareas y notas), /correo, /settings (empresas, Conexiones de Google, Pagos recurrentes)"
+        }
       ]
     }
   ]

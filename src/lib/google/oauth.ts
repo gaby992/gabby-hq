@@ -197,3 +197,72 @@ export async function desconectar(id: string): Promise<void> {
   const { error } = await db.from('conexiones_google').delete().eq('id', id)
   if (error) throw new GoogleError(`Supabase conexiones_google: ${error.message}`)
 }
+
+// ── Fase 12b: Google's errors, said the way an assistant would ─────────────
+// "Unauthorized" or "invalid_grant" mean nothing to Gabby. The bot explains
+// what happened and what to do, with the link that fixes it.
+
+export interface ErrorGoogleExplicado {
+  /** One or two short sentences, no technical words. */
+  texto: string
+  /** True when the fix is Settings → Conexiones → Reconectar. */
+  reconectar: boolean
+}
+
+export function urlConexiones(): string {
+  return `${(process.env.APP_URL ?? 'https://gabby-hq.vercel.app').replace(/\/$/, '')}/settings/conexiones`
+}
+
+export function explicarErrorGoogle(err: unknown, email?: string | null): ErrorGoogleExplicado {
+  const m = err instanceof Error ? err.message : String(err)
+  const quien = email ? ` de ${email}` : ''
+  if (/no hay cuenta de google conectada/i.test(m)) {
+    return { texto: 'No tengo ninguna cuenta de Google con Calendar activo. Conéctala en Settings → Conexiones y márcale Calendar.', reconectar: true }
+  }
+  if (/unauthorized_client|^unauthorized$|\bunauthorized\b/i.test(m)) {
+    return { texto: `Google ya no acepta el permiso guardado${quien}: se dio con una configuración anterior de la app. Reconecta la cuenta y vuelve a pedírmelo.`, reconectar: true }
+  }
+  if (/invalid_grant|token has been expired or revoked|expired|revoked/i.test(m)) {
+    return { texto: `El permiso de Google${quien} caducó (mientras la app esté en modo prueba, Google lo corta a los 7 días). Reconecta la cuenta y vuelve a pedírmelo.`, reconectar: true }
+  }
+  if (/insufficient|forbidden|403/i.test(m)) {
+    return { texto: `Google dice que la cuenta${quien} no tiene permiso para el calendario. Reconéctala aceptando todos los permisos.`, reconectar: true }
+  }
+  if (/faltan GOOGLE_CLIENT_ID/i.test(m)) {
+    return { texto: 'Falta la configuración de Google en Vercel (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET o APP_ENCRYPTION_KEY).', reconectar: false }
+  }
+  return { texto: `Google Calendar no respondió bien (${m}). Si se repite, reconecta la cuenta.`, reconectar: false }
+}
+
+/** The warning line the bot shows when Calendar failed, with the fix as a link. */
+export function avisoCalendar(err: unknown, email?: string | null): string {
+  const e = explicarErrorGoogle(err, email)
+  const link = e.reconectar ? ` <a href="${urlConexiones()}">🔗 Reconectar Google</a>` : ''
+  return `⚠️ No pude ponerlo en Calendar. ${e.texto}${link}`
+}
+
+/**
+ * Fase 12b: the morning health check. Asks Google for a token on every active
+ * connection; returns one plain line per connection Google refuses (with the
+ * fix), nothing when all is well. Never throws: a Supabase hiccup is just no lines.
+ */
+export async function avisosConexiones(): Promise<string[]> {
+  if (!googleConfigurado()) return []
+  try {
+    const { data, error } = await createServerClient().from('conexiones_google').select('*').eq('activa', true)
+    if (error || !data) return []
+    const out: string[] = []
+    for (const conn of data as ConexionRow[]) {
+      if (!conn.usa_calendar && !conn.usa_gmail) continue
+      try {
+        await accessToken(conn)
+      } catch (err) {
+        const e = explicarErrorGoogle(err, conn.email)
+        out.push(`🔌 ${e.texto}${e.reconectar ? ` <a href="${urlConexiones()}">Reconectar</a>` : ''}`)
+      }
+    }
+    return out
+  } catch {
+    return []
+  }
+}

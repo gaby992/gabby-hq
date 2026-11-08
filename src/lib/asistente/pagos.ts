@@ -8,7 +8,7 @@
 import { createServerClient } from '@/lib/supabase-server'
 import type { PagoRecurrente } from '@/types'
 import { actualizarEventoPago, borrarEvento, crearEventoPago, type PagoEvento } from '@/lib/google/calendar'
-import { googleConfigurado } from '@/lib/google/oauth'
+import { avisoCalendar, googleConfigurado } from '@/lib/google/oauth'
 import { addDays, cancunYmd, formatVenceEs } from './cancun'
 import { normalizar } from './acciones'
 import { mensajeError } from '@/lib/errores'
@@ -83,7 +83,7 @@ export async function sincronizarPago(id: string): Promise<string | null> {
     return null
   } catch (err) {
     console.error(`[pagos] calendar: ${errorMsg(err)}`)
-    return `⚠️ sin evento en Calendar: ${errorMsg(err)}`
+    return avisoCalendar(err)
   }
 }
 

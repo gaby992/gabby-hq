@@ -15,7 +15,8 @@ export async function POST(request: Request) {
   if (!taskId) return NextResponse.json({ error: 'task_id requerido' }, { status: 400 })
   try {
     const r = await agregarACalendar(taskId, { todoElDia: body?.todo_el_dia === true })
-    if (r.aviso) return NextResponse.json({ ok: false, error: r.aviso.replace(/^⚠️ sin evento en Calendar: /, '') }, { status: 400 })
+    // The bot's warning carries a Telegram link; the web shows the plain sentence.
+    if (r.aviso) return NextResponse.json({ ok: false, error: r.aviso.replace(/^⚠️ (?:sin evento en Calendar: |No pude ponerlo en Calendar\. )/, '').replace(/\s*<a [^>]*>.*?<\/a>/, '').trim() }, { status: 400 })
     return NextResponse.json({ ok: true, confirmacion: r.confirmacion })
   } catch (err) {
     return NextResponse.json({ error: mensajeError(err) }, { status: 500 })

@@ -28,6 +28,8 @@ import { dejarDeEsperar, enviarListaEsperando, moverTarea } from './esperando'
 import { confirmacionAlarma, crearRecordatorio, instanteDe } from './recordatorios'
 import { confirmacion, guardarTarea } from './tareas'
 import { agregarACalendar, cuandoDe } from '@/lib/google/sync'
+import { crearEventoLibre, describirRepeticion, primeraFechaEn } from '@/lib/google/calendar'
+import { avisoCalendar } from '@/lib/google/oauth'
 import { textoListaPagos } from './pagos'
 import { dividirTarea, siguientePaso } from './pasos'
 import { buscarParecida, claveComun, emparejarParecidas, nombradaEn, similitud } from './similitud'
@@ -226,7 +228,7 @@ function emparejarCrear(acciones: AccionResuelta[], ctx: ContextoInterprete): Ac
 const ICONO: Record<AccionLlm['tipo'], string> = {
   completar: '✅', cancelar: '🗑', borrar: '❌', posponer: '➡️', renombrar: '✏️', cambiar: '✏️', crear: '➕',
   nota_empresa: '📝', nota_tarea: '📎', alarma: '⏰', pregunta: '❓', que_sigue: '🎯', lista: '📋', calendar: '📅',
-  pagos_listar: '💳', dividir: '🪜', siguiente_paso: '🪜', correo: '📧', esperar: '⏳', esperando: '⏳', tablero: '🖥', despues: '📦', correos_lista: '📧', desconocido: '🤷',
+  pagos_listar: '💳', dividir: '🪜', siguiente_paso: '🪜', correo: '📧', esperar: '⏳', esperando: '⏳', tablero: '🖥', despues: '📦', correos_lista: '📧', evento: '📆', desconocido: '🤷',
 }
 
 function fechaDicha(ymd: string, today: string): string {
@@ -272,6 +274,12 @@ function frase(a: AccionResuelta, today: string, conTarea: boolean): string {
     case 'que_sigue': return `Qué sigue${a.empresa ? ` de ${a.empresa}` : ''}${a.solo_urgentes ? ' (solo urgentes)' : ''}${a.solo_vencer ? ' (por vencer)' : ''}`
     case 'lista': return a.lista === 'tarde' ? 'Mandar el cierre del día' : a.lista === 'pendientes' ? `Mandar todo lo pendiente de ${a.empresa_ref?.name.trim() ?? a.empresa ?? '?'}` : 'Mandar la lista completa de hoy'
     case 'calendar': return `Poner en calendar${tt}${a.hora ? ` a las ${formatHoraEs(a.hora)}` : a.todo_el_dia ? ' (todo el día)' : ''}`
+    case 'evento': {
+      // Fase 12b: "📆 Evento «Love on Hire» · jueves 2:00 pm los jueves hasta el 1 de dic · nota GL"
+      const cuando = a.hora ? `${formatVenceEs(a.fecha)} ${formatHoraEs(a.hora)}` : `${formatVenceEs(a.fecha)} (todo el día)`
+      const rep = describirRepeticion(a.repetir, a.fecha)
+      return `Evento «${corto(a.titulo)}» · ${cuando}${rep ? ` · ${rep}` : ''}${a.nota ? ` · nota ${corto(a.nota, 30)}` : ''}`
+    }
     case 'pagos_listar': return `Listar pagos${a.empresa_ref ? ` de ${a.empresa_ref.name.trim()}` : ''}${a.semana ? ' de esta semana' : ''}`
     case 'dividir': return `Dividir en pasos${tt}`
     case 'siguiente_paso': return `Siguiente paso${tt}`
@@ -329,6 +337,7 @@ function simboloPlan(a: AccionResuelta): string {
 /** The task title a plan line is about (for matching corrections and alarms against it). */
 export function tituloDe(a: AccionResuelta): string {
   if (a.tipo === 'crear') return a.existente ? a.existente.text : a.titulo
+  if (a.tipo === 'evento') return a.titulo
   if (a.tipo === 'alarma') return a.texto
   if (a.tipo === 'correo') return (a.correos ?? []).map((c) => `${c.de_nombre ?? c.de_email ?? ''} ${c.asunto ?? ''}`).join(' · ')
   return a.tarea?.text ?? ('ref' in a && a.ref ? a.ref : '')
@@ -649,6 +658,19 @@ export async function ejecutarUna(chatId: number, a: AccionResuelta): Promise<st
       // In a plan, no hour → all-day (a single action asks with buttons in the webhook).
       const r = await agregarACalendar(tareaDe(a).id, { hora: a.hora ?? null, todoElDia: !a.hora })
       return r.confirmacion ?? r.aviso ?? '📅 sin cambios'
+    }
+    case 'evento': {
+      // Fase 12b: straight to Calendar, no task. A weekly repeat starts on the first matching weekday.
+      const fecha = a.repetir?.cada === 'semana' && a.repetir.dias && a.repetir.dias.length > 0 ? primeraFechaEn(a.fecha, a.repetir.dias) : a.fecha
+      try {
+        const r = await crearEventoLibre({ titulo: a.titulo, fecha, hora: a.hora ?? null, duracion_min: a.duracion_min, nota: a.nota ?? null, repetir: a.repetir ?? null })
+        const cuando = a.hora ? `${formatVenceEs(fecha)} ${formatHoraEs(a.hora)}` : `${formatVenceEs(fecha)} (todo el día)`
+        const rep = describirRepeticion(a.repetir, fecha)
+        return `📆 En Calendar: «${a.titulo}» · ${cuando}${rep ? ` · ${rep}` : ''}${a.nota ? ` · nota ${a.nota}` : ''}${r.link ? ` · <a href="${r.link}">abrir</a>` : ''}`
+      } catch (err) {
+        console.error(`[plan] evento: ${mensajeError(err)}`)
+        return avisoCalendar(err)
+      }
     }
     case 'pagos_listar':
       return textoListaPagos(a.empresa_ref?.id ?? null, a.empresa_ref?.name.trim() ?? null, { semana: a.semana === true })

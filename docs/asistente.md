@@ -24,6 +24,7 @@ sección y **no se empieza una fase hasta validar la anterior**.
 | 9b | Tablero: franja de KPIs, vista Calendario (semana / mes, pagos recurrentes, arrastrar a un día), badge "sin empresa" editable, "la 5 es de PD" | ✅ Validada |
 | 9c | El asistente habla: menú de botones, foto del tablero, resumen en líneas, preguntas narradas, chat 💬 en la web | ✅ Validada |
 | 12 | Dashboard de vida: pantalla Resumen clara (agenda con Google Calendar en lectura, prioridades, correos, notas, KPIs, "Resumen diario", herramientas conectadas), menú lateral índigo/morado, pantallas Calendario y Notas, alerta de correo en el idioma de la cuenta | ✅ Construida — pendiente de validar |
+| 12b | El asistente explica sus errores (Google en lenguaje normal + enlace para reconectar), eventos libres y repetidos en Calendar por voz, preguntas sobre lo que él mismo dijo, sin "Ojo" tras un tropiezo, botón Probar en Conexiones, chequeo de conexiones en la alarma de las 8 | ✅ Construida — pendiente de validar |
 
 ---
 
@@ -3084,6 +3085,67 @@ lo que aquí hace Google Calendar lo hace ella pegando su agenda del día (o
 una captura). Sin alarmas ni correo: eso es el Nivel 2.
 
 ---
+
+### 12g. Ajuste 12b — el asistente explica, Calendar repite (7 nov)
+
+**Lo que pasó.** Por voz: "agregar a Google Calendar una alarma para Love Me
+to Hurt Me desde el viernes 13 hasta dic 1, nota GL; otra para Love on Hire
+desde el jueves 12 hasta dic 1; sábado 14 hasta dic 1 Under Her Rules". El
+intérprete solo conocía `calendar` **sobre una tarea existente**, así que
+buscó tareas parecidas (sacó «paypal statements»), propuso un plan absurdo,
+y cuando ella dijo "no hablé de paypal, hablé de: …" tampoco entendió. Aparte,
+la cuenta de Calendar fallaba con "⚠️ sin evento en Calendar: Unauthorized" —
+cierto, pero inútil — y al preguntar "¿cómo que sin autorización?" el bot
+pidió aclarar. Y remató con "Ojo: la nota de IM tiene 46 días".
+
+**Qué cambia.**
+
+1. **Acción `evento`** (`interprete.ts`, `plan.ts`, `google/calendar.ts`):
+   un evento libre en Google Calendar que **no es tarea**, una vez o repetido:
+   `{"tipo":"evento","titulo","fecha","hora"?,"duracion_min"?,"nota"?,"repetir":{"cada":"dia|semana|mes","dias":["JU"],"hasta"|"veces"}}`.
+   "ocho sábados a las 2" → `veces: 8`; "hasta el 1 de diciembre" → `hasta`;
+   "hasta que te avise" → sin fin. Se crea con `RRULE` (`FREQ=WEEKLY;BYDAY=TH;UNTIL=…`
+   o `COUNT=8`), 60 min por defecto, aviso 15 min antes, la nota en la
+   descripción. Si dijo "jueves 12" pero el 12 no es jueves, empieza el primer
+   jueves desde esa fecha (`primeraFechaEn`). Varios títulos → un plan con
+   [✅ Hacer todo]; uno solo → se crea de una vez con el enlace para abrirlo.
+   Regla del prompt: si la frase habla de "google calendar", "calendario" o
+   "evento" con un título nuevo, es `evento`, nunca `crear` ni `calendar`, y
+   **nunca** se busca una tarea parecida.
+2. **Errores de Google en lenguaje normal** (`explicarErrorGoogle`,
+   `avisoCalendar` en `google/oauth.ts`): "Unauthorized" → *"Google ya no
+   acepta el permiso guardado de X: se dio con una configuración anterior de
+   la app. Reconecta la cuenta"*; `invalid_grant` → *"caducó (en modo prueba
+   Google lo corta a los 7 días)"*; sin cuenta → *"no tengo ninguna cuenta con
+   Calendar activo"*. Siempre con el enlace **🔗 Reconectar Google** a
+   Settings → Conexiones. Lo usan el sync de tareas, los pagos, el evento
+   libre y la Agenda del Dashboard.
+3. **Preguntas sobre lo que el bot dijo**: "¿cómo que está sin autorización?",
+   "explícame", "¿por qué falló?" → `pregunta` (no `desconocido`), y la
+   respuesta del modelo recibe la **conversación reciente** (8 turnos) con la
+   regla de explicar su propio aviso y qué hacer.
+4. **Plan mal entendido**: "no hablé de X, hablé de: …" → el intérprete
+   devuelve solo lo que dice ahora, completo; el plan anterior se descarta.
+5. **Sin "Ojo: …" tras un tropiezo** (`ultimoTurnoFueTropiezo` en `motor.ts`):
+   si las dos últimas respuestas del bot traen ⚠️ o "no entendí", no hay
+   sugerencia de archivar notas ni de vencidas.
+6. **Botón Probar** en Settings → Conexiones (`POST /api/google/conexiones/probar`):
+   pide un token a Google con el permiso guardado y dice ✓ o la causa en
+   claro, con "Reconectar ahora". Y la **alarma de las 8** hace ese mismo
+   chequeo en todas las conexiones activas: si Google rechaza una, cierra con
+   una línea 🔌 y el enlace, antes de que algo deje de funcionar en silencio.
+
+**Lo que hay que hacer a mano.** Nada en Supabase ni en Vercel. La cuenta
+gabrielarangel169 se conectó el 2 nov con el cliente OAuth anterior: hay que
+darle **Reconectar** una vez. Para que los permisos no caduquen cada 7 días,
+publicar la app en Google Cloud (Audience → Publish app) desde la cuenta
+dueña del proyecto; con la app en Testing, el chequeo de las 8 avisará cuando
+toque reconectar.
+
+**Prueba.** Repetir por voz el mensaje de los tres eventos → plan con tres
+líneas 📆 → Hacer todo → tres eventos repetidos en Calendar con sus enlaces.
+"¿cómo que está sin autorización?" después de un aviso → explicación y qué
+hacer. Probar en Conexiones → ✓ en las cuatro cuentas.
 
 ## 10. Cómo replicarlo para otra persona
 

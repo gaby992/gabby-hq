@@ -183,6 +183,34 @@ ok('¿qué cerré ayer? → pregunta libre', parse('¿qué cerré ayer?').kind =
   ok('fase 12: razón de regla en inglés', razonRegla('alerta', 'en') === 'alert' && razonRegla('vip', 'en') === 'VIP rule' && razonRegla('alerta', 'es') === 'alerta')
 }
 
+// ── Fase 12b: free / repeating Calendar events, Google errors explained ──
+{
+  const { validarAcciones, repeticion } = await import('@/lib/asistente/interprete')
+  const { rrule, describirRepeticion, primeraFechaEn, diaSemanaDe } = await import('@/lib/google/calendar')
+  const { explicarErrorGoogle } = await import('@/lib/google/oauth')
+  const acc = validarAcciones({ acciones: [
+    { tipo: 'evento', titulo: 'Love on Hire', fecha: '2026-11-12', hora: '14:00', nota: 'GL', repetir: { cada: 'semana', dias: ['JU'], hasta: '2026-12-01' } },
+    { tipo: 'evento', titulo: 'Under Her Rules', fecha: '2026-11-14', hora: '14:00', repetir: { cada: 'semana', dias: ['sábado'], veces: 8 } },
+    { tipo: 'evento', titulo: 'Love Me to Hurt Me', fecha: '2026-11-13', hora: '14:00', repetir: { cada: 'semana', dias: ['VI'] } },
+    { tipo: 'evento', titulo: 'sin fecha' },
+  ] })
+  ok('12b: tres eventos válidos + uno desconocido', acc.length === 4 && acc.filter((a) => a.tipo === 'evento').length === 3 && acc[3].tipo === 'desconocido', JSON.stringify(acc))
+  ok('12b: hasta se conserva', acc[0].tipo === 'evento' && acc[0].repetir?.hasta === '2026-12-01' && acc[0].repetir?.dias?.[0] === 'JU', JSON.stringify(acc[0]))
+  ok('12b: "sábado" → SA, veces 8', acc[1].tipo === 'evento' && acc[1].repetir?.dias?.[0] === 'SA' && acc[1].repetir?.veces === 8, JSON.stringify(acc[1]))
+  ok('12b: sin fin → ni hasta ni veces', acc[2].tipo === 'evento' && !acc[2].repetir?.hasta && !acc[2].repetir?.veces, JSON.stringify(acc[2]))
+  ok('12b: repeticion rechaza basura', repeticion('x') === undefined && repeticion({ cada: 'nunca' }) === undefined)
+  ok('12b: rrule semanal hasta', rrule({ cada: 'semana', dias: ['JU'], hasta: '2026-12-01' }, '2026-11-12') === 'RRULE:FREQ=WEEKLY;BYDAY=TH;UNTIL=20261202T045959Z', rrule({ cada: 'semana', dias: ['JU'], hasta: '2026-12-01' }, '2026-11-12'))
+  ok('12b: rrule 8 veces', rrule({ cada: 'semana', dias: ['SA'], veces: 8 }, '2026-11-14') === 'RRULE:FREQ=WEEKLY;BYDAY=SA;COUNT=8')
+  ok('12b: rrule sin fin', rrule({ cada: 'semana', dias: ['VI'] }, '2026-11-13') === 'RRULE:FREQ=WEEKLY;BYDAY=FR')
+  ok('12b: diaSemanaDe', diaSemanaDe('2026-11-12') === 'JU' && diaSemanaDe('2026-11-14') === 'SA')
+  ok('12b: primeraFechaEn corrige un jueves dicho como miércoles', primeraFechaEn('2026-11-11', ['JU']) === '2026-11-12')
+  ok('12b: describirRepeticion', describirRepeticion({ cada: 'semana', dias: ['JU'], hasta: '2026-12-01' }, '2026-11-12') === 'los jueves hasta el 1 de dic' && describirRepeticion({ cada: 'semana', dias: ['SA'], veces: 8 }, '2026-11-14') === 'los sábados, 8 veces' && describirRepeticion({ cada: 'semana', dias: ['VI'] }, '2026-11-13') === 'los viernes, hasta que avises', describirRepeticion({ cada: 'semana', dias: ['JU'], hasta: '2026-12-01' }, '2026-11-12'))
+  const u = explicarErrorGoogle(new Error('Unauthorized'), 'gabrielarangel169@gmail.com')
+  ok('12b: "Unauthorized" explicado con reconectar', u.reconectar && /otra configuración|Reconecta/.test(u.texto) && !/unauthorized/i.test(u.texto), u.texto)
+  const g = explicarErrorGoogle(new Error('invalid_grant'))
+  ok('12b: invalid_grant = caducó', g.reconectar && /caducó/.test(g.texto), g.texto)
+}
+
 if (fallos > 0) {
   console.error(`\n${fallos} prueba(s) fallaron`)
   process.exit(1)

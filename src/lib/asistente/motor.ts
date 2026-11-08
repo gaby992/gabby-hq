@@ -78,7 +78,7 @@ import { enviarLista } from '@/lib/asistente/alarmas'
 import { enviarListaEsperando } from '@/lib/asistente/esperando'
 import { guiaTelegram } from '@/lib/asistente/comandos'
 import { cargarConfig, presentacion, type AsistenteConfig } from '@/lib/asistente/config'
-import { guardarTurno, limpiarHilo } from '@/lib/asistente/conversacion'
+import { guardarTurno, limpiarHilo, turnosRecientes } from '@/lib/asistente/conversacion'
 import { botonesDe, resolverSugerencia, trasCompletar, trasCrear, trasPregunta, trasOrganizar, type Sugerencia } from '@/lib/asistente/sugerencias'
 import { iniciarOrganizar, responderOrganizar, resumen as resumenOrganizar, tecladoOrganizar, type RespuestaOrganizar } from '@/lib/asistente/organizar'
 import { agregarACalendar, type ResultadoSync } from '@/lib/google/sync'
@@ -137,12 +137,27 @@ async function responderNarradaEn(chatId: number, n: Narrada, prefix: string | n
  */
 async function sugerir(chatId: number, s: Sugerencia | null) {
   if (!s) return
+  // Fase 12b: no "Ojo: …" right after a warning or a "no entendí" — she is sorting that out, not the note.
+  if (await ultimoTurnoFueTropiezo(chatId)) return
   if (s.botones.length === 0) {
     await reply(chatId, s.texto)
     return
   }
   const nonce = await borradorConNonce(chatId, s.texto, s.draft)
   await reply(chatId, s.texto, botonesDe(s, nonce))
+}
+
+/** True when the bot's last two answers in this thread carried a ⚠️ or a "no entendí". */
+async function ultimoTurnoFueTropiezo(chatId: number): Promise<boolean> {
+  try {
+    const turnos = await turnosRecientes(chatId, 4)
+    return turnos
+      .filter((t) => t.rol === 'assistant')
+      .slice(-2)
+      .some((t) => /⚠️|no entend[ií]|no pude|se me trab[oó]/i.test(t.texto))
+  } catch {
+    return false
+  }
 }
 
 function joinLines(...lines: (string | null | undefined)[]): string {
