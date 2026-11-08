@@ -251,7 +251,15 @@ async function ponerEnCalendar(chatId: number, termino: string, prefix: string |
   if (error) throw new Error(`Supabase tasks: ${error.message}`)
   const hits = buscarEnAbiertas((data as unknown as TaskRow[]) ?? [], termino)
   if (hits.length === 0) {
-    await reply(chatId, joinLines(prefix, `No encontré ninguna tarea abierta con «${termino}».`))
+    // Ajuste 14b: no dejarla en un callejón — quizá no era una tarea, sino un evento nuevo.
+    await reply(
+      chatId,
+      joinLines(
+        prefix,
+        `No encontré ninguna tarea abierta con «${termino}».`,
+        'Si lo que quieres es un evento nuevo en el calendario, dímelo con su hora: «Love on Hire los jueves a las 2 pm hasta el 1 de diciembre».'
+      )
+    )
     return
   }
   if (hits.length > 1) {

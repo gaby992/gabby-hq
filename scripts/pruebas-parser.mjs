@@ -214,6 +214,25 @@ ok('¿qué cerré ayer? → pregunta libre', parse('¿qué cerré ayer?').kind =
   ok('12b: invalid_grant = caducó', g.reconectar && /caducó/.test(g.texto), g.texto)
 }
 
+// ── Ajuste 14b: "ponme en el calendario X" — ¿tarea que existe o evento nuevo? ──
+{
+  const { pareceEventoNuevo } = await import('@/lib/parser')
+  ok('14b: con hora/repetición/fecha es un evento nuevo',
+    pareceEventoNuevo('Love on Hire los jueves a las 2 pm hasta el 1 de diciembre, nota GL') &&
+    pareceEventoNuevo('reunion con Angel el 15 de diciembre') &&
+    pareceEventoNuevo('gym todos los lunes') &&
+    pareceEventoNuevo('clase 8 veces') &&
+    pareceEventoNuevo('llamada de 2 horas'))
+  ok('14b: nombrar una tarea sigue siendo la tarea',
+    !pareceEventoNuevo('la de TOTT') &&
+    !pareceEventoNuevo('tarea de paypal statements') &&
+    !pareceEventoNuevo('lo de Chelsea'))
+  ok('14b: el atajo ya no se traga el evento repetido',
+    parse('ponme en el calendario Love on Hire los jueves a las 2 pm hasta el 1 de diciembre, nota GL').kind !== 'calendar')
+  ok('14b: y sigue funcionando el de siempre',
+    parse('pon en calendar la de TOTT').kind === 'calendar')
+}
+
 // ── Fase 14: segundo cerebro (documentos) ────────────────────────────────
 {
   const { normalizarCategoria, montoTexto } = await import('@/lib/documentos/tipos')

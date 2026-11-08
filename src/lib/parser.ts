@@ -147,6 +147,37 @@ function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+/**
+ * Ajuste 14b: does what follows "ponme en el calendario …" describe a NEW
+ * event, instead of naming a task that already exists? An hour, a weekday, a
+ * repetition, a date or a note are all things a task reference never carries.
+ */
+export function pareceEventoNuevo(resto: string): boolean {
+  const n = resto
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+  return (
+    // "a las 2 pm", "2pm", "14:00", "de 9 a 11"
+    /\ba\s+las?\s+\d/.test(n) ||
+    /\b\d{1,2}\s*(?::\d{2})?\s*(?:am|pm)\b/.test(n) ||
+    /\b\d{1,2}:\d{2}\b/.test(n) ||
+    // "los jueves", "cada martes", "todos los viernes"
+    /\b(?:los|cada|todos\s+los)\s+(?:lunes|martes|miercoles|jueves|viernes|sabados?|domingos?)\b/.test(n) ||
+    // "hasta el 1 de diciembre", "desde el viernes", "8 veces", "semanal"
+    /\b(?:hasta|desde)\s+(?:el|la|que)\b/.test(n) ||
+    /\b\d+\s+veces\b/.test(n) ||
+    /\b(?:semanal|mensual|diario|quincenal|todas\s+las\s+semanas)\b/.test(n) ||
+    // "el 15 de diciembre", "15/12"
+    /\b\d{1,2}\s+de\s+(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\b/.test(n) ||
+    /\b\d{1,2}\/\d{1,2}\b/.test(n) ||
+    // "nota GL" — a reference to an existing task never brings a note
+    /\bnota\s+\S/.test(n) ||
+    // "por una hora", "de 2 horas"
+    /\b\d+\s*(?:hora|horas|min|minutos)\b/.test(n)
+  )
+}
+
 function tidy(s: string): string {
   return s.replace(/\s{2,}/g, ' ').replace(/^[\s:,.\-–]+|[\s:,.\-–]+$/g, '').trim()
 }
@@ -569,7 +600,14 @@ export function parseMensaje(raw: string, companies: CompanyRef[], today: string
   if (pagos) return pagos
   const calCmd = text.match(/^(?:pon|ponme|agrega|agr[ée]game|mete|m[ée]teme)\s+(?:en|al)\s+(?:el\s+)?(?:google\s+)?(?:calendar|calendario|agenda)\s+(?:la\s+(?:tarea\s+)?(?:de|del)\s+|la\s+|el\s+)?(.+)$/i)
     ?? text.match(/^calendar\s+(.+)$/i)
-  if (calCmd && !/^calendar:/i.test(text)) return { kind: 'calendar', termino: tidy(calCmd[1]) }
+  // Ajuste 14b: "pon en calendar la de TOTT" es ponerle el evento a una tarea
+  // que ya existe; "ponme en el calendario Love on Hire los jueves a las 2 pm
+  // hasta el 1 de diciembre" es un evento nuevo. Si trae hora, día de la
+  // semana, repetición o fecha, esto NO es una referencia a una tarea: que
+  // siga de largo hasta el intérprete, que sabe crear eventos (fase 12b).
+  if (calCmd && !/^calendar:/i.test(text) && !pareceEventoNuevo(calCmd[1])) {
+    return { kind: 'calendar', termino: tidy(calCmd[1]) }
+  }
   const qs = parseQueSigue(text, companies)
   if (qs) return { kind: 'que_sigue', opts: qs }
   // Fase 9c-B: the board as a picture.
