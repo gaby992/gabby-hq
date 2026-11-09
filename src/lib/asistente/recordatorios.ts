@@ -71,9 +71,22 @@ export async function recordatoriosPendientes(chatId: number): Promise<Recordato
 
 export async function listarRecordatorios(chatId: number): Promise<string> {
   const rows = await recordatoriosPendientes(chatId)
-  if (rows.length === 0) return 'No tienes alarmas pendientes. Pon una: "alarma mañana 9am revisar X".'
+  // Fase 15: las alarmas con hora ya viven en Google Calendar; aquí solo quedan los temporizadores y las viejas.
+  if (rows.length === 0) return 'No tienes alarmas pendientes por aquí. Las que tienen hora están en tu Google Calendar (con ⏰ en el título).'
   const lines = rows.map((r, i) => `${i + 1}. «${r.texto}» · ${formatFechaHoraEs(r.dispara_en)}`)
-  return [`⏰ Tus alarmas (${rows.length}):`, ...lines, 'Para quitar una: "quita alarma 2".'].join('\n')
+  return [`⏰ Alarmas que te aviso por aquí (${rows.length}):`, ...lines, 'Las que tienen hora están en tu Google Calendar. Para quitar una de aquí: "quita alarma 2" · para mudarlas: "pasa mis alarmas al calendario".'].join('\n')
+}
+
+/**
+ * Fase 15: what comes after "quita … alarma(s)" when she means several:
+ * "todas" → all of them; "todas las de pago" / "las de pago" → the ones with
+ * that word. Null when it names just one (a number or a word).
+ */
+export function leerQuitarVarias(arg: string): { palabra: string | null } | null {
+  const n = arg.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  // Only the plural form reaches here marked with "todas": "quita alarma de pago" (one) is never a sweep.
+  const m = n.match(/^todas?(?:\s+(?:las?\s+)?(?:de|del|que\s+digan?|con)\s+(.+))?$/)
+  return m ? { palabra: m[1]?.trim() || null } : null
 }
 
 /** "quita alarma 2" (its number in "mis alarmas") or "quita alarma pagos" (a word of the text). */
@@ -81,6 +94,16 @@ export async function quitarRecordatorio(chatId: number, arg: string): Promise<s
   const rows = await recordatoriosPendientes(chatId)
   if (rows.length === 0) return 'No tienes alarmas pendientes.'
   const rest = arg.trim()
+  // Fase 15: "quita todas las alarmas" y "quita las alarmas de pago" — varias de una vez.
+  const varias = leerQuitarVarias(rest)
+  if (varias) {
+    const plano = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    const fuera = varias.palabra ? rows.filter((r) => plano(r.texto).includes(plano(varias.palabra!))) : rows
+    if (fuera.length === 0) return `No encontré ninguna alarma con «${varias.palabra}».`
+    const { error } = await tabla().delete().in('id', fuera.map((r) => r.id))
+    if (error) throw new Error(`Supabase bot_recordatorios: ${error.message}`)
+    return [`🗑 Quité ${fuera.length} ${fuera.length === 1 ? 'alarma' : 'alarmas'}:`, ...fuera.map((r) => `• «${r.texto}» · ${formatFechaHoraEs(r.dispara_en)}`)].join('\n')
+  }
   let hit: Recordatorio | undefined
   if (/^\d+$/.test(rest)) {
     hit = rows[Number(rest) - 1]
@@ -157,6 +180,7 @@ export async function responderRecordatorio(chatId: number, id: string, que: Res
   if (error) throw new Error(`Supabase bot_recordatorios: ${error.message}`)
   if (!data) return 'Esa alarma ya no existe.'
   if (que === 'ok') return `✅ Listo: «${data.texto}»`
+  // Fase 15: this text REPLACES the alarm's own message (no second message).
 
   let disparaEn: string
   if (que === '1h') {
@@ -167,5 +191,5 @@ export async function responderRecordatorio(chatId: number, id: string, que: Res
   }
   const { error: e2 } = await tabla().update({ dispara_en: disparaEn, enviado: false }).eq('id', id)
   if (e2) throw new Error(`Supabase bot_recordatorios: ${e2.message}`)
-  return `⏰ Te lo recuerdo otra vez: «${data.texto}» · ${formatFechaHoraEs(disparaEn)}`
+  return `💤 Pospuesta: «${data.texto}» → ${formatFechaHoraEs(disparaEn)}`
 }

@@ -233,6 +233,58 @@ ok('¿qué cerré ayer? → pregunta libre', parse('¿qué cerré ayer?').kind =
     parse('pon en calendar la de TOTT').kind === 'calendar')
 }
 
+// ── Fase 15: las alarmas con hora van a Google Calendar ─────────────────
+{
+  const { eventoDeAviso, confirmacionEnCalendar, confirmacionEnTelegram } = await import('@/lib/asistente/avisos')
+  const { cuerpoEventoLibre } = await import('@/lib/google/calendar')
+  const { leerQuitarVarias } = await import('@/lib/asistente/recordatorios')
+  const { htmlSeguro } = await import('@/lib/asistente/html')
+  const { validarAcciones } = await import('@/lib/asistente/interprete')
+
+  // 10:00 am Cancún = 15:00 UTC
+  const ev = eventoDeAviso({ texto: 'pago Health Insurance PD', dispara_en: '2026-11-10T15:00:00.000Z', repetir: { cada: 'mes' } })
+  ok('15: la alarma se vuelve evento a su hora, con ⏰ y sonando al minuto 0',
+    ev.titulo === '⏰ pago Health Insurance PD' && ev.fecha === '2026-11-10' && ev.hora === '10:00' && ev.aviso_min === 0 && ev.duracion_min === 15, JSON.stringify(ev))
+  const cuerpo = cuerpoEventoLibre(ev)
+  ok('15: cada mes y popup a la hora exacta',
+    JSON.stringify(cuerpo.recurrence) === '["RRULE:FREQ=MONTHLY"]' && cuerpo.reminders.overrides[0].minutes === 0, JSON.stringify(cuerpo))
+  ok('15: un evento normal sigue avisando 15 min antes',
+    cuerpoEventoLibre({ titulo: 'Cita', fecha: '2026-11-12', hora: '14:00' }).reminders.overrides[0].minutes === 15)
+  const semanal = eventoDeAviso({ texto: 'plan de Frey', dispara_en: '2026-11-10T14:00:00.000Z', repetir: { cada: 'semana', dias: ['LU'] } })
+  ok('15: una semanal arranca en su primer día', semanal.fecha === '2026-11-16', semanal.fecha)
+
+  const conf = confirmacionEnCalendar({ texto: 'pago Gold Amex', dispara_en: '2026-11-16T15:00:00.000Z', repetir: { cada: 'mes' } }, 'https://www.google.com/calendar/event?eid=abc')
+  ok('15: la confirmación dice dónde quedó y trae el enlace limpio',
+    conf.startsWith('⏰ En tu calendario: «pago Gold Amex»') && conf.includes('cada mes') && conf.endsWith('<a href="https://www.google.com/calendar/event?eid=abc">abrir</a>'), conf)
+  ok('15: un temporizador avisa por aquí', confirmacionEnTelegram({ texto: 'revisar el deploy', dispara_en: '2026-11-09T22:00:00.000Z' }).startsWith('⏰ Te aviso por aquí: «revisar el deploy»'))
+
+  const acc = validarAcciones({ acciones: [
+    { tipo: 'alarma', texto: 'pago Health Insurance PD', fecha: '2026-11-10', hora: '10:00', repetir: { cada: 'mes' } },
+    { tipo: 'alarma', texto: 'revisar el deploy', en_minutos: 20, repetir: { cada: 'dia' } },
+    { tipo: 'alarma', texto: 'llamar al banco', fecha: '2026-11-10', hora: '10:00' },
+  ] })
+  ok('15: el intérprete conserva la repetición (y un temporizador no se repite)',
+    acc[0].repetir?.cada === 'mes' && acc[1].repetir === undefined && acc[1].en_minutos === 20 && acc[2].repetir === undefined, JSON.stringify(acc))
+
+  ok('15: quitar varias solo en plural',
+    leerQuitarVarias('todas')?.palabra === null &&
+    leerQuitarVarias('todas de pago')?.palabra === 'pago' &&
+    leerQuitarVarias('todas las de Amex')?.palabra === 'amex' &&
+    leerQuitarVarias('de pago') === null && leerQuitarVarias('2') === null)
+  ok('15: órdenes nuevas de alarmas',
+    parse('pasa mis alarmas al calendario').kind === 'mudar_alarmas' &&
+    parse('pasa las alarmas a Google Calendar').kind === 'mudar_alarmas' &&
+    parse('quita todas las alarmas').kind === 'quitar_alarma' && parse('quita todas las alarmas').arg === 'todas' &&
+    parse('quita las alarmas de pago').arg === 'todas de pago' &&
+    parse('quita alarma 2').arg === '2',
+    `${parse('pasa mis alarmas al calendario').kind} · ${parse('quita las alarmas de pago').arg}`)
+
+  const h = htmlSeguro('🎙 Entendí: «IM < PD & más»\n📆 En Calendar: «Hitv» · <a href="https://g.co/e?a=1&b=2">abrir</a> · <b>ok</b>')
+  ok('15: HTML seguro — lo suyo se escapa, nuestras etiquetas se quedan',
+    h.includes('IM &lt; PD &amp; más') && h.includes('<a href="https://g.co/e?a=1&amp;b=2">abrir</a>') && h.includes('<b>ok</b>'), h)
+  ok('15: HTML seguro no escapa dos veces', htmlSeguro('a &amp; b &lt;c&gt;') === 'a &amp; b &lt;c&gt;')
+}
+
 // ── Fase 14: segundo cerebro (documentos) ────────────────────────────────
 {
   const { normalizarCategoria, montoTexto } = await import('@/lib/documentos/tipos')
@@ -281,6 +333,7 @@ ok('¿qué cerré ayer? → pregunta libre', parse('¿qué cerré ayer?').kind =
     leerNotaCerebro('llamar a Juan mañana') === null,
     String(leerNotaCerebro('anota en el cerebro: la renta se paga el día 5')))
 
+  ok('14: "Gabita, guarda: …" también', leerNotaCerebro('Gabita, guarda: la renta se paga el día 5') === 'la renta se paga el día 5')
   ok('14: avisos a 30 / 7 / 1 y todos los días si ya venció',
     toca(30) && toca(7) && toca(1) && toca(0) && toca(-5) && !toca(29) && !toca(2))
   ok('14: cómo se dice el vencimiento', cuandoVence(0) === 'hoy' && cuandoVence(1) === 'mañana' && cuandoVence(30) === 'en 30 días' && cuandoVence(-3) === 'hace 3 días')

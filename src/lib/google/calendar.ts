@@ -233,6 +233,12 @@ export interface EventoLibre {
   duracion_min?: number
   nota?: string | null
   repetir?: Repeticion | null
+  /**
+   * Fase 15: minutes before the start when the phone rings. Default 15 (an
+   * appointment); a reminder ("recuérdame pagar a las 10") uses 0 — it must
+   * sound AT the hour, that is the whole point of it.
+   */
+  aviso_min?: number
 }
 
 /** The weekday code of a 'YYYY-MM-DD'. */
@@ -267,7 +273,7 @@ export function cuerpoEventoLibre(e: EventoLibre): Record<string, unknown> {
   const body: Record<string, unknown> = {
     summary: e.titulo,
     description: [e.nota ? `Nota: ${e.nota}` : null, `Creado desde el asistente de GabbyHQ · ${appUrl()}/calendario`].filter(Boolean).join('\n'),
-    reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: AVISO_MIN }] },
+    reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: typeof e.aviso_min === 'number' && e.aviso_min >= 0 ? e.aviso_min : AVISO_MIN }] },
     source: { title: 'GabbyHQ', url: `${appUrl()}/calendario` },
   }
   if (e.hora) {

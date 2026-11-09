@@ -76,7 +76,7 @@
         },
         {
           "ejemplo": "mis alarmas",
-          "que": "tus alarmas pendientes, numeradas"
+          "que": "las alarmas que todavía te aviso por aquí (temporizadores y las viejas); las que tienen hora están en tu Google Calendar con ⏰"
         },
         {
           "ejemplo": "pagos de IM",
@@ -107,11 +107,19 @@
         },
         {
           "ejemplo": "alarma mañana 9am revisar pagos",
-          "que": "alarma propia: te llega un ⏰ a esa hora (no es una tarea)"
+          "que": "queda en tu Google Calendar con ⏰ y te suena en el teléfono a esa hora exacta (no es una tarea). Si Calendar falla, te avisa por aquí y te dice por qué"
+        },
+        {
+          "ejemplo": "alarma: pago del seguro los días 10 y 20 de cada mes a las 10 am",
+          "que": "alarmas que se repiten: cada mes, cada semana (\"todos los lunes a las 9\") o cada día. Una por cada día que digas"
         },
         {
           "ejemplo": "recuérdame el viernes a las 10 llamar al contador",
-          "que": "lo mismo, dicho de otra forma; \"avísame en 2 horas …\" también"
+          "que": "lo mismo, dicho de otra forma: va a tu calendario"
+        },
+        {
+          "ejemplo": "avísame en 20 minutos revisar el horno",
+          "que": "un temporizador: ese sí te llega por aquí (✅ Listo · ⏰ +1h · 📅 Mañana), y si lo pospones se actualiza el mismo mensaje"
         },
         {
           "ejemplo": "nota IM: vamos por la propuesta 2",
@@ -296,6 +304,14 @@
         {
           "ejemplo": "/ayuda",
           "que": "el resumen corto; \"/ayuda todo\" manda esta guía completa"
+        },
+        {
+          "ejemplo": "mis alarmas · quita alarma 2 · quita las alarmas de pago · quita todas las alarmas",
+          "que": "las que todavía te aviso por aquí (las que tienen hora están en tu Google Calendar)"
+        },
+        {
+          "ejemplo": "pasa mis alarmas al calendario",
+          "que": "muda a Google Calendar todas las alarmas que quedaban por aquí"
         },
         {
           "ejemplo": "/menu · /ocultar",

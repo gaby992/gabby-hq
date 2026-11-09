@@ -10,6 +10,7 @@ import type { AccionResuelta } from './plan'
 import type { OpcionDuda } from './correcciones'
 import type { SugerenciaDraft } from './sugerencias'
 import type { OrganizarDraft } from './organizar'
+import type { Repeticion } from '@/lib/google/calendar'
 
 /**
  * What waits in a draft. Tasks are stored flat (the phase 2 shape, no `tipo`);
@@ -32,7 +33,7 @@ export type BorradorParsed =
   /** Ajuste 7-G: a correction that could mean two things — the plan waits while she picks. */
   | { tipo: 'plan_duda'; acciones: AccionResuelta[]; opciones: OpcionDuda[] }
   | { tipo: 'elegir'; accion: AccionResuelta; candidatos: string[] }
-  | { tipo: 'alarma_hora'; texto: string; fecha: string | null }
+  | { tipo: 'alarma_hora'; texto: string; fecha: string | null; repetir?: Repeticion | null }
   | { tipo: 'aclarar'; texto: string }
   /** Fase 5-B: "ponla en calendar" on a task without an hour: [9am] [12pm] [3pm] [6pm] [todo el día]. */
   | { tipo: 'calendar_hora'; task_id: string; texto: string }

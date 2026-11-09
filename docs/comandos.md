@@ -25,7 +25,7 @@ Es lo mismo que manda el bot con `/ayuda todo`. La guía técnica está en [asis
 - `correos · correos de Chelsea · lo más importante de los correos de PD · mi correo de IM` — cualquier frase que mencione correos pide correos (nunca tareas): te cuenta en un párrafo cuántos hay, cuáles urgen y quién espera respuesta, y debajo la lista numerada por urgencia; "Chelsea" ahí es el buzón IM Chelsea (coincidencia parcial sobre el nombre o el email de la cuenta; si hay varias, botones). "lo más importante" / "urgentes" / "qué necesita respuesta" deja solo alta + necesita respuesta. Luego "el 3 lo hago yo", "el 2 para Chelsea", "archiva el 5". La línea se tacha sola cuando se resuelve
 - `el 5 es silencio · el 5 es solo app · el 5 es alerta` — aprende ese remitente (su dominio, o el email si es gmail/outlook) en la lista de esa cuenta y aplica el nivel al correo; "archiva el 5 y márcalo como silencio" hace las dos cosas. Si ya estaba en otra lista, lo mueve y te lo dice
 - `¿qué cerré ayer?` — pregunta libre: te contesta con tus tareas y notas (también "? qué tengo hoy")
-- `mis alarmas` — tus alarmas pendientes, numeradas
+- `mis alarmas` — las alarmas que todavía te aviso por aquí (temporizadores y las viejas); las que tienen hora están en tu Google Calendar con ⏰
 - `pagos de IM` — los pagos recurrentes de esa empresa; "qué pagos hay esta semana" filtra
 
 ## ➕ Agregar
@@ -34,8 +34,10 @@ Es lo mismo que manda el bot con `/ayuda todo`. La guía técnica está en [asis
 - `para PD: mandar propuesta el viernes` — otra forma de decir la empresa
 - `revisar contrato el 15 de noviembre` — si falta empresa o urgencia, te pregunta con botones
 - `IM revisar propuesta el viernes y ponla en calendar` — además crea el evento en Google Calendar (sin hora, te pregunta a qué hora)
-- `alarma mañana 9am revisar pagos` — alarma propia: te llega un ⏰ a esa hora (no es una tarea)
-- `recuérdame el viernes a las 10 llamar al contador` — lo mismo, dicho de otra forma; "avísame en 2 horas …" también
+- `alarma mañana 9am revisar pagos` — queda en tu Google Calendar con ⏰ y te suena en el teléfono a esa hora exacta (no es una tarea). Si Calendar falla, te avisa por aquí y te dice por qué
+- `alarma: pago del seguro los días 10 y 20 de cada mes a las 10 am` — alarmas que se repiten: cada mes, cada semana ("todos los lunes a las 9") o cada día. Una por cada día que digas
+- `recuérdame el viernes a las 10 llamar al contador` — lo mismo, dicho de otra forma: va a tu calendario
+- `avísame en 20 minutos revisar el horno` — un temporizador: ese sí te llega por aquí (✅ Listo · ⏰ +1h · 📅 Mañana), y si lo pospones se actualiza el mismo mensaje
 - `nota IM: vamos por la propuesta 2` — la nota "por dónde iba" de IM (reemplaza la que había)
 - `nota IM + ya respondió el cliente` — agrega una línea a esa nota; "nota IM:" sola la borra
 - `nota en paypal: ya mandé el de marzo` — comentario con fecha al pie de esa tarea
@@ -87,6 +89,8 @@ Es lo mismo que manda el bot con `/ayuda todo`. La guía técnica está en [asis
 ## ℹ️ Otros
 
 - `/ayuda` — el resumen corto; "/ayuda todo" manda esta guía completa
+- `mis alarmas · quita alarma 2 · quita las alarmas de pago · quita todas las alarmas` — las que todavía te aviso por aquí (las que tienen hora están en tu Google Calendar)
+- `pasa mis alarmas al calendario` — muda a Google Calendar todas las alarmas que quedaban por aquí
 - `/menu · /ocultar` — el menú fijo bajo el teclado: 📋 Hoy · 📅 Mañana · ⏳ Esperando · 📧 Correos · 🎯 ¿Qué sigue? · 🖥 Tablero. Cada botón es una de estas preguntas; aparece solo con el primer mensaje y con cada alarma de las 8
 - `botones` — aparecen cuando falta empresa o urgencia, cuando varias tareas coinciden, antes de borrar, y en cada ⏰ (Listo · +1h · Mañana)
 - `eso no son correos, son tareas · no, me refería a los correos de PD` — corrige cómo leyó tu último mensaje: lo reconoce («Tienes razón, lo leí mal») y lo reintenta con la otra lectura, sin tomarlo como una orden nueva

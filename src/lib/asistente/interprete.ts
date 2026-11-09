@@ -49,7 +49,11 @@ export type AccionLlm =
   | { tipo: 'siguiente_paso'; ref?: string }
   | { tipo: 'nota_empresa'; empresa: string; texto: string; modo: NotaModoLlm }
   | { tipo: 'nota_tarea'; ref: string; texto: string }
-  | { tipo: 'alarma'; texto: string; fecha?: string; hora?: string; en_minutos?: number }
+  /**
+   * Fase 15: con fecha/hora va a Google Calendar (y puede repetirse: "los días
+   * 10 de cada mes"); con en_minutos es un temporizador que avisa por Telegram.
+   */
+  | { tipo: 'alarma'; texto: string; fecha?: string; hora?: string; en_minutos?: number; repetir?: Repeticion }
   | { tipo: 'pregunta'; texto: string }
   | { tipo: 'que_sigue'; empresa?: string; solo_urgentes?: boolean; solo_vencer?: boolean }
   | { tipo: 'lista'; lista: 'manana' | 'tarde' | 'pendientes'; empresa?: string }
@@ -280,9 +284,13 @@ export function systemPrompt(today: string, cfg: AsistenteConfig = { nombre_pers
       'Los pagos recurrentes solo se CONSULTAN por aquí; crearlos, cambiarlos o quitarlos se hace en la web (Settings): si lo pide, responde "desconocido" con texto "los pagos se administran en Settings → Pagos recurrentes"',
     '- {"tipo":"nota_empresa","empresa":"…","texto":"…","modo":"reemplazar|agregar"}  → "nota de IM: …", "apunta en PD que …" (agregar si dice agrega/suma/además)',
     '- {"tipo":"nota_tarea","ref":REF,"texto":"…"}  → un comentario sobre una tarea existente',
-    '- {"tipo":"alarma","texto":"…",("fecha":"YYYY-MM-DD"),("hora":"HH:MM")}  → alarma, recuérdame, avísame, ponme un recordatorio. ' +
+    '- {"tipo":"alarma","texto":"…",("fecha":"YYYY-MM-DD"),("hora":"HH:MM"),("repetir":{"cada":"dia|semana|mes",("dias":["LU",…]),("hasta":"YYYY-MM-DD"),("veces":8)})}  → alarma, recuérdame, avísame, ponme un recordatorio. ' +
       'Para "en 2 horas"/"en 30 minutos" usa "en_minutos":120 en vez de fecha/hora. Si no dijo hora, NO inventes una: omite "hora". ' +
-      'texto = qué recordar, sin la fecha ni la hora. Una alarma NO es una tarea (salvo que diga "y agrégala como tarea": entonces también crear)',
+      'texto = qué recordar, sin la fecha ni la hora. Una alarma NO es una tarea (salvo que diga "y agrégala como tarea": entonces también crear). ' +
+      'ALARMAS QUE SE REPITEN: "cada mes", "mensual", "todos los meses", "los días 10 de cada mes" → "repetir":{"cada":"mes"} y fecha = el PRÓXIMO día con ese número (hoy incluido si la hora no ha pasado). ' +
+      '"los días 10 y 20 de cada mes" son DOS acciones alarma, una por día, cada una con su fecha y repetir cada mes; "igual a las 10" / "también a las 10" = la misma hora. ' +
+      '"todos los lunes a las 9" → repetir cada semana con dias ["LU"]; "todos los días a las 7" → repetir cada día. Si no dice que se repite, NO pongas repetir. ' +
+      'NUNCA metas "(día 10)" ni la frecuencia en el texto: el texto es solo qué recordar ("pago Health Insurance PD")',
     '- {"tipo":"pregunta","texto":"…"}  → pregunta sobre sus tareas (qué tengo hoy, qué cerré ayer, cómo voy con IM)',
     '- {"tipo":"que_sigue",("empresa":"…"),("solo_urgentes":true),("solo_vencer":true)}  → "qué sigue", "qué hago primero", "qué es lo más urgente", "por dónde empiezo". ' +
       '"solo urgentes" → solo_urgentes; "qué vence / qué está por vencer esta semana" → solo_vencer; "qué sigue de IM" → empresa',
@@ -304,7 +312,7 @@ export function systemPrompt(today: string, cfg: AsistenteConfig = { nombre_pers
     '- {"tipo":"correos_lista",("cuenta":"…"),("importante":true)}  → cualquier forma de pedir VER correos: "mándame los correos de Chelsea", "qué llegó al buzón de PD", "lo más importante del correo de IM", "qué necesita respuesta en mi correo". ' +
       'OJO: ahí "Chelsea"/"PD"/"IM" es el BUZÓN (una cuenta de correo), NUNCA la empresa ni sus tareas; cuenta = ese nombre tal cual lo dijo. "lo más importante" / "urgentes" / "qué necesita respuesta" → importante:true. Esto NUNCA es "lista" (lista es de TAREAS)',
     '- {"tipo":"despues","ref":REF}  → "deja X para después", "X para después", "quítale la fecha a X", "pásala a Después", "esa no corre": la tarea queda sin fecha en 📦 Después. NO es cancelar ni posponer a un día',
-    '- {"tipo":"documentos","texto":"…"}  → preguntas sobre sus PAPELES guardados (el archivero / segundo cerebro): ' +
+    '- {"tipo":"documentos","texto":"…"}  → preguntas sobre sus PAPELES guardados (el archivero / segundo cerebro, que ella llama "Gabita": "Gabita, ¿…?" es siempre esto o documento_nota): ' +
       '"¿con quién tengo el seguro del carro?", "¿cuánto pago de alquiler?", "¿cuándo vence mi pasaporte?", "mándame el contrato de Bonampak", "¿qué dice la póliza de la cobertura?", ' +
       '"busca el recibo de la CFE de octubre", "¿tengo guardado el contrato de DATAVIA?", "qué documentos tengo de seguros". texto = la pregunta tal cual. ' +
       'OJO: esto es sobre CONTRATOS, PÓLIZAS, FACTURAS, RECIBOS, IDENTIFICACIONES y datos archivados, NUNCA sobre tareas (eso es "pregunta") ni correos (eso es "correos_lista")',
@@ -599,7 +607,8 @@ export function validarAcciones(raw: unknown): AccionLlm[] {
       case 'alarma': {
         const t = str(a.texto)
         const min = typeof a.en_minutos === 'number' && a.en_minutos > 0 ? Math.round(a.en_minutos) : undefined
-        if (t) out.push({ tipo, texto: t, fecha: fecha(a.fecha), hora: hora(a.hora), en_minutos: min })
+        // Fase 15: un temporizador ("en 20 minutos") no se repite; una alarma con fecha sí puede.
+        if (t) out.push({ tipo, texto: t, fecha: fecha(a.fecha), hora: hora(a.hora), en_minutos: min, repetir: min ? undefined : repeticion(a.repetir) })
         break
       }
       case 'esperar': {

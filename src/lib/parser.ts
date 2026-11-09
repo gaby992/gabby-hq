@@ -109,6 +109,8 @@ export type Parsed =
   | { kind: 'pagos_web' }
   | { kind: 'alarmas' }
   | { kind: 'quitar_alarma'; arg: string }
+  /** Fase 15: "pasa mis alarmas al calendario". */
+  | { kind: 'mudar_alarmas' }
   /** Fase 9: "qué tengo esperando" → the ⏳ list. */
   | { kind: 'esperando' }
   /** Fase 9c-A: "/menu" installs the persistent menu; "/ocultar" removes it. */
@@ -635,6 +637,13 @@ export function parseMensaje(raw: string, companies: CompanyRef[], today: string
   if (esperar && !/^(?:que|qu[eé])\b/i.test(text)) return { kind: 'esperar', termino: tidy(esperar[1]).replace(/^(?:el|la|los|las)\s+(?=\d)/i, ''), quien: tidy(esperar[2]), fin: false }
   const retomar = text.match(/^(?:la\s+(?:tarea\s+)?(?:de|del)\s+|la\s+|el\s+|lo\s+de\s+)?(.+?)\s+(?:ya\s+no\s+(?:est[aá]\s+)?(?:esperando|espera)|vuelve\s+a\s+m[ií]|la\s+retomo)\s*[.!]*$/i)
   if (retomar) return { kind: 'esperar', termino: tidy(retomar[1]).replace(/^(?:el|la|los|las)\s+(?=\d)/i, ''), quien: null, fin: true }
+  // Fase 15: "pasa mis alarmas al calendario" — las que quedaban en Telegram se mudan a Google Calendar.
+  if (/^(?:pasa|p[aá]same|mueve|muda|manda|lleva)\s+(?:todas\s+)?(?:mis\s+|las\s+)?alarmas\s+(?:a|al|para)\s+(?:el\s+|mi\s+)?(?:google\s+)?(?:calendar|calendario|agenda)\s*[.!]*$/i.test(text)) {
+    return { kind: 'mudar_alarmas' }
+  }
+  // "quita todas las alarmas", "quita las alarmas de pago" (varias) · "quita alarma 2" (una).
+  const quitarVarias = text.match(/^(?:quita|quitar|borra|borrar|elimina|cancela)\s+(todas\s+(?:las\s+|mis\s+)?alarmas|(?:las\s+|mis\s+)alarmas)\s*([\s\S]*?)\s*[.!]*$/i)
+  if (quitarVarias) return { kind: 'quitar_alarma', arg: `todas ${tidy(quitarVarias[2])}`.trim() }
   const quitar = text.match(/^(?:quita|quitar|borra|borrar|elimina|cancela)\s+(?:la\s+)?alarma\s+([\s\S]+)$/i)
   if (quitar) return { kind: 'quitar_alarma', arg: tidy(quitar[1]) }
   // Ajuste 6-7: "1 listo", "3 terminado", "2, 5 hechas", "el 4 listo" — numbers of the last list, no model needed.

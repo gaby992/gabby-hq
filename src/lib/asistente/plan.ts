@@ -25,9 +25,9 @@ import { responderNarrada } from './narracion'
 import { enviarTablero } from './tablero-imagen'
 import { enviarQueSigue } from './que-sigue'
 import { dejarDeEsperar, enviarListaEsperando, moverTarea } from './esperando'
-import { confirmacionAlarma, crearRecordatorio, instanteDe } from './recordatorios'
+import { instanteDe } from './recordatorios'
+import { crearAviso } from './avisos'
 import { cargarEmpresas, confirmacion, guardarTarea } from './tareas'
-import { sinHtml } from './html'
 import { responderDeDocumentos } from '@/lib/documentos/buscar'
 import { recibirNota } from '@/lib/documentos/entrada'
 import { agregarACalendar, cuandoDe } from '@/lib/google/sync'
@@ -272,7 +272,12 @@ function frase(a: AccionResuelta, today: string, conTarea: boolean): string {
     }
     case 'nota_empresa': return `Nota de ${a.empresa_ref?.name.trim() ?? a.empresa} (${a.modo}): «${corto(a.texto, 60)}»`
     case 'nota_tarea': return `Nota en${tt}: «${corto(a.texto, 60)}»`
-    case 'alarma': return `Alarma «${corto(a.texto)}» · ${a.dispara_en ? formatFechaHoraEs(a.dispara_en) : `${a.fecha ? formatVenceEs(a.fecha) : 'hoy'} (sin hora → 9:00 am)`}`
+    case 'alarma': {
+      // Fase 15: la línea dice dónde va a sonar — en su calendario, o por aquí si es un temporizador.
+      const cuando = a.dispara_en ? formatFechaHoraEs(a.dispara_en) : `${a.fecha ? formatVenceEs(a.fecha) : 'hoy'} (sin hora → 9:00 am)`
+      const rep = describirRepeticion(a.repetir, a.fecha ?? cancunYmd())
+      return `Alarma «${corto(a.texto)}» · ${cuando}${rep ? ` · ${rep}` : ''}${a.en_minutos ? ' · por aquí' : ' · 📆 en tu calendario'}`
+    }
     case 'pregunta': return `Responder «${corto(a.texto, 60)}»`
     case 'que_sigue': return `Qué sigue${a.empresa ? ` de ${a.empresa}` : ''}${a.solo_urgentes ? ' (solo urgentes)' : ''}${a.solo_vencer ? ' (por vencer)' : ''}`
     case 'lista': return a.lista === 'tarde' ? 'Mandar el cierre del día' : a.lista === 'pendientes' ? `Mandar todo lo pendiente de ${a.empresa_ref?.name.trim() ?? a.empresa ?? '?'}` : 'Mandar la lista completa de hoy'
@@ -643,8 +648,8 @@ export async function ejecutarUna(chatId: number, a: AccionResuelta): Promise<st
     case 'alarma': {
       // No hour inside an approved plan → 9:00 am (the plan said so).
       const cuando = a.dispara_en ?? instanteDe({ fecha: a.fecha, hora: '09:00' })!
-      const r = await crearRecordatorio(chatId, a.texto, cuando)
-      return confirmacionAlarma(r)
+      // Fase 15: con hora → Google Calendar (suena en el teléfono); "en 20 minutos" → por aquí.
+      return crearAviso(chatId, { texto: a.texto, dispara_en: cuando, repetir: a.repetir ?? null, temporizador: !!a.en_minutos })
     }
     case 'pregunta': {
       // Fase 9c-D: the known questions get prose (no model); the rest, the LLM answer.
@@ -717,14 +722,13 @@ export async function ejecutarUna(chatId: number, a: AccionResuelta): Promise<st
       return '📧 (correos enviados arriba)'
     }
     case 'documentos': {
-      // Fase 14: la respuesta trae su enlace firmado; aquí va en texto plano
-      // porque una línea de plan se manda sin HTML.
+      // Fase 14/15: la respuesta trae su enlace firmado; el motor la manda como HTML seguro.
       const r = await responderDeDocumentos(a.texto)
-      return sinHtml(r.texto)
+      return r.texto
     }
     case 'documento_nota': {
       const s = await recibirNota(chatId, a.texto, await cargarEmpresas())
-      return sinHtml(s.texto)
+      return s.texto
     }
     case 'desconocido':
       return `🤷 No entendí «${corto(a.texto, 60)}»`

@@ -265,7 +265,8 @@ const RE_NOTA_CEREBRO = /^(?:guarda(?:me)?|gu[aá]rdalo|anota|ap[uú]ntame|ap[u�
 
 /** The sentence she dictated, or null when the message is not one of these. */
 export function leerNotaCerebro(texto: string): string | null {
-  const m = texto.trim().match(RE_NOTA_CEREBRO)
+  // "Gabita, guarda: …" — el cerebro tiene nombre; llamarlo no cambia la orden.
+  const m = texto.trim().replace(/^(?:oye\s+)?gabita\s*[,:.]?\s+/i, '').match(RE_NOTA_CEREBRO)
   const dato = m?.[1]?.trim()
   // "guarda: listo" is not a document; a real note has something in it.
   return dato && dato.length >= 8 ? dato : null

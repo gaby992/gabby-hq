@@ -8,8 +8,10 @@
 
 import { createServerClient } from '@/lib/supabase-server'
 import {
+  TelegramError,
   answerCallbackQuery,
   downloadTelegramFile,
+  editMessageText,
   inlineKeyboard,
   isAllowedChat,
   removeInlineKeyboard,
@@ -50,8 +52,6 @@ import { mensajeError, motivoParaUsuario } from '@/lib/errores'
 import { tareasRecientes } from '@/lib/asistente/conversacion'
 import {
   HORAS_BOTONES,
-  confirmacionAlarma,
-  crearRecordatorio,
   instanteDe,
   listarRecordatorios,
   quitarRecordatorio,
@@ -91,7 +91,8 @@ import {
 import { documentoPorId } from '@/lib/documentos/ficha'
 import { tituloRenovar } from '@/lib/documentos/vencimientos'
 import { buscarDocumentos, pareceDeDocumentos, responderDeDocumentos } from '@/lib/documentos/buscar'
-import { sinHtml } from '@/lib/asistente/html'
+import { htmlSeguro, sinHtml } from '@/lib/asistente/html'
+import { crearAviso, textoMudanza } from '@/lib/asistente/avisos'
 import { responderPregunta } from '@/lib/asistente/pregunta'
 import { enviarQueSigue } from '@/lib/asistente/que-sigue'
 import { enviarLista } from '@/lib/asistente/alarmas'
@@ -122,8 +123,17 @@ export async function reply(chatId: number, text: string, replyMarkup?: unknown,
   let id: number | null = null
   try {
     id = await sendTelegram(chatId, text, { tag: 'bot', replyMarkup, html })
-  } catch {
-    /* already logged by sendTelegram */
+  } catch (err) {
+    // Fase 15: if Telegram refuses the HTML (a stray "<" somewhere), the same
+    // message goes out as plain text — an ugly link beats a silent bot.
+    if (html && err instanceof TelegramError && err.status === 400) {
+      try {
+        id = await sendTelegram(chatId, sinHtml(text), { tag: 'bot-plano', replyMarkup })
+      } catch {
+        /* already logged by sendTelegram */
+      }
+    }
+    /* otherwise already logged by sendTelegram */
   }
   // Fase 7: every answer is part of the thread the interpreter will read next.
   await guardarTurno(chatId, 'assistant', text)
@@ -665,6 +675,10 @@ export async function handleText(chatId: number, text: string, prefix: string | 
       await responderAccion(chatId, text, params, (nonce) => manejarAccion(params, parsed.termino, nonce), prefix)
       return
     }
+    case 'mudar_alarmas':
+      // Fase 15: "pasa mis alarmas al calendario".
+      await reply(chatId, htmlSeguro(joinLines(prefix, await textoMudanza(chatId))), undefined, true)
+      return
     case 'quitar_alarma':
       await reply(chatId, joinLines(prefix, await quitarRecordatorio(chatId, parsed.arg)))
       return
@@ -941,13 +955,14 @@ async function handleLibre(chatId: number, text: string, parsed: Parsed, prefix:
     return
   }
   if (a.tipo === 'alarma' && !a.dispara_en) {
-    const nonce = await borradorConNonce(chatId, text, { tipo: 'alarma_hora', texto: a.texto, fecha: a.fecha ?? null })
+    const nonce = await borradorConNonce(chatId, text, { tipo: 'alarma_hora', texto: a.texto, fecha: a.fecha ?? null, repetir: a.repetir ?? null })
     const dia = a.fecha ? `el ${formatVenceEs(a.fecha)}` : 'hoy'
     await reply(chatId, joinLines(prefix, `¿A qué hora te aviso «${a.texto}» ${dia}?`), botonesHora(nonce))
     return
   }
-  // Fase 14: una línea puede traer un enlace (📆 Calendar, 🔗 Reconectar): sin HTML se manda como texto, no como etiqueta.
-  await reply(chatId, joinLines(prefix, sinHtml(await ejecutarUna(chatId, a))))
+  // Fase 15: una línea puede traer un enlace (📆 abrir, 🔗 Reconectar). Va como HTML seguro:
+  // nuestras etiquetas se quedan y lo que ella escribió se escapa.
+  await reply(chatId, htmlSeguro(joinLines(prefix, await ejecutarUna(chatId, a))), undefined, true)
   if (a.tarea) await guardarTurno(chatId, 'assistant', `[${a.tipo}] ${a.tarea.text}`, { tareas: [{ id: a.tarea.id, text: a.tarea.text }] })
   if (a.tipo === 'completar' && a.tarea) await sugerir(chatId, await trasCompletar(chatId, await cargarConfig(), a.tarea.id))
 }
@@ -1150,8 +1165,15 @@ export async function procesarBoton(chatId: number, messageId: number | null, da
   const rm = data.match(/^r:([0-9a-f-]{36}):(ok|1h|man)$/)
   if (rm) {
     try {
-      await quitarBotones()
-      await reply(chatId, await responderRecordatorio(chatId, rm[1], rm[2] as RespuestaRecordatorio))
+      // Fase 15: la respuesta se escribe EN el mismo mensaje de la alarma ("⏰ Pospuesta → …"),
+      // en vez de mandar otro: un aviso es un mensaje, no dos.
+      const texto = await responderRecordatorio(chatId, rm[1], rm[2] as RespuestaRecordatorio)
+      const editado = messageId ? await editMessageText(chatId, messageId, texto) : false
+      if (editado) await guardarTurno(chatId, 'assistant', texto)
+      else {
+        await quitarBotones()
+        await reply(chatId, texto)
+      }
     } catch (err) {
       console.error('[bot] callback recordatorio error:', err)
       await reply(chatId, ERROR_GENERICO)
@@ -1288,7 +1310,7 @@ export async function procesarBoton(chatId: number, messageId: number | null, da
         return
       }
       await borrarBorrador(borrador.id)
-      await reply(chatId, sinHtml(await ejecutarPlan(chatId, parsed.acciones)))
+      await reply(chatId, htmlSeguro(await ejecutarPlan(chatId, parsed.acciones)), undefined, true)
       const tocadas = parsed.acciones.filter((a) => a.tarea && !a.error).map((a) => ({ id: a.tarea!.id, text: a.tarea!.text }))
       if (tocadas.length > 0) await guardarTurno(chatId, 'assistant', `[plan] ${tocadas.length} tareas`, { tareas: tocadas })
       return
@@ -1307,7 +1329,7 @@ export async function procesarBoton(chatId: number, messageId: number | null, da
         return
       }
       const accion: AccionResuelta = { ...parsed.accion, tarea: elegida, candidatos: undefined, error: undefined }
-      await reply(chatId, await ejecutarUna(chatId, accion))
+      await reply(chatId, htmlSeguro(await ejecutarUna(chatId, accion)), undefined, true)
       return
     }
 
@@ -1316,8 +1338,8 @@ export async function procesarBoton(chatId: number, messageId: number | null, da
       if (kind !== 'h' || !(HORAS_BOTONES as readonly string[]).includes(value)) return
       await borrarBorrador(borrador.id)
       const cuando = instanteDe({ fecha: parsed.fecha, hora: `${value}:00` })!
-      const r = await crearRecordatorio(chatId, parsed.texto, cuando)
-      await reply(chatId, confirmacionAlarma(r))
+      // Fase 15: ya tiene hora → a su calendario (si Calendar falla, por aquí y diciendo por qué).
+      await reply(chatId, htmlSeguro(await crearAviso(chatId, { texto: parsed.texto, dispara_en: cuando, repetir: parsed.repetir ?? null })), undefined, true)
       return
     }
 

@@ -26,6 +26,7 @@ sección y **no se empieza una fase hasta validar la anterior**.
 | 12 | Dashboard de vida: pantalla Resumen clara (agenda con Google Calendar en lectura, prioridades, correos, notas, KPIs, "Resumen diario", herramientas conectadas), menú lateral índigo/morado, pantallas Calendario y Notas, alerta de correo en el idioma de la cuenta | ✅ Construida — pendiente de validar |
 | 12b | El asistente explica sus errores (Google en lenguaje normal + enlace para reconectar), eventos libres y repetidos en Calendar por voz, preguntas sobre lo que él mismo dijo, sin "Ojo" tras un tropiezo, botón Probar en Conexiones, chequeo de conexiones en la alarma de las 8 | ✅ Construida — pendiente de validar |
 | 14 | Segundo cerebro: documentos (PDF y fotos) al bucket privado, ficha propuesta por el modelo con Guardar/Corregir, varias fotos = un documento, renovaciones con historial, notas sin archivo, preguntas con enlace firmado, vencimientos a 30/7/1 días con botón de renovar, pantalla Archivos | ✅ Construida — pendiente de validar |
+| 15 | Cada cosa en su cajón: las alarmas con hora van a Google Calendar (suenan en el teléfono, pueden repetirse cada mes/semana/día), los temporizadores siguen en Telegram, posponer reescribe el mismo mensaje, "pasa mis alarmas al calendario", enlaces limpios | ✅ Construida — pendiente de validar |
 
 ---
 
@@ -3272,6 +3273,66 @@ El trozo vendible de esta fase, para "IA después de los 40":
 3. Ver el **vencimiento** como chip en el Resumen y en Archivos.
 4. Que la alarma de las 8 **avise** del vencimiento que toque y que el botón
    ➕ cree la tarea de renovar.
+
+---
+
+## 15. Fase 15 — Cada cosa en su cajón: las alarmas con hora van a Google Calendar
+
+**El problema.** Telegram terminó cargando todo con el mismo peso: la
+alarma de un pago, su "te lo recuerdo otra vez", la lista de las 8, el
+tablero y la conversación. Cuando todo llega igual, se deja de distinguir y
+se termina ignorando. En un solo día (9 nov) el chat tuvo ocho ⏰.
+
+**La regla (decisión de Gabby, 9 nov).** Tres cajones que no se pisan:
+
+| Cajón | Qué guarda | Cómo avisa |
+| --- | --- | --- |
+| 📆 Google Calendar | lo que tiene **hora**: pagos, citas, "recuérdame llamar al banco a las 10" | el teléfono suena solo, a la hora exacta |
+| 📋 Tablero | lo que hay que **hacer**: tareas, con fecha, en sus bloques | aparece en el mensaje de las 8 y en el Dashboard |
+| 🧠 Gabita (archivero) | lo que hay que **saber**: papeles, datos, lo que vio | no avisa: se consulta |
+
+Si no tiene hora, no es alarma: es una tarea con fecha.
+
+### 15a. Qué cambió
+
+- **"alarma …", "recuérdame …", "avísame …" con fecha y hora → evento en
+  Google Calendar**, con ⏰ en el título, de 15 minutos, y el aviso del
+  teléfono en el **minuto 0** (una cita avisa 15 min antes; un recordatorio
+  tiene que sonar a la hora). Ella lo dice igual que siempre.
+- **Se repiten:** "los días 10 y 20 de cada mes a las 10 am" son dos
+  alarmas mensuales; "todos los lunes a las 9", semanal; "todos los días a
+  las 7", diaria. Antes la palabra "mensual" se perdía y quedaba una sola
+  alarma.
+- **"avísame en 20 minutos …" sigue en Telegram**: es un temporizador
+  dentro de la conversación, no una fecha.
+- **Si Calendar falla, la alarma no se pierde:** cae a Telegram por esa vez
+  y la respuesta dice por qué y cómo arreglarlo (el mismo aviso de la 12b).
+- **Posponer ya no manda otro mensaje:** [⏰ +1h] y [📅 Mañana] reescriben
+  el mismo mensaje ("💤 Pospuesta: … → mar 10 nov 10:00 am"). Un aviso es
+  un mensaje, no dos.
+- **Mudanza:** "pasa mis alarmas al calendario" lleva a Calendar las que
+  quedaban en Telegram. "quita todas las alarmas" y "quita las alarmas de
+  pago" limpian varias de una vez.
+- **Enlaces limpios:** las confirmaciones salen con "abrir" como enlace, no
+  con la URL entre paréntesis. `htmlSeguro()` escapa lo que ella escribió y
+  deja nuestras etiquetas; si Telegram igual rechaza el HTML, el mensaje se
+  manda en texto plano en vez de perderse.
+
+### 15b. Lo que falta de esta idea (domingo)
+
+- Telegram en **3 mensajes al día**: las 8 (bloque A y B de hoy), el cambio
+  de bloque y el check-in de las 7:30 pm. Depende de la plantilla de semana.
+- Que una **tarea con hora** vaya sola a Calendar (hoy solo si dice "y ponla
+  en calendar").
+
+### 15c. Versión curso
+
+- **La clase:** "Un asistente no es un notificador". Por qué más alarmas =
+  menos atención, y cómo repartir: reloj → calendario, hacer → lista,
+  saber → archivo.
+- **Lo que se enseña:** crear el evento con la API (RRULE mensual/semanal,
+  recordatorio en el minuto 0), el patrón "si el servicio falla, cae al
+  canal de respaldo y dilo", y editar un mensaje en vez de mandar otro.
 
 ## 10. Cómo replicarlo para otra persona
 
