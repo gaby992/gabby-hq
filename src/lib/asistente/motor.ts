@@ -60,7 +60,7 @@ import {
 } from '@/lib/asistente/recordatorios'
 import { ejecutarNota, USO_NOTA } from '@/lib/asistente/notas-bot'
 import { llmConfig } from '@/lib/asistente/llm'
-import { ayuda, faltantes, parseMensaje, type Parsed, type TareaParsed } from '@/lib/parser'
+import { ayuda, faltantes, lineasConOrdenDeAlarmas, parseMensaje, type Parsed, type TareaParsed } from '@/lib/parser'
 import { cancunYmd, formatHoraEs, formatVenceEs } from '@/lib/asistente/cancun'
 import { MAX_AUDIO_SECONDS, transcribirAudio } from '@/lib/asistente/whisper'
 import {
@@ -466,6 +466,14 @@ async function correccionDeFicha(chatId: number, text: string, prefix: string | 
 export async function handleText(chatId: number, text: string, prefix: string | null) {
   if (!text) {
     await reply(chatId, joinLines(prefix, 'No entendí nada. ¿Me lo repites?'))
+    return
+  }
+  // Ajuste 15a: varias órdenes de alarmas apiladas en un mensaje ("quita las alarmas de pago ⏎ pasa mis
+  // alarmas al calendario ⏎ alarma: …") se atienden una por una, en orden, como si las hubiera mandado aparte.
+  const apiladas = lineasConOrdenDeAlarmas(text)
+  if (apiladas) {
+    if (prefix) await reply(chatId, prefix)
+    for (const linea of apiladas) await handleText(chatId, linea, null)
     return
   }
   // Fase 9c-A: the first message of a conversation (nothing in the last 30 min) installs the menu with its reply.

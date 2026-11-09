@@ -279,6 +279,13 @@ ok('¿qué cerré ayer? → pregunta libre', parse('¿qué cerré ayer?').kind =
     parse('quita alarma 2').arg === '2',
     `${parse('pasa mis alarmas al calendario').kind} · ${parse('quita las alarmas de pago').arg}`)
 
+  const { lineasConOrdenDeAlarmas } = await import('@/lib/parser')
+  const tres = lineasConOrdenDeAlarmas('quita las alarmas de pago\npasa mis alarmas al calendario\nalarma: pago Health Insurance PD los días 10 y 20 de\ncada mes a las 10 am, y pago Gold Amex PD los días 16 y\n22 de cada mes a las 10 am')
+  ok('15a: tres órdenes apiladas se atienden una por una (y la alarma larga no se parte)',
+    tres?.length === 3 && tres[0] === 'quita las alarmas de pago' && tres[1] === 'pasa mis alarmas al calendario' && tres[2].startsWith('alarma: pago Health') && tres[2].endsWith('10 am'), JSON.stringify(tres))
+  ok('15a: un mensaje normal de varias líneas no se toca', lineasConOrdenDeAlarmas('1 terminado\n9 cancelar') === null && lineasConOrdenDeAlarmas('quita las alarmas de pago') === null)
+  ok('15a: una orden de alarmas ya no se traga las líneas de abajo',
+    parse('quita las alarmas de pago\npasa mis alarmas al calendario').kind !== 'quitar_alarma')
   const h = htmlSeguro('🎙 Entendí: «IM < PD & más»\n📆 En Calendar: «Hitv» · <a href="https://g.co/e?a=1&b=2">abrir</a> · <b>ok</b>')
   ok('15: HTML seguro — lo suyo se escapa, nuestras etiquetas se quedan',
     h.includes('IM &lt; PD &amp; más') && h.includes('<a href="https://g.co/e?a=1&amp;b=2">abrir</a>') && h.includes('<b>ok</b>'), h)

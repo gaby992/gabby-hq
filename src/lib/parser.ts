@@ -180,6 +180,42 @@ export function pareceEventoNuevo(resto: string): boolean {
   )
 }
 
+/**
+ * Ajuste 15a: one of the two orders about the bot's own alarms ("quita las
+ * alarmas de pago", "pasa mis alarmas al calendario"). They are answered
+ * without the model, so a message that stacks them line by line has to be
+ * taken one line at a time.
+ */
+export function esOrdenDeAlarmas(linea: string): boolean {
+  const t = linea.trim()
+  return (
+    /^(?:quita|quitar|borra|borrar|elimina|cancela)\s+(?:(?:todas\s+)?(?:las\s+|mis\s+)?alarmas|(?:la\s+)?alarma\s+\S)/i.test(t) ||
+    /^(?:pasa|p[aá]same|mueve|muda|manda|lleva)\s+(?:todas\s+)?(?:mis\s+|las\s+)?alarmas\s+(?:a|al|para)\s/i.test(t)
+  )
+}
+
+/**
+ * Ajuste 15a: a message of several lines where at least one is an alarm
+ * order → the lines, to be handled one by one, in order. Null for anything
+ * else (a normal multi-line message still goes whole to the interpreter).
+ */
+export function lineasConOrdenDeAlarmas(texto: string): string[] | null {
+  const lineas = texto.split(/\n+/).map((l) => l.trim()).filter(Boolean)
+  if (lineas.length < 2 || !lineas.some(esOrdenDeAlarmas)) return null
+  // Lines that are not alarm orders stay together, in place, so a long dictated alarm is not cut in two.
+  const out: string[] = []
+  let resto: string[] = []
+  for (const l of lineas) {
+    if (esOrdenDeAlarmas(l)) {
+      if (resto.length > 0) out.push(resto.join('\n'))
+      resto = []
+      out.push(l)
+    } else resto.push(l)
+  }
+  if (resto.length > 0) out.push(resto.join('\n'))
+  return out
+}
+
 function tidy(s: string): string {
   return s.replace(/\s{2,}/g, ' ').replace(/^[\s:,.\-–]+|[\s:,.\-–]+$/g, '').trim()
 }
@@ -642,9 +678,9 @@ export function parseMensaje(raw: string, companies: CompanyRef[], today: string
     return { kind: 'mudar_alarmas' }
   }
   // "quita todas las alarmas", "quita las alarmas de pago" (varias) · "quita alarma 2" (una).
-  const quitarVarias = text.match(/^(?:quita|quitar|borra|borrar|elimina|cancela)\s+(todas\s+(?:las\s+|mis\s+)?alarmas|(?:las\s+|mis\s+)alarmas)\s*([\s\S]*?)\s*[.!]*$/i)
+  const quitarVarias = text.match(/^(?:quita|quitar|borra|borrar|elimina|cancela)\s+(todas\s+(?:las\s+|mis\s+)?alarmas|(?:las\s+|mis\s+)alarmas)[ \t]*([^\n]*?)[ \t]*[.!]*$/i)
   if (quitarVarias) return { kind: 'quitar_alarma', arg: `todas ${tidy(quitarVarias[2])}`.trim() }
-  const quitar = text.match(/^(?:quita|quitar|borra|borrar|elimina|cancela)\s+(?:la\s+)?alarma\s+([\s\S]+)$/i)
+  const quitar = text.match(/^(?:quita|quitar|borra|borrar|elimina|cancela)\s+(?:la\s+)?alarma\s+([^\n]+)$/i)
   if (quitar) return { kind: 'quitar_alarma', arg: tidy(quitar[1]) }
   // Ajuste 6-7: "1 listo", "3 terminado", "2, 5 hechas", "el 4 listo" — numbers of the last list, no model needed.
   const nListo = text.match(/^(?:(?:el|la|los|las)\s+)?(\d+(?:[\s,;]+\d+)*)\s+(?:listo|lista|listos|listas|terminad[oa]s?|hech[oa]s?|done|completad[oa]s?|cerrad[oa]s?|ya\s+est[aá]n?)\s*[.!]*$/i)
