@@ -556,6 +556,16 @@ export function necesitaConfirmacion(acciones: AccionResuelta[]): boolean {
   return reales.length >= 2 || reales.some((a) => a.tipo === 'cancelar' || (a.tipo === 'correo' && (a.correos?.length ?? 0) >= 2))
 }
 
+/**
+ * Ajuste 15b: a "plan" where no line can run — every one is an error ("no sé
+ * cuál es la anterior"), a question or something not understood. It is not a
+ * plan: showing it with [Hacer todo] and leaving it waiting only makes the
+ * NEXT message be read as a correction of nothing.
+ */
+export function sinNadaQueHacer(acciones: AccionResuelta[]): boolean {
+  return acciones.every((a) => !!a.error || a.tipo === 'pregunta' || a.tipo === 'desconocido')
+}
+
 function tareaDe(a: AccionResuelta): TareaRef {
   if (!a.tarea) throw new Error('acción sin tarea resuelta')
   return a.tarea

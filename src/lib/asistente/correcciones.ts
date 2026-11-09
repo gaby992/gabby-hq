@@ -305,6 +305,10 @@ export function fusionarCorreccion(plan: AccionResuelta[], nuevas: AccionResuelt
   const acciones: AccionResuelta[] = JSON.parse(JSON.stringify(plan))
   const cambiadas: AccionResuelta[] = []
   const agregadas: AccionResuelta[] = []
+  // Ajuste 15b: an alarm of the message replaces an alarm THE PLAN ALREADY HAD
+  // with that text, once. Two alarms of the same message with the same text
+  // ("pago del seguro" el 10 y el 20) are two alarms, not one overwriting the other.
+  const alarmasTomadas = new Set<number>()
   for (const n of nuevas) {
     if (AJENAS.has(n.tipo)) continue
     if (n.tipo === 'borrar' || n.tipo === 'cancelar' || n.tipo === 'completar') {
@@ -319,8 +323,9 @@ export function fusionarCorreccion(plan: AccionResuelta[], nuevas: AccionResuelt
       return { tipo: 'duda', pregunta: `¿Quito «${corto(tituloDe(a), 40)}» del plan, o ${v.pregunta}?`, opciones }
     }
     if (n.tipo === 'alarma') {
-      const j = acciones.findIndex((a) => a.tipo === 'alarma' && normalizar(a.texto) === normalizar(n.texto))
+      const j = acciones.findIndex((a, k) => k < plan.length && !alarmasTomadas.has(k) && a.tipo === 'alarma' && normalizar(a.texto) === normalizar(n.texto))
       if (j >= 0) {
+        alarmasTomadas.add(j)
         acciones[j] = n
         cambiadas.push(n)
       } else {

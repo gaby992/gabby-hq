@@ -286,6 +286,19 @@ ok('¿qué cerré ayer? → pregunta libre', parse('¿qué cerré ayer?').kind =
   ok('15a: un mensaje normal de varias líneas no se toca', lineasConOrdenDeAlarmas('1 terminado\n9 cancelar') === null && lineasConOrdenDeAlarmas('quita las alarmas de pago') === null)
   ok('15a: una orden de alarmas ya no se traga las líneas de abajo',
     parse('quita las alarmas de pago\npasa mis alarmas al calendario').kind !== 'quitar_alarma')
+  const { fusionarCorreccion } = await import('@/lib/asistente/correcciones')
+  const { sinNadaQueHacer } = await import('@/lib/asistente/plan')
+  const al = (texto, fecha) => ({ tipo: 'alarma', texto, fecha, hora: '10:00', repetir: { cada: 'mes' } })
+  const cuatro = [al('pago Health Insurance PD', '2026-11-10'), al('pago Health Insurance PD', '2026-11-20'), al('pago Gold Amex PD', '2026-11-16'), al('pago Gold Amex PD', '2026-11-22')]
+  const f1 = fusionarCorreccion([{ tipo: 'crear', titulo: 'otra cosa' }], cuatro)
+  ok('15b: dos alarmas con el mismo texto y distinto día son dos, no una pisando a la otra',
+    f1.tipo === 'plan' && f1.acciones.filter((a) => a.tipo === 'alarma').length === 4 && f1.agregadas.length === 4, JSON.stringify(f1.acciones?.map((a) => a.fecha)))
+  const f2 = fusionarCorreccion([al('pago Gold Amex PD', '2026-11-16')], [al('pago Gold Amex PD', '2026-11-17')])
+  ok('15b: corregir la alarma que el plan ya tenía sigue reemplazándola',
+    f2.tipo === 'plan' && f2.acciones.length === 1 && f2.acciones[0].fecha === '2026-11-17' && f2.cambiadas.length === 1)
+  ok('15b: un plan donde nada se puede hacer no es un plan',
+    sinNadaQueHacer([{ tipo: 'esperar', ref: 'anterior', error: 'no sé cuál es "la anterior"' }, { tipo: 'pregunta', texto: '¿a qué alarmas te refieres?' }]) &&
+    !sinNadaQueHacer([{ tipo: 'pregunta', texto: 'x' }, al('pago', '2026-11-10')]))
   const h = htmlSeguro('🎙 Entendí: «IM < PD & más»\n📆 En Calendar: «Hitv» · <a href="https://g.co/e?a=1&b=2">abrir</a> · <b>ok</b>')
   ok('15: HTML seguro — lo suyo se escapa, nuestras etiquetas se quedan',
     h.includes('IM &lt; PD &amp; más') && h.includes('<a href="https://g.co/e?a=1&amp;b=2">abrir</a>') && h.includes('<b>ok</b>'), h)

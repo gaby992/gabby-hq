@@ -30,6 +30,7 @@ import {
   ejecutarUna,
   esPlanSemana,
   necesitaConfirmacion,
+  sinNadaQueHacer,
   renderPlan,
   renderPlanSemana,
   resolverAcciones,
@@ -60,7 +61,7 @@ import {
 } from '@/lib/asistente/recordatorios'
 import { ejecutarNota, USO_NOTA } from '@/lib/asistente/notas-bot'
 import { llmConfig } from '@/lib/asistente/llm'
-import { ayuda, faltantes, lineasConOrdenDeAlarmas, parseMensaje, type Parsed, type TareaParsed } from '@/lib/parser'
+import { ayuda, esOrdenDeAlarmas, faltantes, lineasConOrdenDeAlarmas, parseMensaje, type Parsed, type TareaParsed } from '@/lib/parser'
 import { cancunYmd, formatHoraEs, formatVenceEs } from '@/lib/asistente/cancun'
 import { MAX_AUDIO_SECONDS, transcribirAudio } from '@/lib/asistente/whisper'
 import {
@@ -516,7 +517,10 @@ export async function handleText(chatId: number, text: string, prefix: string | 
   // estaba" or "olvídalo" correct THAT plan; nothing is deleted or completed.
   const pendiente = await planPendiente(chatId)
   if (pendiente) {
-    const c = leerCorreccion(text)
+    // Ajuste 15b: "quita las alarmas de pago" / "pasa mis alarmas al calendario" hablan de SUS alarmas,
+    // no del plan — salvo que el plan tenga una alarma, y entonces sí puede ser de esa.
+    const deSusAlarmas = esOrdenDeAlarmas(text) && !pendiente.acciones.some((a) => a.tipo === 'alarma')
+    const c = deSusAlarmas ? null : leerCorreccion(text)
     if (c) {
       await responderCorreccion(chatId, pendiente, aplicarCorreccion(pendiente.acciones, c), prefix)
       return
@@ -814,6 +818,8 @@ interface PlanPendiente {
 async function planPendiente(chatId: number): Promise<PlanPendiente | null> {
   const b = await borradorVigente(chatId)
   if (!b || !('tipo' in b.parsed) || (b.parsed.tipo !== 'plan' && b.parsed.tipo !== 'plan_duda')) return null
+  // Ajuste 15b: un "plan" donde nada se puede ejecutar no espera nada: el siguiente mensaje es un mensaje nuevo.
+  if (sinNadaQueHacer(b.parsed.acciones)) return null
   return { id: b.id, nonce: nonceDe(b.id), acciones: b.parsed.acciones }
 }
 
@@ -896,6 +902,22 @@ async function handleLibre(chatId: number, text: string, parsed: Parsed, prefix:
       await responderCorreccion(chatId, pendiente, fusion, prefix)
       return
     }
+  }
+
+  // Ajuste 15b: varias líneas y ninguna se puede hacer → no es un plan. Se dice en claro, sin botones
+  // y sin dejar nada esperando (un plan vacío se tragaba el mensaje siguiente como "corrección").
+  if (acciones.length >= 2 && sinNadaQueHacer(acciones)) {
+    const motivos = Array.from(new Set(acciones.map((a) => a.error).filter((e): e is string => !!e)))
+    await reply(
+      chatId,
+      joinLines(
+        prefix,
+        'No encontré nada que hacer con ese mensaje.',
+        motivos.length > 0 ? motivos.map((m) => `• ${m}`).join('\n') : null,
+        'Dímelo de otra forma, o una cosa a la vez.'
+      )
+    )
+    return
   }
 
   // ── Several actions, or anything that cancels: show the plan, ask OK ──
