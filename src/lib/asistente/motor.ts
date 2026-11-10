@@ -866,7 +866,7 @@ async function responderCorreccion(chatId: number, plan: PlanPendiente, r: Resul
  * [Orden] / [Alarma] buttons on a second try.
  */
 /** Actions that only read or talk: several of them together are never a plan to confirm. */
-const SOLO_LECTURA = new Set<string>(['lista', 'que_sigue', 'pregunta', 'esperando', 'conversar', 'documentos'])
+const SOLO_LECTURA = new Set<string>(['lista', 'que_sigue', 'pregunta', 'esperando', 'conversar', 'documentos', 'proyectos'])
 
 async function handleLibre(chatId: number, text: string, parsed: Parsed, prefix: string | null, pista?: string) {
   const companies = await cargarEmpresas()

@@ -22,6 +22,7 @@ import { calcularQueSigue } from './que-sigue'
 import { allowedChatIds } from './telegram'
 import { chipsVencimientos, type ChipVencimiento } from '@/lib/documentos/vencimientos'
 import { hoyTeToca, type BloqueDelDia } from './bloques'
+import { proyectosActivos } from '@/lib/proyectos'
 
 /** One line of the agenda. Sorted by `hora`; the ones without an hour go to "Sin hora". */
 export interface ItemAgenda {
@@ -75,6 +76,8 @@ export interface Resumen {
   bloques_hoy: BloqueDelDia[]
   /** Fase 16: tareas de hoy que no caen en ningún bloque. */
   sin_bloque: { id: string; text: string }[]
+  /** Fase 17: los proyectos activos con su cuenta regresiva. */
+  proyectos: { id: string; nombre: string; empresa: string | null; salida: string | null; dias: number | null; hechos: number; total: number; falta: number }[]
   conexiones: {
     google_configurado: boolean
     cuentas: { email: string; calendar: boolean; correo: boolean; activa: boolean }[]
@@ -166,6 +169,7 @@ export async function cargarResumen(today: string = cancunYmd()): Promise<Resume
   ])
   const { companies, tasks, notas } = panorama
   const hechos = await agendaHechos(today)
+  const proyectos = await proyectosActivos(today)
   // Fase 16: sin el SQL de la fase 16 esto vuelve vacío y el Resumen sigue igual.
   const teToca = await hoyTeToca(tasks, companies, today).catch((err) => {
     console.warn(`[resumen] bloques: ${mensajeError(err)}`)
@@ -286,6 +290,7 @@ export async function cargarResumen(today: string = cancunYmd()): Promise<Resume
       return { ...b, nota: n || null }
     }),
     sin_bloque: teToca.sin_bloque,
+    proyectos: proyectos.map((p) => ({ id: p.id, nombre: p.nombre, empresa: p.empresa, salida: p.salida, dias: p.dias, hechos: p.hechos, total: p.pasos.length, falta: p.falta.length })),
     conexiones: {
       google_configurado: googleConfigurado(),
       cuentas: conexiones,

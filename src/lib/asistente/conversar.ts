@@ -16,6 +16,7 @@
 // where a stronger model changes the answer. If that model fails or is not
 // set, the usual one answers — a plainer answer beats none.
 
+import { proyectosActivos, textoProyecto } from '@/lib/proyectos'
 import { createServerClient } from '@/lib/supabase-server'
 import { eventosEntre, type EventoConFecha } from '@/lib/google/calendar'
 import { googleConfigurado } from '@/lib/google/oauth'
@@ -86,7 +87,7 @@ function lineaEvento(e: EventoConFecha): string {
 /** Everything Gabita knows when she answers, as the text of the user turn. */
 export async function contextoConversacion(chatId: number, mensaje: string, ahora: Date = new Date()): Promise<string> {
   const hoy = cancunYmd(ahora)
-  const [panorama, plantilla, turnos, eventos] = await Promise.all([
+  const [panorama, plantilla, turnos, eventos, proyectos] = await Promise.all([
     cargarPanorama(hoy),
     cargarPlantilla(),
     historial(chatId, ahora),
@@ -96,6 +97,7 @@ export async function contextoConversacion(chatId: number, mensaje: string, ahor
           return null
         })
       : Promise.resolve(null),
+    proyectosActivos(hoy),
   ])
   const tareas = panorama.tasks
   const partes: string[] = []
@@ -104,6 +106,8 @@ export async function contextoConversacion(chatId: number, mensaje: string, ahor
   partes.push(
     `TAREAS ABIERTAS (${tareas.length}):\n${tareas.slice(0, MAX_TAREAS).map((t) => lineaTarea(t, hoy)).join('\n') || '(ninguna)'}${tareas.length > MAX_TAREAS ? `\n(+${tareas.length - MAX_TAREAS} más)` : ''}`
   )
+  // Fase 17: lo que tiene un final, con su fecha de salida y lo que falta definir.
+  if (proyectos.length > 0) partes.push(`SUS PROYECTOS ACTIVOS (cada uno con su fecha de salida; respeta esas fechas al proponer):\n${proyectos.map((p) => textoProyecto(p)).join('\n')}`)
   if (eventos === null) partes.push('SU CALENDARIO: no pude leerlo ahora; no asumas que está vacío.')
   else partes.push(`SU CALENDARIO (próximos ${DIAS_A_LA_VISTA} días; los que empiezan con ⏰ son recordatorios, no reuniones):\n${eventos.map(lineaEvento).join('\n') || '(nada agendado)'}`)
   const hilo = renderHistorial(turnos.slice(-8), () => null)

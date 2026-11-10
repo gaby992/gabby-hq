@@ -107,3 +107,10 @@ Es lo mismo que manda el bot con `/ayuda todo`. La guía técnica está en [asis
 - `"No te entendí"` — si no capta la frase, te pregunta si es una tarea nueva, una orden o una alarma
 - `hora de Cancún` — "hoy", "mañana" y las horas van en hora de Cancún; "el viernes" siempre es el próximo viernes
 - `en la web` — /hoy (tablero por horizonte: Hoy sí o sí · Mañana · Esta semana · Esperando · Después · Correos, arrastra las tarjetas; pestañas Prioridad, Empresas y Calendario; ¿Qué sigue?; y el chat 💬 abajo a la derecha: el mismo asistente que en Telegram, misma conversación, mismos planes con botones; el tablero se refresca solo), /tasks (tareas y notas), /correo, /settings (empresas, Conexiones de Google, Pagos recurrentes)
+
+## 📁 Proyectos (lo que tiene un final)
+
+- `proyecto nuevo: agente de CPT, DATAVIA, sale el 30 de noviembre` — abre el proyecto; te pide lo que falte (qué es terminado, producción, pruebas)
+- `proyecto asistente del curso: terminado es que Kenny anote tareas por Telegram; producción 14 y 15, pruebas del 16 al 20, sale el 21. Pasos: construirlo el sábado 14, dos horas; revisarlo el domingo 15` — el proyecto completo con sus pasos, de un solo mensaje
+- `agrégale al proyecto del curso el paso grabar el video, para el jueves` — un paso nuevo dentro de un proyecto que ya existe
+- `¿cómo van mis proyectos?` — cada proyecto con su fecha de salida, avance y lo que falta definir

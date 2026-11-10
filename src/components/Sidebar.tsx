@@ -22,6 +22,7 @@ interface Item {
 const PRINCIPAL: Item[] = [
   { href: '/resumen', label: 'Resumen', icon: '⌂', activo: (p) => p === '/resumen' || p === '/' },
   { href: '/hoy', label: 'Tablero', icon: '▦', activo: (p) => p === '/hoy' },
+  { href: '/proyectos', label: 'Proyectos', icon: '◈', activo: (p) => p === '/proyectos' },
   { href: '/calendario', label: 'Calendario', icon: '▣', activo: (p) => p === '/calendario' },
   { href: '/correo', label: 'Correos', icon: '✉', activo: (p) => p.startsWith('/correo') },
   { href: '/notas', label: 'Notas', icon: '✎', activo: (p) => p === '/notas' },

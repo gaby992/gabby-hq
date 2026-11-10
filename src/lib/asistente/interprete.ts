@@ -8,6 +8,7 @@
 // in bot_preguntas (modelo "interprete:…") with the resulting actions, so the
 // prompt can be tuned from real traffic.
 
+import { proyectosActivos } from '@/lib/proyectos'
 import { createServerClient } from '@/lib/supabase-server'
 import type { Priority } from '@/types'
 import { COLS_SIN_NOTAS, normalizar, ultimaAlarma, type TaskRow } from './acciones'
@@ -37,13 +38,31 @@ export type AccionLlm =
   | { tipo: 'posponer'; ref: string; fecha: string }
   | { tipo: 'renombrar'; ref: string; titulo: string }
   | { tipo: 'cambiar'; ref: string; prioridad?: Priority; empresa?: string; fecha?: string; hora?: string; calendar?: boolean }
-  | { tipo: 'crear'; titulo: string; empresa?: string; prioridad?: Priority; fecha?: string; hora?: string; importante?: boolean; calendar?: boolean; /** Fase 16: cuánto tarda, si lo dijo. */ minutos?: number }
+  | { tipo: 'crear'; titulo: string; empresa?: string; prioridad?: Priority; fecha?: string; hora?: string; importante?: boolean; calendar?: boolean; /** Fase 16: cuánto tarda, si lo dijo. */ minutos?: number; /** Fase 17: el proyecto del que es un paso. */ proyecto?: string }
   /**
    * Fase 16: ella piensa en voz alta o pide ayuda para organizarse ("necesito
    * tiempo para CPT esta semana, no sé cuándo"). No es una orden: Gabita
    * responde con una propuesta sobre su horario.
    */
   | { tipo: 'conversar'; texto: string }
+  /**
+   * Fase 17: un proyecto (lo que tiene un final) con sus 4 definiciones y sus
+   * pasos. Si ya existe uno con ese nombre, se completa lo que venga.
+   */
+  | {
+      tipo: 'proyecto'
+      nombre: string
+      empresa?: string
+      terminado?: string
+      produccion_desde?: string
+      produccion_hasta?: string
+      pruebas_desde?: string
+      pruebas_hasta?: string
+      salida?: string
+      pasos?: { titulo: string; fecha?: string; minutos?: number }[]
+    }
+  /** Fase 17: "¿cómo van mis proyectos?" */
+  | { tipo: 'proyectos' }
   | { tipo: 'calendar'; ref: string; hora?: string; todo_el_dia?: boolean }
   /**
    * Fase 12b: a free Calendar event — not a task — once or repeating:
@@ -102,7 +121,7 @@ const TIPOS: TipoAccionLlm[] = [
   'completar', 'cancelar', 'borrar', 'posponer', 'renombrar', 'cambiar', 'crear',
   'nota_empresa', 'nota_tarea', 'alarma', 'pregunta', 'que_sigue', 'lista', 'calendar',
   'pagos_listar', 'dividir', 'siguiente_paso', 'correo', 'esperar', 'esperando', 'tablero', 'despues', 'correos_lista', 'evento',
-  'documentos', 'documento_nota', 'conversar', 'desconocido',
+  'documentos', 'documento_nota', 'conversar', 'proyecto', 'proyectos', 'desconocido',
 ]
 
 const ACCIONES_CORREO: CorreoAccion[] = ['chelsea', 'yo', 'tarea', 'archivar']
@@ -248,6 +267,9 @@ export async function construirContextoInterprete(
   }
 
   lines.push(`EMPRESAS: ${companies.map((c) => c.name.trim()).join(', ')}`)
+  // Fase 17: los proyectos que ya existen, para completar uno en vez de duplicarlo.
+  const proyectos = await proyectosActivos(today)
+  lines.push(`PROYECTOS ACTIVOS: ${proyectos.length > 0 ? proyectos.map((p) => `«${p.nombre}»${p.salida ? ` (sale ${p.salida})` : ' (sin fecha de salida)'}`).join(', ') : 'ninguno todavía'}`)
   lines.push(`HOY: ${today} (${formatDiaLargoEs(today)}) · hora actual ${cancunHm(now)} (Cancún) · mañana = ${addDays(today, 1)}`)
 
   // Fase 7: the recent thread, with each mentioned task's current ref.
@@ -285,10 +307,18 @@ export function systemPrompt(today: string, cfg: AsistenteConfig = { nombre_pers
       'NUNCA agregues una acción lista, pregunta ni que_sigue para volver a mandarle lo que ya tiene en pantalla. ' +
       'NO es conversar cuando la orden es clara ("mañana llamar a Juan", "listo 3", "alarma a las 5"): eso sigue siendo su acción. Y si ella responde "sí", "dale", "déjalo así" a una propuesta tuya ' +
       'de la CONVERSACIÓN RECIENTE, NO es conversar: crea las tareas que propusiste, cada una con su fecha y, si la propuesta decía cuánto tarda, con "minutos"',
-    '- {"tipo":"crear","titulo":"…",("empresa":"…"),("prioridad":"urgente|normal|cuando"),("fecha":"YYYY-MM-DD"),("hora":"HH:MM"),("importante":true),("minutos":90)}  → tarea nueva. ' +
+    '- {"tipo":"crear","titulo":"…",("empresa":"…"),("prioridad":"urgente|normal|cuando"),("fecha":"YYYY-MM-DD"),("hora":"HH:MM"),("importante":true),("minutos":90),("proyecto":"…")}  → tarea nueva. ' +
+      '"proyecto" SOLO si dijo que es de un proyecto de PROYECTOS ACTIVOS ("para el proyecto del curso: …"): su nombre exacto. ' +
       '"minutos" SOLO si dijo cuánto tarda ("toma 2 horas" → 120, "media hora" → 30); nunca lo inventes. ' +
       'La fecha ("para el viernes", "el 15 de noviembre", "en 3 días", "mañana") y la hora ("3pm", "a las 10") NUNCA van en el título: van en fecha/hora. ' +
       'Si dice "y ponla en calendar" / "agrégala al calendario" / "en la agenda", pon "calendar":true y quítalo del título. Sin eso, la tarea NO va a Calendar aunque tenga hora',
+    '- {"tipo":"proyecto","nombre":"…",("empresa":"…"),("terminado":"…"),("produccion_desde":"YYYY-MM-DD"),("produccion_hasta":"YYYY-MM-DD"),("pruebas_desde":"YYYY-MM-DD"),("pruebas_hasta":"YYYY-MM-DD"),("salida":"YYYY-MM-DD"),("pasos":[{"titulo":"…",("fecha":"YYYY-MM-DD"),("minutos":120)}])}  → ' +
+      'un PROYECTO: algo con un final y varios pasos. Úsalo cuando diga "proyecto nuevo: X", "crea el proyecto X", "abre un proyecto para X", o cuando te dé las definiciones de uno (qué es terminado, producción, pruebas, salida). ' +
+      'terminado = qué es la versión mínima terminada, en sus palabras. salida = la fecha final ("sale el 21", "para el 30", "lo entrego el viernes"). ' +
+      'TODOS los pasos del proyecto van DENTRO de "pasos" (cada uno con su fecha y sus minutos si los dijo): NO los repitas como acciones crear aparte. ' +
+      'Si el proyecto ya está en PROYECTOS ACTIVOS, usa su nombre EXACTO y manda solo lo que cambia o los pasos nuevos ("el proyecto de CPT sale el 30", "agrégale al proyecto del curso el paso grabar el video"). ' +
+      'NUNCA inventes fechas ni pasos que ella no dijo: lo que falte, el bot se lo pide',
+    '- {"tipo":"proyectos"}  → "¿cómo van mis proyectos?", "muéstrame los proyectos", "qué proyectos tengo", "¿cuándo sale lo del curso?"',
     '- {"tipo":"calendar","ref":REF,("hora":"HH:MM"),("todo_el_dia":true)}  → "pon en calendar la de TOTT", "agrega al calendario el 3", "la anterior al calendar": crear el evento de una tarea que YA EXISTE en la lista (ref obligatorio)',
     '- {"tipo":"evento","titulo":"…","fecha":"YYYY-MM-DD",("hora":"HH:MM"),("duracion_min":60),("nota":"…"),("repetir":{"cada":"dia|semana|mes",("dias":["LU","MA","MI","JU","VI","SA","DO"]),("hasta":"YYYY-MM-DD"),("veces":8)})}  → ' +
       'un EVENTO en Google Calendar que NO es una tarea de la lista: "ponme en el calendario X el jueves a las 2", "agrega a google calendar una alarma/evento para X", "evento los viernes a las 2 pm hasta el 1 de diciembre", ' +
@@ -556,7 +586,7 @@ export function validarAcciones(raw: unknown): AccionLlm[] {
           const due = fecha(a.fecha) ?? f.due_date ?? undefined
           // Fase 16: "toma 2 horas" → 120. Entre 5 minutos y 100 horas; lo demás se ignora.
           const minutos = typeof a.minutos === 'number' && a.minutos >= 5 && a.minutos <= 6000 ? Math.round(a.minutos) : undefined
-          out.push({ tipo, titulo: text, empresa: str(a.empresa), prioridad: p, fecha: due, hora: due ? hora(a.hora) ?? h.due_time ?? undefined : undefined, importante: a.importante === true || p === 'urgente', calendar: a.calendar === true || c.calendar, minutos })
+          out.push({ tipo, titulo: text, empresa: str(a.empresa), prioridad: p, fecha: due, hora: due ? hora(a.hora) ?? h.due_time ?? undefined : undefined, importante: a.importante === true || p === 'urgente', calendar: a.calendar === true || c.calendar, minutos, proyecto: str(a.proyecto) })
         }
         break
       }
@@ -650,6 +680,38 @@ export function validarAcciones(raw: unknown): AccionLlm[] {
         // Fase 14: sin texto no hay ni pregunta ni dato que archivar.
         if (texto) out.push({ tipo, texto })
         else out.push({ tipo: 'desconocido', texto: 'no entendí qué buscar en el archivero' })
+        break
+      case 'proyecto': {
+        // Fase 17: sin nombre no hay proyecto; las fechas que no son fechas se descartan (nunca se adivinan).
+        const nombre = str(a.nombre) ?? str(a.titulo)
+        if (!nombre) {
+          out.push({ tipo: 'desconocido', texto: 'un proyecto sin nombre' })
+          break
+        }
+        const pasos = (Array.isArray(a.pasos) ? (a.pasos as Record<string, unknown>[]) : [])
+          .map((x) => ({
+            titulo: (str(x?.titulo) ?? str(x?.texto) ?? '').trim(),
+            fecha: fecha(x?.fecha),
+            minutos: typeof x?.minutos === 'number' && x.minutos >= 5 && x.minutos <= 6000 ? Math.round(x.minutos) : undefined,
+          }))
+          .filter((x) => x.titulo)
+          .slice(0, 30)
+        out.push({
+          tipo,
+          nombre,
+          empresa: str(a.empresa),
+          terminado: str(a.terminado),
+          produccion_desde: fecha(a.produccion_desde),
+          produccion_hasta: fecha(a.produccion_hasta),
+          pruebas_desde: fecha(a.pruebas_desde),
+          pruebas_hasta: fecha(a.pruebas_hasta),
+          salida: fecha(a.salida),
+          pasos,
+        })
+        break
+      }
+      case 'proyectos':
+        out.push({ tipo })
         break
       case 'conversar':
         // Fase 16: sin texto no hay de qué conversar.

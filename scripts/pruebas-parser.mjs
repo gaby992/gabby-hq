@@ -507,6 +507,30 @@ ok('¿qué cerré ayer? → pregunta libre', parse('¿qué cerré ayer?').kind =
   ok('16d: "pasa el 3 al lunes" sigue igual que antes', parse('pasa el 3 al lunes').kind === 'accion')
 }
 
+// ── Fase 17: proyectos ──
+{
+  const { loQueFalta, elegirProyecto, limpiarEntrada, cuentaRegresiva } = await import('@/lib/proyectos')
+  const vacio = { terminado: '', produccion_desde: null, produccion_hasta: null, pruebas_desde: null, pruebas_hasta: null, salida: null }
+  ok('17: un proyecto vacío pide las 4 definiciones', loQueFalta(vacio).length === 4)
+  ok('17: completo no pide nada', loQueFalta({ terminado: 'x', produccion_desde: '2026-11-14', produccion_hasta: null, pruebas_desde: null, pruebas_hasta: '2026-11-20', salida: '2026-11-21' }).length === 0)
+  const ps = [{ nombre: 'Asistente del curso' }, { nombre: 'Agente de CPT' }, { nombre: 'Marketing de DATAVIA' }]
+  ok('17: encuentra el proyecto por una parte del nombre', elegirProyecto('CPT', ps)?.nombre === 'Agente de CPT' && elegirProyecto('el asistente del curso', ps)?.nombre === 'Asistente del curso' && elegirProyecto('asistente del curso', ps)?.nombre === 'Asistente del curso')
+  ok('17: un nombre nuevo no se pega a otro', elegirProyecto('Web de DATAVIA', ps) === null, JSON.stringify(elegirProyecto('Web de DATAVIA', ps)))
+  const l = limpiarEntrada({ nombre: '  Agente de CPT ', salida: '30 de noviembre', produccion_desde: '2026-11-14' })
+  ok('17: una fecha que no es fecha se descarta, no se adivina', l.nombre === 'Agente de CPT' && l.salida === null && l.produccion_desde === '2026-11-14', JSON.stringify(l))
+  ok('17: cuenta regresiva', cuentaRegresiva(11) === 'sale en 11 días' && cuentaRegresiva(0) === 'sale HOY' && cuentaRegresiva(-3) === 'salía hace 3 días' && cuentaRegresiva(null) === 'sin fecha de salida')
+  const { validarAcciones } = await import('@/lib/asistente/interprete')
+  const acc = validarAcciones({ acciones: [
+    { tipo: 'proyecto', nombre: 'Asistente del curso', empresa: 'DATAVIA', terminado: 'Kenny anota tareas por Telegram', salida: '2026-11-21', pruebas_desde: 'la otra semana',
+      pasos: [{ titulo: 'Construir el asistente', fecha: '2026-11-14', minutos: 120 }, { titulo: '' }, { titulo: 'Revisarlo', fecha: 'domingo' }] },
+    { tipo: 'proyecto' },
+    { tipo: 'proyectos' },
+  ] })
+  ok('17: el intérprete arma el proyecto con sus pasos y descarta lo que no es fecha',
+    acc[0].tipo === 'proyecto' && acc[0].salida === '2026-11-21' && acc[0].pruebas_desde === undefined && acc[0].pasos.length === 2 && acc[0].pasos[0].minutos === 120 && acc[0].pasos[1].fecha === undefined
+    && acc[1].tipo === 'desconocido' && acc[2].tipo === 'proyectos', JSON.stringify(acc))
+}
+
 if (fallos > 0) {
   console.error(`\n${fallos} prueba(s) fallaron`)
   process.exit(1)

@@ -367,6 +367,28 @@ export default function ResumenPage() {
         </Tarjeta>
       )}
 
+      {/* ── Fase 17: proyectos activos, con lo que falta para que salgan ── */}
+      {(datos.proyectos?.length ?? 0) > 0 && (
+        <Tarjeta titulo="Proyectos" accion={<Enlace href="/proyectos">Ver proyectos</Enlace>}>
+          <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            {datos.proyectos.map((p) => {
+              const color = p.dias === null || p.dias < 0 ? '#f87171' : p.dias <= 7 ? '#fb923c' : '#1D9E75'
+              const cuando = p.dias === null ? 'sin fecha de salida' : p.dias < 0 ? `atrasado ${-p.dias} d` : p.dias === 0 ? 'sale HOY' : p.dias === 1 ? 'sale mañana' : `faltan ${p.dias} días`
+              return (
+                <li key={p.id} className="rounded-lg px-3 py-2" style={{ border: `1px solid ${CLARO.borde}` }}>
+                  <p className="text-[13px] font-medium truncate" style={{ color: CLARO.texto }}>{p.nombre}</p>
+                  <p className="text-[11px] mt-0.5">
+                    <span className="font-semibold" style={{ color }}>{cuando}</span>
+                    <span style={{ color: CLARO.textoSuave }}>{p.empresa ? ` · ${p.empresa}` : ''}{p.total > 0 ? ` · ${p.hechos}/${p.total} pasos` : ' · sin pasos'}</span>
+                  </p>
+                  {p.falta > 0 && <p className="text-[10px] mt-0.5 text-[#f87171]">⚠️ faltan {p.falta} definiciones</p>}
+                </li>
+              )
+            })}
+          </ul>
+        </Tarjeta>
+      )}
+
       {/* ── Agenda · Prioridades ── */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
         <Tarjeta titulo="Agenda de hoy" className="lg:col-span-3" accion={<Enlace href="/calendario">Ver calendario</Enlace>}>

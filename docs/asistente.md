@@ -3537,3 +3537,19 @@ verano; para una zona con DST hay que calcular el offset en vez de fijarlo).
 **Fase 3 total: ~$0.65 USD/mes** con 20 preguntas al día. Sale del mismo saldo y del mismo tope de $5 de OpenAI.
 **Fase 4 total: ~$0.55 USD/mes** con 30 mensajes libres al día. Mismo saldo, mismo tope.
 **Fase 6 total: ~$0.45 USD/mes** con 30 correos al día clasificados por el modelo (más lo que se gaste evaluando). Si el ganador es JEV u otro endpoint compatible, el costo es el de ese proveedor.
+
+
+## 17. Proyectos (fase 17)
+
+Un **proyecto** es lo que tiene un final: "asistente del curso", "agente de CPT". Guarda las 4 definiciones que se piden antes de arrancar cualquier cosa y agrupa sus pasos.
+
+- **Tabla `proyectos`**: nombre, empresa, `terminado` (qué es la versión mínima), `produccion_desde/hasta`, `pruebas_desde/hasta`, `salida`, `estado` (activo · pausado · terminado).
+- **Pasos**: son tareas normales con `tasks.proyecto_id`. Caen en los bloques de la semana como cualquier tarea y se completan igual.
+- **`/proyectos`**: cada proyecto entero, con su cuenta regresiva a la salida, lo que falta definir en rojo, el avance y sus pasos. Se crea, edita, pausa, termina o borra desde ahí (al borrar, los pasos quedan como tareas sueltas).
+- **Resumen**: tarjeta "Proyectos" con los activos y cuántos días faltan.
+- **Gabita**: acción `proyecto` ("proyecto nuevo: agente de CPT, DATAVIA, sale el 30") crea o completa el proyecto y sus pasos de un solo mensaje; si falta alguna de las 4 definiciones, lo dice. `proyectos` ("¿cómo van mis proyectos?") los lista. `crear` acepta `proyecto` para meter una tarea suelta como paso. Cuando conversa, ve los proyectos activos y sus fechas de salida.
+- **Nunca inventa**: una fecha que no viene como fecha se descarta y se pide; no se adivina.
+
+SQL: `sql/2026-11-asistente-fase17-proyectos.sql`.
+
+**Versión curso:** proyectos con las 4 definiciones y pasos; sin bloques ni calendario.

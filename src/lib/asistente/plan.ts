@@ -7,6 +7,7 @@
 //
 // Single simple actions skip the plan and run directly (see the webhook).
 
+import { elegirProyecto, guardarProyecto, listarProyectos, proyectosActivos, textoProyecto, textoProyectos } from '@/lib/proyectos'
 import { PRIORITY_LABELS } from '@/types'
 import type { Cambios, TareaParsed } from '@/lib/parser'
 import { cancelarTareas, ejecutarAccion, renombrarTarea } from './acciones'
@@ -146,10 +147,10 @@ export function resolverAcciones(acciones: AccionLlm[], ctx: ContextoInterprete,
         r.error = res.error
       }
     }
-    if ((a.tipo === 'cambiar' || a.tipo === 'crear' || a.tipo === 'nota_empresa' || a.tipo === 'pagos_listar' || a.tipo === 'lista') && a.empresa) {
+    if ((a.tipo === 'cambiar' || a.tipo === 'crear' || a.tipo === 'nota_empresa' || a.tipo === 'pagos_listar' || a.tipo === 'lista' || a.tipo === 'proyecto') && a.empresa) {
       const e = resolverEmpresa(a.empresa, companies)
       if (e) r.empresa_ref = e
-      else if (a.tipo !== 'crear') r.error = r.error ?? `no conozco la empresa «${a.empresa}»`
+      else if (a.tipo !== 'crear' && a.tipo !== 'proyecto') r.error = r.error ?? `no conozco la empresa «${a.empresa}»`
     }
     if (a.tipo === 'nota_empresa' && !a.empresa) r.error = r.error ?? 'no sé de qué empresa es la nota: dime "nota IM: …"'
     if (a.tipo === 'cambiar' && !a.prioridad && !a.fecha && !a.empresa && !a.hora && !a.calendar) r.error = r.error ?? 'no dijiste qué cambiar'
@@ -234,7 +235,7 @@ function emparejarCrear(acciones: AccionResuelta[], ctx: ContextoInterprete): Ac
 const ICONO: Record<AccionLlm['tipo'], string> = {
   completar: '✅', cancelar: '🗑', borrar: '❌', posponer: '➡️', renombrar: '✏️', cambiar: '✏️', crear: '➕',
   nota_empresa: '📝', nota_tarea: '📎', alarma: '⏰', pregunta: '❓', que_sigue: '🎯', lista: '📋', calendar: '📅',
-  pagos_listar: '💳', dividir: '🪜', siguiente_paso: '🪜', correo: '📧', esperar: '⏳', esperando: '⏳', tablero: '🖥', despues: '📦', correos_lista: '📧', evento: '📆', documentos: '📂', documento_nota: '🧠', conversar: '💬', desconocido: '🤷',
+  pagos_listar: '💳', dividir: '🪜', siguiente_paso: '🪜', correo: '📧', esperar: '⏳', esperando: '⏳', tablero: '🖥', despues: '📦', correos_lista: '📧', evento: '📆', documentos: '📂', documento_nota: '🧠', conversar: '💬', proyecto: '📁', proyectos: '📁', desconocido: '🤷',
 }
 
 function fechaDicha(ymd: string, today: string): string {
@@ -309,6 +310,11 @@ function frase(a: AccionResuelta, today: string, conTarea: boolean): string {
     case 'despues': return `Pasar a Después (sin fecha)${tt}`
     case 'conversar': return `Pensarlo contigo: «${corto(a.texto, 60)}»`
     case 'documentos': return `Buscar en el archivero «${corto(a.texto, 60)}»`
+    case 'proyecto': {
+      const n = a.pasos?.length ?? 0
+      return `Proyecto «${corto(a.nombre, 50)}»${a.empresa_ref ? ` · ${a.empresa_ref.name.trim()}` : ''}${a.salida ? ` · sale ${formatVenceEs(a.salida)}` : ''}${n > 0 ? ` · ${n} ${n === 1 ? 'paso' : 'pasos'}` : ''}`
+    }
+    case 'proyectos': return 'Mostrar tus proyectos'
     case 'documento_nota': return `Archivar el dato «${corto(a.texto, 60)}»`
     case 'desconocido': return `No entendí «${corto(a.texto, 60)}»`
   }
@@ -648,11 +654,24 @@ export async function ejecutarUna(chatId: number, a: AccionResuelta): Promise<st
         const { error } = await createServerClient().from('tasks').update({ minutos_estimados: a.minutos }).eq('id', g.id)
         if (error) console.warn(`[plan] minutos_estimados: ${error.message}`)
       }
+      // Fase 17: "para el proyecto del curso: …" → el paso queda dentro del proyecto.
+      let enProyecto = ''
+      if (a.proyecto) {
+        try {
+          const p = elegirProyecto(a.proyecto, await proyectosActivos())
+          if (p) {
+            const { error } = await createServerClient().from('tasks').update({ proyecto_id: p.id }).eq('id', g.id)
+            if (!error) enProyecto = `\n📁 Paso del proyecto «${p.nombre}»`
+          }
+        } catch (err) {
+          console.warn(`[plan] proyecto de la tarea: ${mensajeError(err)}`)
+        }
+      }
       // So the thread can refer to it ("la de marketing a las 10").
       a.tarea = { id: g.id, text: t.text, company: a.empresa_ref ? { name: a.empresa_ref.name } : null }
       // Inside an approved plan an event without an hour is all-day (the plan said so).
       const sync = g.faltaHora ? await agregarACalendar(g.id, { todoElDia: true }) : g.sync
-      const linea = confirmacion(t, sync)
+      const linea = confirmacion(t, sync) + enProyecto
       return sync?.confirmacion ? `${linea}\n${sync.confirmacion}` : linea
     }
     case 'dividir':
@@ -750,6 +769,35 @@ export async function ejecutarUna(chatId: number, a: AccionResuelta): Promise<st
       const s = await recibirNota(chatId, a.texto, await cargarEmpresas())
       return s.texto
     }
+    case 'proyecto': {
+      try {
+        const r = await guardarProyecto(
+          {
+            nombre: a.nombre,
+            ...(a.empresa_ref ? { company_id: a.empresa_ref.id } : {}),
+            ...(a.terminado ? { terminado: a.terminado } : {}),
+            ...(a.produccion_desde ? { produccion_desde: a.produccion_desde } : {}),
+            ...(a.produccion_hasta ? { produccion_hasta: a.produccion_hasta } : {}),
+            ...(a.pruebas_desde ? { pruebas_desde: a.pruebas_desde } : {}),
+            ...(a.pruebas_hasta ? { pruebas_hasta: a.pruebas_hasta } : {}),
+            ...(a.salida ? { salida: a.salida } : {}),
+          },
+          a.pasos ?? []
+        )
+        const p = (await proyectosActivos()).find((x) => x.id === r.proyecto.id)
+        const cabeza = r.nuevo ? `📁 Proyecto creado: «${r.proyecto.nombre}»` : `📁 Proyecto actualizado: «${r.proyecto.nombre}»${r.pasos > 0 ? ` (+${r.pasos} ${r.pasos === 1 ? 'paso' : 'pasos'})` : ''}`
+        const falta = p && p.falta.length > 0 ? `\n👉 Para dejarlo completo dime: ${p.falta.join(', ')}.` : ''
+        return `${cabeza}\n${p ? textoProyecto({ ...p, falta: [] }) : ''}${falta}\nLo ves entero en GabbyHQ → Proyectos.`
+      } catch (err) {
+        return `⚠️ No pude guardar el proyecto: ${mensajeError(err)}`
+      }
+    }
+    case 'proyectos':
+      try {
+        return textoProyectos(await listarProyectos())
+      } catch (err) {
+        return `⚠️ No pude leer los proyectos: ${mensajeError(err)}`
+      }
     case 'conversar':
       return responderConversacion(chatId, a.texto)
     case 'desconocido':
