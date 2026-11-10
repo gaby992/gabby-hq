@@ -25,6 +25,17 @@ function cuando(iso: string | null): string {
   return new Intl.DateTimeFormat('es-MX', { timeZone: TZ, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true }).format(new Date(iso))
 }
 
+/** "7 nov" + how old it is, big enough to clean the inbox by date. */
+function fechaCorta(iso: string | null): { dia: string; hace: string } | null {
+  if (!iso) return null
+  const d = new Date(iso)
+  const dia = new Intl.DateTimeFormat('es-MX', { timeZone: TZ, day: 'numeric', month: 'short' }).format(d)
+  const ymd = (x: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(x)
+  const dias = Math.round((Date.parse(ymd(new Date())) - Date.parse(ymd(d))) / 86_400_000)
+  const hace = dias <= 0 ? 'hoy' : dias === 1 ? 'ayer' : `hace ${dias} días`
+  return { dia, hace }
+}
+
 function todayLabel(): string {
   return new Intl.DateTimeFormat('en-US', { timeZone: TZ, month: 'short', day: 'numeric' }).format(new Date())
 }
@@ -174,12 +185,18 @@ export default function CorreoPage() {
         {items.map((c) => {
           const open = abierto.has(c.id)
           const u = c.urgencia ?? 'media'
+          const f = fechaCorta(c.recibido_en)
           return (
             <div key={c.id} className="bg-[#1c1c1c] border border-[#2a2a2a] rounded-lg px-3 py-2.5">
               <div className="flex items-start gap-3">
                 <span title={CORREO_URGENCIA_LABELS[u]} className="mt-0.5">{CORREO_URGENCIA_EMOJI[u]}</span>
                 <div className="flex-1 min-w-0 cursor-pointer" onClick={() => toggle(c.id)}>
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                    {f && (
+                      <span className="text-xs font-medium text-[#c9a227] bg-[#2a2410] rounded px-1.5 py-0.5 whitespace-nowrap" title={cuando(c.recibido_en)}>
+                        {f.dia} · {f.hace}
+                      </span>
+                    )}
                     <span className="text-sm font-medium text-[#e8e8e8]">{remitente(c)}</span>
                     <span className="text-sm text-[#888888] truncate">{c.asunto || '(sin asunto)'}</span>
                   </div>
