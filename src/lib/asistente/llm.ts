@@ -136,12 +136,44 @@ async function openai(model: string, system: string, user: string, o: Opts, comp
   const json = await res.json().catch(() => null)
   if (!res.ok) {
     if (compatible) throw new LlmError(redactar(String(json?.error?.message ?? json?.message ?? `endpoint compatible HTTP ${res.status}`)))
+    // Fase 16: the newest models may only exist on the Responses API. OpenAI
+    // says so in the error itself; when it does, the same question goes there.
+    if (/v1\/responses|responses api/i.test(String(json?.error?.message ?? ''))) return openaiResponses(model, system, user, o, key)
     throw clasificarErrorOpenAI(res.status, json)
   }
   return {
     text: String(json?.choices?.[0]?.message?.content ?? '').trim(),
     tokensIn: Number(json?.usage?.prompt_tokens ?? 0),
     tokensOut: Number(json?.usage?.completion_tokens ?? 0),
+  }
+}
+
+/** The same call through POST /v1/responses, for models that are not on chat/completions. */
+async function openaiResponses(model: string, system: string, user: string, o: Opts, key: string) {
+  const res = await fetchWithTimeout(
+    'https://api.openai.com/v1/responses',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+      body: JSON.stringify({ model, instructions: system, input: user, max_output_tokens: o.maxTokens }),
+    },
+    o.timeoutMs
+  )
+  const json = await res.json().catch(() => null)
+  if (!res.ok) throw clasificarErrorOpenAI(res.status, json)
+  // `output_text` is the convenience field; the structured form is output[].content[].text.
+  const partes: string[] = []
+  if (typeof json?.output_text === 'string') partes.push(json.output_text)
+  else if (Array.isArray(json?.output)) {
+    for (const item of json.output as { type?: string; content?: { type?: string; text?: string }[] }[]) {
+      if (item?.type !== 'message' || !Array.isArray(item.content)) continue
+      for (const c of item.content) if (typeof c?.text === 'string') partes.push(c.text)
+    }
+  }
+  return {
+    text: partes.join('').trim(),
+    tokensIn: Number(json?.usage?.input_tokens ?? 0),
+    tokensOut: Number(json?.usage?.output_tokens ?? 0),
   }
 }
 

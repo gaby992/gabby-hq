@@ -94,7 +94,7 @@ import { tituloRenovar } from '@/lib/documentos/vencimientos'
 import { buscarDocumentos, pareceDeDocumentos, responderDeDocumentos } from '@/lib/documentos/buscar'
 import { htmlSeguro, sinHtml } from '@/lib/asistente/html'
 import { crearAviso, textoMudanza } from '@/lib/asistente/avisos'
-import { responderConversacion } from '@/lib/asistente/conversar'
+import { probarModeloConversacion, responderConversacion } from '@/lib/asistente/conversar'
 import { responderPregunta } from '@/lib/asistente/pregunta'
 import { enviarQueSigue } from '@/lib/asistente/que-sigue'
 import { enviarLista } from '@/lib/asistente/alarmas'
@@ -468,6 +468,11 @@ async function correccionDeFicha(chatId: number, text: string, prefix: string | 
 export async function handleText(chatId: number, text: string, prefix: string | null) {
   if (!text) {
     await reply(chatId, joinLines(prefix, 'No entendí nada. ¿Me lo repites?'))
+    return
+  }
+  // Fase 16: "/modelo" prueba de verdad el modelo de conversación y dice cuál contesta.
+  if (/^\/modelo\b/i.test(text.trim())) {
+    await reply(chatId, await probarModeloConversacion())
     return
   }
   // Ajuste 15a: varias órdenes de alarmas apiladas en un mensaje ("quita las alarmas de pago ⏎ pasa mis

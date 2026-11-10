@@ -169,3 +169,29 @@ export async function responderConversacion(chatId: number, mensaje: string): Pr
     return RESPUESTA_TRABADA
   }
 }
+
+/**
+ * "/modelo": which model answers in conversation, tried for real. The id in
+ * LLM_MODEL_CONVERSACION is typed by hand in Vercel, and a typo there would
+ * silently fall back to the usual model — this says so in one line.
+ */
+export async function probarModeloConversacion(): Promise<string> {
+  let deSiempre = 'el modelo de siempre'
+  try {
+    const c = llmConfig()
+    deSiempre = `${c.provider}:${c.model}`
+  } catch {
+    /* said below, if it matters */
+  }
+  const propio = modeloConversacion()
+  if (!propio) {
+    return `💬 Para conversar uso el modelo de siempre (${deSiempre}). Todavía no está la variable LLM_MODEL_CONVERSACION en Vercel, o falta volver a desplegar.`
+  }
+  try {
+    const r = await llamarLlm(parsearModelo(propio), 'Responde solo con la palabra: listo', 'Di listo.', { maxTokens: 400, timeoutMs: 25_000 })
+    if (!r.text) return `⚠️ ${propio} contestó vacío. Mientras tanto converso con ${deSiempre}.`
+    return `✓ Para conversar uso ${r.provider}:${r.model} (respondió en ${r.ms} ms). Para todo lo demás, ${deSiempre}.`
+  } catch (err) {
+    return `⚠️ ${propio} no respondió: ${mensajeError(err)}. Mientras tanto converso con ${deSiempre}.`
+  }
+}
