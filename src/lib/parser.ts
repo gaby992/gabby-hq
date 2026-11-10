@@ -186,6 +186,17 @@ export function pareceEventoNuevo(resto: string): boolean {
  * without the model, so a message that stacks them line by line has to be
  * taken one line at a time.
  */
+/**
+ * Ajuste 16d: more than one order in a message — a second sentence after a
+ * full stop / line break, or "… y crea / y pasa / y ponme …". Numbers with
+ * dots or commas ("listo 2, 5") are not sentences.
+ */
+export function ordenCompuesta(texto: string): boolean {
+  const t = texto.trim().replace(/[.!\s]+$/, '')
+  if (/[.;!?»"]\s+(?:y\s+)?[A-Za-zÁÉÍÓÚÑáéíóúñ¿¡«"]{2,}/.test(t) || /\n\s*\S/.test(t)) return true
+  return /\s(?:y|luego|despu[eé]s|tambi[eé]n)\s+(?:crea|creame|pasa|pon|ponme|agrega|agr[eé]game|borra|cancela|cambia|mueve|recu[eé]rdame|av[ií]same|marca|listo)\b/i.test(t)
+}
+
 export function esOrdenDeAlarmas(linea: string): boolean {
   const t = linea.trim()
   return (
@@ -687,7 +698,9 @@ export function parseMensaje(raw: string, companies: CompanyRef[], today: string
   // Ajuste 6-7: "1 listo", "3 terminado", "2, 5 hechas", "el 4 listo" — numbers of the last list, no model needed.
   const nListo = text.match(/^(?:(?:el|la|los|las)\s+)?(\d+(?:[\s,;]+\d+)*)\s+(?:listo|lista|listos|listas|terminad[oa]s?|hech[oa]s?|done|completad[oa]s?|cerrad[oa]s?|ya\s+est[aá]n?)\s*[.!]*$/i)
   if (nListo) return { kind: 'accion', accion: 'listo', arg: tidy(nListo[1]) }
-  const accion = text.match(/^(pasa|listo|borra)\b\s*([\s\S]*)$/i)
+  // Ajuste 16d: "Pasa X al viernes. Pasa Y al viernes. Y crea Z" son VARIAS órdenes: el comando
+  // clásico se las tragaba como el nombre de una sola tarea. Eso lo lee el intérprete, como un plan.
+  const accion = ordenCompuesta(text) ? null : text.match(/^(pasa|listo|borra)\b\s*([\s\S]*)$/i)
   // "listo el 3" → "3" (an article before a number is noise, not a title word).
   if (accion) return { kind: 'accion', accion: accion[1].toLowerCase() as Accion, arg: tidy(accion[2]).replace(/^(?:el|la|los|las)\s+(?=\d)/i, '') }
 

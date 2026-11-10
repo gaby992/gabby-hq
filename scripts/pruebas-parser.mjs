@@ -498,6 +498,15 @@ ok('¿qué cerré ayer? → pregunta libre', parse('¿qué cerré ayer?').kind =
   ok('16c: PTHO vs TOTT son nombres distintos; SEO no es un nombre', nombresDistintos('keywords PTHO', 'keywords TOTT') && !nombresDistintos('SEO de PTHO', 'estrategia PTHO') && !nombresDistintos('Google Ads y SEO', 'Google Ads PTHO'))
 }
 
+// ── Ajuste 16d: varias órdenes en un mensaje no son el nombre de UNA tarea ──
+{
+  const largo = 'Pasa «Trabajar keywords PTHO» al viernes 13. Pasa «Preparar estrategia de SEO PTHO» al viernes 13. Pasa «Shift Google Ads y SEO» a mañana miércoles a las 10 am. Y crea la tarea «Google Ads PTHO», IM, para el viernes 13.'
+  ok('16d: cuatro órdenes juntas van al intérprete', parse(largo).kind !== 'accion', parse(largo).kind)
+  ok('16d: "pasa paypal y crea X" va al intérprete', parse('pasa paypal a mañana y crea llamar a Juan').kind !== 'accion')
+  ok('16d: "pasa 3" sigue siendo directo', parse('pasa 3').kind === 'accion' && parse('listo 2, 5').kind === 'accion' && parse('pasa paypal.').kind === 'accion' && parse('listo el 3').kind === 'accion')
+  ok('16d: "pasa el 3 al lunes" sigue igual que antes', parse('pasa el 3 al lunes').kind === 'accion')
+}
+
 if (fallos > 0) {
   console.error(`\n${fallos} prueba(s) fallaron`)
   process.exit(1)
