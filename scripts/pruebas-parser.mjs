@@ -305,6 +305,93 @@ ok('¿qué cerré ayer? → pregunta libre', parse('¿qué cerré ayer?').kind =
   ok('15: HTML seguro no escapa dos veces', htmlSeguro('a &amp; b &lt;c&gt;') === 'a &amp; b &lt;c&gt;')
 }
 
+// ── Fase 16: la semana en bloques + Gabita conversando ───────────────────
+{
+  const B = await import('@/lib/asistente/bloques')
+  const { limpiarRespuesta, systemPromptConversacion } = await import('@/lib/asistente/conversar')
+  const { validarAcciones } = await import('@/lib/asistente/interprete')
+  const { sinNadaQueHacer } = await import('@/lib/asistente/plan')
+
+  const blq = (o) => ({ id: o.nombre + o.dia + o.inicio, tema: '', company_id: null, palabras: [], fijas: [], toma_tareas: true, bloqueado: false, activo: true, ...o })
+  const plantilla = {
+    bloques: [
+      blq({ dia: 2, inicio: '04:45', fin: '06:45', nombre: 'Estudio', tema: 'GHL', palabras: ['ghl', 'estudiar'] }),
+      blq({ dia: 2, inicio: '07:00', fin: '07:30', nombre: 'PD diario', company_id: 'pd', fijas: ['Bancos'], toma_tareas: false }),
+      blq({ dia: 2, inicio: '08:15', fin: '10:15', nombre: 'Bloque A', tema: 'IM: cierre', company_id: 'im', palabras: ['quickbooks', 'paypal'] }),
+      blq({ dia: 2, inicio: '10:30', fin: '12:30', nombre: 'Bloque B', tema: 'Shift y GHL', company_id: 'im', palabras: ['shift', 'ghl'] }),
+      blq({ dia: 2, inicio: '13:00', fin: '18:00', nombre: 'Bloqueado', tema: 'Niñas', toma_tareas: false, bloqueado: true }),
+      blq({ dia: 2, inicio: '18:00', fin: '19:30', nombre: 'Tarde', tema: 'DATAVIA', company_id: 'dv' }),
+      blq({ dia: 5, inicio: '10:30', fin: '12:30', nombre: 'Bloque B', tema: 'Colchón' }),
+      blq({ dia: 5, inicio: '08:15', fin: '10:15', nombre: 'Bloque A', tema: 'PD', company_id: 'pd' }),
+      blq({ dia: 1, inicio: '10:30', fin: '12:30', nombre: 'Bloque B', tema: 'GHL', company_id: 'im', palabras: ['ghl'] }),
+    ],
+    reglas: [
+      { id: 'r1', desde: 1, hasta: 7, inicio: '10:30', tema: 'SEO/GEO del mes', rotacion: ['Shift', 'TOTT', 'PTHO', 'Urólogo', 'CPT'], fijas: ['Reporte'], activo: true },
+      { id: 'r2', desde: 12, hasta: 16, inicio: '10:30', tema: 'Repaso', rotacion: ['Shift, TOTT y PTHO', 'Urólogo y CPT'], fijas: [], activo: true },
+    ],
+  }
+  const empresas = [{ id: 'pd', name: 'PD' }, { id: 'im', name: 'IM ' }, { id: 'dv', name: 'DATAVIA' }]
+  const t = (o) => ({ done: false, importante: false, estado: 'abierta', company_id: null, due_date: '2026-11-10', ...o })
+  const tareas = [
+    t({ id: '1', text: 'Estudiar 2 temas de GHL en la Academy', company_id: 'im' }),
+    t({ id: '2', text: 'PayPal statements Mar and Apr', company_id: 'im', due_date: '2026-11-08', minutos_estimados: 60 }),
+    t({ id: '3', text: 'Shift Google Ads y SEO', company_id: 'im', minutos_estimados: 150 }),
+    t({ id: '4', text: 'Cargar JEV', company_id: 'dv' }),
+    t({ id: '5', text: 'PTHO acceso al hosting', company_id: 'ch', estado: 'esperando' }),
+    t({ id: '6', text: 'Llamar al contador', company_id: 'dv', due_date: null }),
+    t({ id: '7', text: 'Aug completo en QB', company_id: 'pd', due_date: '2026-10-31' }),
+  ]
+
+  ok('16: día de la semana y duración', B.diaDeLaSemana('2026-11-10') === 2 && B.diaDeLaSemana('2026-11-15') === 0 && B.duracion(90) === '1 h 30' && B.duracion(45) === '45 min' && B.duracion(120) === '2 h' && B.minutosEntre('08:15', '10:15') === 120)
+
+  const martes = B.bloquesDelDia(plantilla, '2026-11-10', tareas, empresas, '2026-11-10')
+  const de = (n) => martes.find((b) => b.nombre === n)
+  ok('16: los bloques del martes salen en orden', martes.map((b) => b.inicio).join() === '04:45,07:00,08:15,10:30,13:00,18:00', martes.map((b) => b.inicio).join())
+  ok('16: cada tarea cae en el bloque de su tema',
+    de('Estudio').tareas.map((x) => x.id).join() === '1' && de('Bloque A').tareas.map((x) => x.id).join() === '2' && de('Bloque B').tareas.map((x) => x.id).join() === '3' && de('Tarde').tareas.map((x) => x.id).join() === '4',
+    JSON.stringify(martes.map((b) => [b.nombre, b.tareas.map((x) => x.id)])))
+  ok('16: la rutina y lo bloqueado no reciben tareas', de('PD diario').tareas.length === 0 && de('Bloqueado').tareas.length === 0 && de('Bloqueado').bloqueado)
+  ok('16: aviso cuando no cabe', de('Bloque B').no_cabe && de('Bloque B').carga === 150 && !de('Bloque A').no_cabe && de('Bloque A').tareas[0].vencida)
+  ok('16: sin estimado cuenta media hora y se marca', de('Tarde').tareas[0].minutos === 30 && de('Tarde').tareas[0].estimado && !de('Bloque A').tareas[0].estimado)
+  ok('16: lo que espera a otra persona, lo sin fecha y lo de otra empresa no entran', B.sinBloque(martes, tareas, '2026-11-10', '2026-11-10').map((x) => x.id).join() === '7', JSON.stringify(B.sinBloque(martes, tareas, '2026-11-10', '2026-11-10').map((x) => x.id)))
+
+  const viernes = B.bloquesDelDia(plantilla, '2026-11-13', [t({ id: '8', text: 'cosa suelta', due_date: '2026-11-13' }), t({ id: '9', text: 'algo de PD', company_id: 'pd', due_date: '2026-11-13' })], empresas, '2026-11-10')
+  ok('16: el colchón solo recibe lo que nadie más tomó', viernes[0].tareas.map((x) => x.id).join() === '9' && viernes[1].tareas.map((x) => x.id).join() === '', JSON.stringify(viernes.map((b) => [b.tema, b.tareas.map((x) => x.id)])))
+  ok('16: un día futuro solo carga lo que vence ese día', B.tareasDelDia(tareas, '2026-11-11', '2026-11-10').length === 0)
+
+  // Noviembre 2026 empieza en domingo: los hábiles del 1 al 7 son lun 2 … vie 6.
+  ok('16: turnos por día hábil',
+    B.indiceHabil('2026-11-01', 1, 7) === -1 && B.indiceHabil('2026-11-02', 1, 7) === 0 && B.indiceHabil('2026-11-06', 1, 7) === 4 && B.indiceHabil('2026-11-09', 1, 7) === -1)
+  const lun2 = B.bloquesDelDia(plantilla, '2026-11-02', [t({ id: 'g', text: 'algo de ghl', company_id: 'im', due_date: '2026-11-02' })], empresas, '2026-11-02')
+  ok('16: en inicio de mes el Bloque B es el cliente del día y no recibe otras tareas',
+    lun2[0].tema === 'SEO/GEO del mes · hoy: Shift' && lun2[0].regla_mes && lun2[0].tareas.length === 0 && lun2[0].fijas.join() === 'Reporte', JSON.stringify(lun2[0]))
+  ok('16: mitad de mes: dos días y la regla se acaba',
+    B.reglaPara(plantilla.reglas, '2026-11-12', '10:30')?.turno === 'Shift, TOTT y PTHO' && B.reglaPara(plantilla.reglas, '2026-11-13', '10:30')?.turno === 'Urólogo y CPT' && B.reglaPara(plantilla.reglas, '2026-11-16', '10:30') === null)
+
+  const txt = B.textoHoyTeToca(martes, '08:00')
+  ok('16: el mensaje de la mañana dice lo que queda del día',
+    txt.startsWith('🧭 <b>Hoy te toca</b>') && !txt.includes('Estudio') && !txt.includes('Niñas') && txt.includes('8:15 am Bloque A') && txt.includes('⚠️ 10:30 am Bloque B') && txt.includes('no caben en 2 h'), txt)
+  ok('16: sin plantilla no hay bloque', B.textoHoyTeToca([], '08:00') === null)
+
+  const sem = B.semanaParaPrompt(plantilla, '2026-11-10', 1, tareas, empresas, '2026-11-10')
+  ok('16: la semana para Gabita trae lo libre y lo no disponible',
+    sem.includes('martes 2026-11-10 (HOY):') && sem.includes('13:00–18:00 NO DISPONIBLE (Niñas)') && sem.includes('18:00–19:30 Tarde · DATAVIA') && sem.includes('libre: 1 h') && sem.includes('no recibe tareas') && sem.includes('SIN BLOQUE ese día: «Aug completo en QB»'), sem)
+
+  const acc = validarAcciones({ acciones: [
+    { tipo: 'conversar', texto: 'necesito tiempo para CPT esta semana, no sé cuándo' },
+    { tipo: 'crear', titulo: 'CPT: reunir la información', fecha: '2026-11-12', minutos: 90 },
+    { tipo: 'crear', titulo: 'otra', minutos: 2 },
+    { tipo: 'conversar' },
+  ] })
+  ok('16: el intérprete distingue conversar y guarda cuánto tarda',
+    acc[0].tipo === 'conversar' && acc[1].minutos === 90 && acc[2].minutos === undefined && acc[3].tipo === 'desconocido', JSON.stringify(acc))
+  ok('16: conversar no es un plan vacío', !sinNadaQueHacer([{ tipo: 'conversar', texto: 'x' }, { tipo: 'pregunta', texto: 'y' }]))
+
+  ok('16: la respuesta de Gabita sale sin markdown', limpiarRespuesta('**Propuesta**\n\n\n- jue 12 · Tarde\n# Título\n* otra') === 'Propuesta\n\n• jue 12 · Tarde\nTítulo\n• otra', JSON.stringify(limpiarRespuesta('**Propuesta**\n\n\n- jue 12 · Tarde\n# Título\n* otra')))
+  const sp = systemPromptConversacion({ nombre_persona: 'Gabby', nombre_bot: 'Gabita', tono: 'informal', sugerencias: true })
+  ok('16: el prompt de conversación manda proponer y respetar el horario', sp.includes('MODO CONVERSACIÓN') && sp.includes('NO DISPONIBLE') && sp.includes('¿Lo dejo así?'))
+}
+
 // ── Fase 14: segundo cerebro (documentos) ────────────────────────────────
 {
   const { normalizarCategoria, montoTexto } = await import('@/lib/documentos/tipos')

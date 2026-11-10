@@ -288,7 +288,7 @@ function mezclar(p: AccionResuelta, n: AccionResuelta): AccionResuelta | null {
   return null
 }
 
-const AJENAS = new Set<AccionResuelta['tipo']>(['pregunta', 'que_sigue', 'lista', 'pagos_listar', 'dividir', 'siguiente_paso', 'desconocido', 'nota_empresa', 'correo'])
+const AJENAS = new Set<AccionResuelta['tipo']>(['pregunta', 'que_sigue', 'lista', 'pagos_listar', 'dividir', 'siguiente_paso', 'desconocido', 'nota_empresa', 'correo', 'conversar', 'documentos', 'documento_nota'])
 
 const VERBO_DESTRUCTIVO: Record<'borrar' | 'cancelar' | 'completar', { pregunta: string; boton: string }> = {
   borrar: { pregunta: 'de verdad borro la tarea', boton: '❌ Borrar la tarea de verdad' },

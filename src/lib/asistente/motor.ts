@@ -94,6 +94,7 @@ import { tituloRenovar } from '@/lib/documentos/vencimientos'
 import { buscarDocumentos, pareceDeDocumentos, responderDeDocumentos } from '@/lib/documentos/buscar'
 import { htmlSeguro, sinHtml } from '@/lib/asistente/html'
 import { crearAviso, textoMudanza } from '@/lib/asistente/avisos'
+import { responderConversacion } from '@/lib/asistente/conversar'
 import { responderPregunta } from '@/lib/asistente/pregunta'
 import { enviarQueSigue } from '@/lib/asistente/que-sigue'
 import { enviarLista } from '@/lib/asistente/alarmas'
@@ -942,6 +943,12 @@ async function handleLibre(chatId: number, text: string, parsed: Parsed, prefix:
       await responderNarradaEn(chatId, narrada, prefix)
       return
     }
+  }
+  // Fase 16: está pensando en voz alta → Gabita responde con una propuesta sobre su semana.
+  // Sin el eco de "🎙 Entendí: …": la respuesta misma muestra que entendió.
+  if (a.tipo === 'conversar') {
+    await reply(chatId, await responderConversacion(chatId, a.texto))
+    return
   }
   // Fase 14: el archivero contesta con enlace firmado, así que va en HTML y no por ejecutarUna.
   if (a.tipo === 'documentos') {

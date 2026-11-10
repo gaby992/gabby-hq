@@ -9,7 +9,7 @@ Es lo mismo que manda el bot con `/ayuda todo`. La guía técnica está en [asis
 ## 👀 Ver
 
 - `/hoy` — la lista completa de hoy, por empresa (la misma de las 8:00)
-- `cierre` — el cierre del día (el mismo de las 6:00 pm)
+- `cierre` — el cierre del día (el mismo de las 7:30 pm)
 - `¿qué sigue?` — una tarea para ahora, tres después, tres por vencer y tus notas recientes
 - `solo urgentes` — lo mismo, sin la parte de "por vencer"
 - `qué vence esta semana` — solo lo que vence de aquí al domingo
@@ -85,6 +85,16 @@ Es lo mismo que manda el bot con `/ayuda todo`. La guía técnica está en [asis
 - `¿cuánto pago de alquiler? · ¿cuándo vence mi pasaporte?` — lo mismo: busca en el texto de los PDF, no solo en los títulos
 - `mándame el contrato de Bonampak` — te manda ese documento con su enlace
 - `(archivo de más de 20 MB)` — Telegram no deja bajarlo: te lo dice y te manda a subirlo en GabbyHQ → Archivos
+
+## 🧭 Organizarte (Gabita conversando)
+
+- `necesito tiempo para CPT esta semana, no sé cuándo` — no te devuelve la pregunta: te propone días, bloques y horas de TU semana, y cierra con «¿Lo dejo así?»
+- `tengo que hacer primero la reunión, luego recolectar la información y luego 6 horas de crear el agente, para el viernes 20` — reparte los pasos en orden en tus bloques, con su tiempo, y te avisa si no cabe antes de esa fecha
+- `sí, déjalo así` — crea esas tareas con sus fechas y su duración
+- `¿me da tiempo de terminar lo de PTHO para el viernes?` — mira lo que ya tienes en cada bloque y te contesta con criterio
+- `mañana revisar el contrato de CPT, toma 2 horas` — la tarea se guarda con su duración, y así «Hoy te toca» sabe si el bloque alcanza
+- `(en la web) Resumen → Hoy te toca` — tus bloques de hoy, lo fijo de cada uno y las tareas que caen ahí; ⚠️ cuando no caben en las horas
+- `(en la web) Settings → Mi semana` — cambias tus bloques, las horas, de qué es cada uno y lo que cambia según el día del mes
 
 ## ℹ️ Otros
 

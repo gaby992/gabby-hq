@@ -27,6 +27,7 @@ sección y **no se empieza una fase hasta validar la anterior**.
 | 12b | El asistente explica sus errores (Google en lenguaje normal + enlace para reconectar), eventos libres y repetidos en Calendar por voz, preguntas sobre lo que él mismo dijo, sin "Ojo" tras un tropiezo, botón Probar en Conexiones, chequeo de conexiones en la alarma de las 8 | ✅ Construida — pendiente de validar |
 | 14 | Segundo cerebro: documentos (PDF y fotos) al bucket privado, ficha propuesta por el modelo con Guardar/Corregir, varias fotos = un documento, renovaciones con historial, notas sin archivo, preguntas con enlace firmado, vencimientos a 30/7/1 días con botón de renovar, pantalla Archivos | ✅ Construida — pendiente de validar |
 | 15 | Cada cosa en su cajón: las alarmas con hora van a Google Calendar (suenan en el teléfono, pueden repetirse cada mes/semana/día), los temporizadores siguen en Telegram, posponer reescribe el mismo mensaje, "pasa mis alarmas al calendario", enlaces limpios | ✅ Construida — pendiente de validar |
+| 16 | La semana en bloques (plantilla editable, reglas del mes, "Hoy te toca" en el Resumen y en el mensaje de la mañana, tiempo estimado por tarea) y Gabita conversando: propone días y bloques sobre su semana con un modelo propio | ✅ Construida — pendiente de validar |
 
 ---
 
@@ -3333,6 +3334,94 @@ Si no tiene hora, no es alarma: es una tarea con fecha.
 - **Lo que se enseña:** crear el evento con la API (RRULE mensual/semanal,
   recordatorio en el minuto 0), el patrón "si el servicio falla, cae al
   canal de respaldo y dilo", y editar un mensaje en vez de mandar otro.
+
+---
+
+## 16. Fase 16 — La semana en bloques y Gabita conversando
+
+**El problema.** GabbyHQ sabía QUÉ había que hacer, nunca CUÁNDO se trabaja
+en qué. Y cuando ella pensaba en voz alta ("necesito tiempo para CPT esta
+semana, no sé cuándo"), el bot contestaba con otra pregunta ("¿cuántos días
+quieres bloquear?"): devolverle el problema. En sus palabras: "sigo tirando
+flechas".
+
+### 16a. La plantilla de la semana
+
+`sql/2026-11-asistente-fase16-bloques.sql`:
+
+| Pieza | Para qué |
+| --- | --- |
+| `semana_bloques` | Cada día con sus bloques: hora, nombre, de qué es, empresa y palabras (qué tareas le caen), lo **fijo** del bloque (la rutina, que no son tareas), si recibe tareas y si es horario no disponible. |
+| `semana_reglas_mes` | Lo que cambia según el día del mes, solo en días hábiles: del 1 al 7 el Bloque B es un cliente de SEO/GEO por día (turnos: Shift → TOTT → PTHO → Urólogo → CPT); del 1 al 5 el Bloque A son los estados de cuenta; del 12 al 16, el repaso de mitad de mes. Cuando los turnos se acaban, vuelve el bloque normal. |
+| `tasks.minutos_estimados` · `responsable` · `proyecto` | Cuánto tarda, quién la hace, de qué proyecto es. Los dos últimos quedan listos para las recetas y el equipo. |
+
+La plantilla se siembra una sola vez con su semana (lun–vie: Estudio 4:45 ·
+PD 7:00 · IM 7:30 · Bloque A 8:15 · Bloque B 10:30 · Cierre 12:30 · no
+disponible 1–6 · Tarde 6:00; sábado y domingo, 5 h mientras QuickBooks esté
+atrasado). Todo se edita en **Settings → Mi semana**.
+
+**Cómo cae una tarea en un bloque** (`bloquesDelDia`): de las tareas del día
+(hoy: lo que vence hoy o está vencido; un día futuro: lo que vence ese día;
+nunca lo que espera a otra persona), cada una va al primer bloque que la
+toma — por empresa y, si el bloque tiene palabras, por palabras. Un bloque
+sin empresa ni palabras es un **colchón**: recibe solo lo que nadie más tomó.
+Sin estimado, una tarea cuenta 30 minutos (y se marca con ~).
+
+### 16b. Dónde se ve
+
+- **Resumen → "Hoy te toca":** los bloques del día con su rutina (↻), sus
+  tareas y su carga; el bloque en curso resaltado; ⚠️ cuando las tareas
+  piden más de lo que el bloque dura; y lo que no cayó en ninguno.
+- **Mensaje de la mañana:** "🧭 Hoy te toca" con los bloques que quedan.
+- **El cierre del día pasa de las 6:00 a las 7:30 pm**, cuando termina su
+  último bloque.
+
+### 16c. Gabita conversando
+
+Acción nueva del intérprete: `conversar`. Cuando no hay una orden sino
+alguien pensando ("no sé cuándo", "¿me da tiempo?", "ayúdame a organizar",
+"tengo una idea"), el mensaje completo va a `responderConversacion`, que arma
+el contexto —la hora, **su semana bloque por bloque con lo libre de cada
+uno**, las tareas abiertas con su duración, su calendario de los próximos 9
+días y el hilo— y pide una propuesta:
+
+- propone días, bloques y horas exactas; nunca devuelve la pregunta,
+- respeta lo no disponible y el tema de cada bloque,
+- si no cabe antes de la fecha, lo dice y dice qué habría que mover,
+- una línea por cosa (`• jue 12 nov · Tarde 6:00–7:30 pm · CPT: reunir la
+  información (1 h 30)`) y cierra con "¿Lo dejo así?".
+
+Cuando ella dice "sí, déjalo así", el intérprete (que lee el hilo) crea las
+tareas con su fecha y su `minutos`. Por eso el historial ahora conserva los
+mensajes largos enteros.
+
+**Modelo propio:** `LLM_MODEL_CONVERSACION` (por ejemplo `gpt-6.1-sol` o
+`claude-sonnet-5-5`; el proveedor se deduce del nombre). Es el único punto
+donde un modelo más fuerte cambia la respuesta. Si no está definida o ese
+modelo falla, responde el de siempre: una respuesta más simple es mejor que
+ninguna. Cada turno queda en `bot_preguntas` con `[conversar]` para ver el
+costo.
+
+### 16d. Lo que falta (segunda parte)
+
+- **Recetas:** "necesito un agente SDK para CPT" → Gabita ya sabe los pasos,
+  las horas y quién hace cada uno, y los reparte. Las columnas
+  `responsable` y `proyecto` ya existen.
+- **Tareas que se repiten** como tareas (hoy la rutina vive en lo fijo del
+  bloque).
+- **Telegram en 3 mensajes al día** con el aviso de cambio de bloque.
+- Mudar el modelo base (gpt-5-mini está marcado como obsoleto).
+
+### 16e. Versión curso
+
+- **La clase:** "De lista de tareas a semana con horas". Por qué una lista
+  sin horario produce culpa y no trabajo, y cómo un horario fijo convierte
+  "¿cuándo lo hago?" en un cálculo.
+- **Lo que se enseña:** la plantilla (bloques + rutina + qué le cae), el
+  reparto automático con aviso de "no cabe", y el patrón de conversación:
+  darle al modelo **el espacio libre ya calculado** para que proponga, en vez
+  de pedirle que lo adivine. Y la regla de oro: una asistente propone, no
+  devuelve la pregunta.
 
 ## 10. Cómo replicarlo para otra persona
 

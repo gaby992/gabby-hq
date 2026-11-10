@@ -24,6 +24,19 @@ function hora12(t: string): string {
   return `${h12}:${String(m).padStart(2, '0')} ${h < 12 ? 'am' : 'pm'}`
 }
 
+/** "1 h 30" · "45 min". */
+function dur(min: number): string {
+  if (min < 60) return `${min} min`
+  const h = Math.floor(min / 60)
+  const m = min % 60
+  return m === 0 ? `${h} h` : `${h} h ${m}`
+}
+
+/** 'HH:MM' now in Cancún, to mark the block she is in. */
+function horaCancunAhora(): string {
+  return new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Cancun', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date())
+}
+
 function Empresa({ empresa }: { empresa: { name: string; color: string } | null }) {
   if (!empresa) return null
   const color = COMPANY_COLORS[empresa.color] ?? '#888780'
@@ -64,6 +77,12 @@ export default function ResumenPage() {
   const [diario, setDiario] = useState<string | null>(null)
   const [diarioCargando, setDiarioCargando] = useState(false)
   const [diarioEnviado, setDiarioEnviado] = useState<string | null>(null)
+  // Fase 16: the hour, refreshed every minute, so "AHORA" moves with the day.
+  const [horaAhora, setHoraAhora] = useState(horaCancunAhora())
+  useEffect(() => {
+    const t = setInterval(() => setHoraAhora(horaCancunAhora()), 60_000)
+    return () => clearInterval(t)
+  }, [])
 
   const cargar = useCallback(async () => {
     try {
@@ -241,6 +260,71 @@ export default function ResumenPage() {
           </Link>
         ))}
       </div>
+
+      {/* ── Fase 16: Hoy te toca — los bloques del día con lo que cae en cada uno ── */}
+      {datos.bloques_hoy.length > 0 && (
+        <Tarjeta titulo="Hoy te toca" accion={<Enlace href="/settings/semana">Editar mi semana</Enlace>}>
+          <ul className="space-y-1.5">
+            {datos.bloques_hoy.map((b) => {
+              const ahora = b.inicio <= horaAhora && horaAhora < b.fin
+              const pasado = b.fin <= horaAhora
+              if (b.bloqueado) {
+                return (
+                  <li key={b.id} className="flex items-baseline gap-3 text-[11px]" style={{ color: CLARO.textoApagado }}>
+                    <span className="w-36 flex-shrink-0 tabular-nums">{hora12(b.inicio)} – {hora12(b.fin)}</span>
+                    <span>{b.tema || b.nombre}</span>
+                  </li>
+                )
+              }
+              return (
+                <li
+                  key={b.id}
+                  className="rounded-lg px-3 py-2"
+                  style={{
+                    backgroundColor: ahora ? CLARO.acentoSuave : 'transparent',
+                    border: `1px solid ${ahora ? CLARO.acento : CLARO.borde}`,
+                    opacity: pasado ? 0.5 : 1,
+                  }}
+                >
+                  <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+                    <span className="w-36 flex-shrink-0 text-[11px] tabular-nums" style={{ color: CLARO.textoSuave }}>
+                      {hora12(b.inicio)} – {hora12(b.fin)}
+                    </span>
+                    <span className="text-sm font-medium" style={{ color: CLARO.texto }}>{b.nombre}</span>
+                    <span className="text-sm" style={{ color: CLARO.textoSuave }}>{b.tema}</span>
+                    {ahora && <span className="text-[10px] font-semibold" style={{ color: CLARO.acento }}>AHORA</span>}
+                    {b.tareas.length > 0 && (
+                      <span className="ml-auto text-[11px]" style={{ color: b.no_cabe ? '#fb923c' : CLARO.textoApagado }}>
+                        {b.no_cabe ? `⚠️ ${dur(b.carga)} en un bloque de ${dur(b.minutos)}` : `${dur(b.carga)} de ${dur(b.minutos)}`}
+                      </span>
+                    )}
+                  </div>
+                  {(b.fijas.length > 0 || b.tareas.length > 0) && (
+                    <ul className="mt-1.5 space-y-0.5 pl-[9.75rem] max-sm:pl-0">
+                      {b.fijas.map((f) => (
+                        <li key={f} className="text-xs" style={{ color: CLARO.textoSuave }}>↻ {f}</li>
+                      ))}
+                      {b.tareas.map((t) => (
+                        <li key={t.id} className="text-xs flex items-baseline gap-2" style={{ color: CLARO.texto }}>
+                          <span>{t.importante ? '★' : '•'} {t.text}</span>
+                          <span className="text-[10px] whitespace-nowrap" style={{ color: t.vencida ? '#f87171' : CLARO.textoApagado }}>
+                            {t.estimado ? `~${dur(t.minutos)}` : dur(t.minutos)}{t.vencida ? ' · vencida' : ''}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+          {datos.sin_bloque.length > 0 && (
+            <p className="mt-2 text-[11px]" style={{ color: CLARO.textoApagado }}>
+              Sin bloque hoy: {datos.sin_bloque.map((t) => t.text).join(' · ')}
+            </p>
+          )}
+        </Tarjeta>
+      )}
 
       {/* ── Agenda · Prioridades ── */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">

@@ -1,8 +1,20 @@
 {
   "crons": [
-    { "path": "/api/asistente/manana", "schedule": "0 13 * * 1-6" },
-    { "path": "/api/asistente/tarde", "schedule": "0 23 * * 1-6" },
-    { "path": "/api/asistente/recordatorios", "schedule": "*/5 * * * *" },
-    { "path": "/api/correo/ingesta", "schedule": "*/15 * * * *" }
+    {
+      "path": "/api/asistente/manana",
+      "schedule": "0 13 * * 1-6"
+    },
+    {
+      "path": "/api/asistente/tarde",
+      "schedule": "30 0 * * 0,2-6"
+    },
+    {
+      "path": "/api/asistente/recordatorios",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/correo/ingesta",
+      "schedule": "*/15 * * * *"
+    }
   ]
 }

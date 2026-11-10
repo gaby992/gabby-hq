@@ -12,7 +12,7 @@
         },
         {
           "ejemplo": "cierre",
-          "que": "el cierre del día (el mismo de las 6:00 pm)"
+          "que": "el cierre del día (el mismo de las 7:30 pm)"
         },
         {
           "ejemplo": "¿qué sigue?",
@@ -293,6 +293,41 @@
         {
           "ejemplo": "(archivo de más de 20 MB)",
           "que": "Telegram no deja bajarlo: te lo dice y te manda a subirlo en GabbyHQ → Archivos"
+        }
+      ]
+    },
+    {
+      "id": "organizarte",
+      "emoji": "🧭",
+      "titulo": "Organizarte (Gabita conversando)",
+      "lineas": [
+        {
+          "ejemplo": "necesito tiempo para CPT esta semana, no sé cuándo",
+          "que": "no te devuelve la pregunta: te propone días, bloques y horas de TU semana, y cierra con «¿Lo dejo así?»"
+        },
+        {
+          "ejemplo": "tengo que hacer primero la reunión, luego recolectar la información y luego 6 horas de crear el agente, para el viernes 20",
+          "que": "reparte los pasos en orden en tus bloques, con su tiempo, y te avisa si no cabe antes de esa fecha"
+        },
+        {
+          "ejemplo": "sí, déjalo así",
+          "que": "crea esas tareas con sus fechas y su duración"
+        },
+        {
+          "ejemplo": "¿me da tiempo de terminar lo de PTHO para el viernes?",
+          "que": "mira lo que ya tienes en cada bloque y te contesta con criterio"
+        },
+        {
+          "ejemplo": "mañana revisar el contrato de CPT, toma 2 horas",
+          "que": "la tarea se guarda con su duración, y así «Hoy te toca» sabe si el bloque alcanza"
+        },
+        {
+          "ejemplo": "(en la web) Resumen → Hoy te toca",
+          "que": "tus bloques de hoy, lo fijo de cada uno y las tareas que caen ahí; ⚠️ cuando no caben en las horas"
+        },
+        {
+          "ejemplo": "(en la web) Settings → Mi semana",
+          "que": "cambias tus bloques, las horas, de qué es cada uno y lo que cambia según el día del mes"
         }
       ]
     },

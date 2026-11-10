@@ -129,7 +129,9 @@ export function renderHistorial(turnos: Turno[], refDe: (id: string) => string |
   if (turnos.length === 0) return ''
   const lines = turnos.map((t) => {
     const quien = t.rol === 'user' ? 'ella' : 'tú'
-    const texto = t.texto.length > 400 ? t.texto.slice(0, 399) + '…' : t.texto
+    // Fase 16: una propuesta de Gabita (varias líneas con días y horas) tiene que llegar entera,
+    // o el "sí, déjalo así" que le sigue no sabe qué crear.
+    const texto = t.texto.length > 1000 ? t.texto.slice(0, 999) + '…' : t.texto
     const tareas = (t.acciones?.tareas ?? [])
       .map((x, i) => `${i + 1}ª=${refDe(x.id) ?? `«${x.text}»`}`)
       .join(', ')

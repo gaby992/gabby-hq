@@ -26,7 +26,10 @@ import { enviarTablero } from './tablero-imagen'
 import { enviarQueSigue } from './que-sigue'
 import { dejarDeEsperar, enviarListaEsperando, moverTarea } from './esperando'
 import { instanteDe } from './recordatorios'
+import { createServerClient } from '@/lib/supabase-server'
 import { crearAviso } from './avisos'
+import { duracion } from './bloques'
+import { responderConversacion } from './conversar'
 import { cargarEmpresas, confirmacion, guardarTarea } from './tareas'
 import { responderDeDocumentos } from '@/lib/documentos/buscar'
 import { recibirNota } from '@/lib/documentos/entrada'
@@ -231,7 +234,7 @@ function emparejarCrear(acciones: AccionResuelta[], ctx: ContextoInterprete): Ac
 const ICONO: Record<AccionLlm['tipo'], string> = {
   completar: '✅', cancelar: '🗑', borrar: '❌', posponer: '➡️', renombrar: '✏️', cambiar: '✏️', crear: '➕',
   nota_empresa: '📝', nota_tarea: '📎', alarma: '⏰', pregunta: '❓', que_sigue: '🎯', lista: '📋', calendar: '📅',
-  pagos_listar: '💳', dividir: '🪜', siguiente_paso: '🪜', correo: '📧', esperar: '⏳', esperando: '⏳', tablero: '🖥', despues: '📦', correos_lista: '📧', evento: '📆', documentos: '📂', documento_nota: '🧠', desconocido: '🤷',
+  pagos_listar: '💳', dividir: '🪜', siguiente_paso: '🪜', correo: '📧', esperar: '⏳', esperando: '⏳', tablero: '🖥', despues: '📦', correos_lista: '📧', evento: '📆', documentos: '📂', documento_nota: '🧠', conversar: '💬', desconocido: '🤷',
 }
 
 function fechaDicha(ymd: string, today: string): string {
@@ -268,6 +271,7 @@ function frase(a: AccionResuelta, today: string, conTarea: boolean): string {
       const parts = [a.empresa_ref?.name.trim() ?? (a.empresa ? `empresa «${a.empresa}»?` : 'sin empresa'), PRIORITY_LABELS[a.prioridad ?? 'normal'] + (a.importante ? ' ★' : '')]
       if (a.fecha) parts.push(a.hora ? `${formatVenceEs(a.fecha)} ${formatHoraEs(a.hora)}` : `vence ${formatVenceEs(a.fecha)}`)
       if (a.calendar) parts.push(a.fecha ? `📅 calendar${a.hora ? '' : ' (todo el día)'}` : '📅 calendar (sin fecha: no se podrá)')
+      if (a.minutos) parts.push(duracion(a.minutos))
       return `Crear «${corto(a.titulo)}» · ${parts.join(' · ')}`
     }
     case 'nota_empresa': return `Nota de ${a.empresa_ref?.name.trim() ?? a.empresa} (${a.modo}): «${corto(a.texto, 60)}»`
@@ -303,6 +307,7 @@ function frase(a: AccionResuelta, today: string, conTarea: boolean): string {
     case 'tablero': return 'Mandar la foto del tablero'
     case 'correos_lista': return `Mandar los correos${a.cuenta ? ` de ${a.cuenta}` : ''}${a.importante ? ' (lo importante)' : ''}`
     case 'despues': return `Pasar a Después (sin fecha)${tt}`
+    case 'conversar': return `Pensarlo contigo: «${corto(a.texto, 60)}»`
     case 'documentos': return `Buscar en el archivero «${corto(a.texto, 60)}»`
     case 'documento_nota': return `Archivar el dato «${corto(a.texto, 60)}»`
     case 'desconocido': return `No entendí «${corto(a.texto, 60)}»`
@@ -638,6 +643,11 @@ export async function ejecutarUna(chatId: number, a: AccionResuelta): Promise<st
       }
       const t = tareaParsedDe(a)
       const g = await guardarTarea(t)
+      // Fase 16: cuánto tarda, si lo dijo. Aparte y sin romper: antes del SQL de la fase 16 la columna no existe.
+      if (a.minutos) {
+        const { error } = await createServerClient().from('tasks').update({ minutos_estimados: a.minutos }).eq('id', g.id)
+        if (error) console.warn(`[plan] minutos_estimados: ${error.message}`)
+      }
       // So the thread can refer to it ("la de marketing a las 10").
       a.tarea = { id: g.id, text: t.text, company: a.empresa_ref ? { name: a.empresa_ref.name } : null }
       // Inside an approved plan an event without an hour is all-day (the plan said so).
@@ -740,6 +750,8 @@ export async function ejecutarUna(chatId: number, a: AccionResuelta): Promise<st
       const s = await recibirNota(chatId, a.texto, await cargarEmpresas())
       return s.texto
     }
+    case 'conversar':
+      return responderConversacion(chatId, a.texto)
     case 'desconocido':
       return `🤷 No entendí «${corto(a.texto, 60)}»`
   }

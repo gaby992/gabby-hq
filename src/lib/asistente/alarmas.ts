@@ -1,4 +1,4 @@
-// The two daily alarms: "☀️ Hoy" at 8:00 and "🌙 Cierre del día" at 6:00 pm
+// The two daily alarms: "☀️ Hoy" at 8:00 and "🌙 Cierre del día" at 7:30 pm (fase 16: when her last block ends)
 // (Cancún). Both build one HTML message from the GabbyHQ Supabase, send it to
 // every chat in ALLOWED_CHAT_IDS and record the numbering in `bot_alarmas` so
 // that "pasa 2,5" can resolve those numbers later, whatever the list looks
@@ -11,7 +11,7 @@ import { CHELSEA_COMPANY_NAME } from '@/lib/chelsea'
 import { NOTA_FRESCA_DIAS } from '@/lib/notas'
 import { daysSince } from '@/lib/dates'
 import { HORIZONTES, HORIZONTE_EMOJI, HORIZONTE_LABELS, compararEnColumna, horizonteDe, type Horizonte } from '@/lib/horizonte'
-import { cancunDayBounds, cancunYmd, daysBetween, formatCortoEs, formatDiaLargoEs, formatHoraEs } from './cancun'
+import { cancunDayBounds, cancunHm, cancunYmd, daysBetween, formatCortoEs, formatDiaLargoEs, formatHoraEs } from './cancun'
 import { SIMBOLO, bucketFor, type Bucket } from './simbolos'
 import { allowedChatIds, escapeHtml, sendTelegram } from './telegram'
 import { cargarConfig } from './config'
@@ -24,6 +24,7 @@ import { tecladoMenu } from './menu'
 import { avisoVencimientos, tituloRenovar } from '@/lib/documentos/vencimientos'
 import type { Documento as DocumentoVence } from '@/lib/documentos/tipos'
 import { inlineKeyboard } from './telegram'
+import { hoyTeToca, textoHoyTeToca } from './bloques'
 
 // The numbering record (bot_alarmas) lives in registro-listas.ts; re-exported so the old imports keep working.
 export { guardarAlarma, ultimaAlarma, type AlarmaItem, type AlarmaTipo } from './registro-listas'
@@ -344,6 +345,15 @@ export async function buildManana(today: string = cancunYmd()): Promise<Mensaje>
   const saludo = await resumenManana(cfg, panorama)
   const blocks: string[] = [`☀️ <b>Hoy, ${formatDiaLargoEs(today)}</b>\n${escapeHtml(saludo)}`]
 
+  // Fase 16: qué bloque le toca de aquí en adelante (lo de antes de esta hora ya pasó).
+  // Sin el SQL de la fase 16 no hay plantilla y este bloque simplemente no sale.
+  try {
+    const teToca = textoHoyTeToca((await hoyTeToca(tasks, companies, today)).bloques, today === cancunYmd() ? cancunHm() : '00:00')
+    if (teToca) blocks.push(teToca)
+  } catch (err) {
+    console.warn(`[manana] hoy te toca: ${mensajeError(err)}`)
+  }
+
   // Fase 4b: only notes of the last 3 days are "por dónde iba"; older ones stay in /hoy, greyed.
   const frescas = companiesInOrder(companies)
     .map((c) => ({ c, nota: notas.find((n) => n.company_id === c.id)?.nota?.trim() }))
@@ -470,7 +480,7 @@ export interface AlarmaResultado {
  */
 export async function ejecutarAlarma(tipo: AlarmaTipo, opts: { test?: boolean } = {}): Promise<AlarmaResultado> {
   const tag = `alarma-${tipo}`
-  const hora = tipo === 'manana' ? '8:00' : '6:00 pm'
+  const hora = tipo === 'manana' ? '8:00' : '7:30 pm'
   const chats = allowedChatIds()
   if (chats.length === 0) {
     throw new Error('ALLOWED_CHAT_IDS está vacío: no hay a quién mandar la alarma')

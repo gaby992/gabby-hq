@@ -37,7 +37,13 @@ export type AccionLlm =
   | { tipo: 'posponer'; ref: string; fecha: string }
   | { tipo: 'renombrar'; ref: string; titulo: string }
   | { tipo: 'cambiar'; ref: string; prioridad?: Priority; empresa?: string; fecha?: string; hora?: string; calendar?: boolean }
-  | { tipo: 'crear'; titulo: string; empresa?: string; prioridad?: Priority; fecha?: string; hora?: string; importante?: boolean; calendar?: boolean }
+  | { tipo: 'crear'; titulo: string; empresa?: string; prioridad?: Priority; fecha?: string; hora?: string; importante?: boolean; calendar?: boolean; /** Fase 16: cuánto tarda, si lo dijo. */ minutos?: number }
+  /**
+   * Fase 16: ella piensa en voz alta o pide ayuda para organizarse ("necesito
+   * tiempo para CPT esta semana, no sé cuándo"). No es una orden: Gabita
+   * responde con una propuesta sobre su horario.
+   */
+  | { tipo: 'conversar'; texto: string }
   | { tipo: 'calendar'; ref: string; hora?: string; todo_el_dia?: boolean }
   /**
    * Fase 12b: a free Calendar event — not a task — once or repeating:
@@ -96,7 +102,7 @@ const TIPOS: TipoAccionLlm[] = [
   'completar', 'cancelar', 'borrar', 'posponer', 'renombrar', 'cambiar', 'crear',
   'nota_empresa', 'nota_tarea', 'alarma', 'pregunta', 'que_sigue', 'lista', 'calendar',
   'pagos_listar', 'dividir', 'siguiente_paso', 'correo', 'esperar', 'esperando', 'tablero', 'despues', 'correos_lista', 'evento',
-  'documentos', 'documento_nota', 'desconocido',
+  'documentos', 'documento_nota', 'conversar', 'desconocido',
 ]
 
 const ACCIONES_CORREO: CorreoAccion[] = ['chelsea', 'yo', 'tarea', 'archivar']
@@ -271,7 +277,14 @@ export function systemPrompt(today: string, cfg: AsistenteConfig = { nombre_pers
     '- {"tipo":"posponer","ref":REF,"fecha":"YYYY-MM-DD"}  → pasar/mover/dejar para otro día',
     '- {"tipo":"renombrar","ref":REF,"titulo":"…"}  → "se llama X", "cámbiale el nombre". Si solo corrige una palabra, devuelve el título completo corregido',
     '- {"tipo":"cambiar","ref":REF,("prioridad":"urgente|normal|cuando"),("empresa":"…"),("fecha":"YYYY-MM-DD"),("hora":"HH:MM"),("calendar":true)}  → solo lo que cambia; "y ponla en calendar" → calendar:true',
-    '- {"tipo":"crear","titulo":"…",("empresa":"…"),("prioridad":"urgente|normal|cuando"),("fecha":"YYYY-MM-DD"),("hora":"HH:MM"),("importante":true)}  → tarea nueva. ' +
+    '- {"tipo":"conversar","texto":"…"}  → ella PIENSA EN VOZ ALTA o pide ayuda para ORGANIZARSE, decidir o repartir su tiempo, sin dar una orden concreta: ' +
+      '"necesito organizar tiempo para CPT esta semana, no sé cuándo", "¿en qué bloques hago esto?", "¿cómo reparto lo de DATAVIA?", "tengo que terminar X para el viernes, ¿me da tiempo?", ' +
+      '"¿qué opinas?", "ayúdame a organizar mi semana", "esta semana necesito hacer primero esto, luego esto… dime cuándo", "tengo una idea…", "estoy pensando que…". ' +
+      'texto = su mensaje COMPLETO tal cual (con los pasos, tiempos y fechas que dijo). Úsalo también cuando habla largo mezclando contexto y dudas. ' +
+      'NO es conversar cuando la orden es clara ("mañana llamar a Juan", "listo 3", "alarma a las 5"): eso sigue siendo su acción. Y si ella responde "sí", "dale", "déjalo así" a una propuesta tuya ' +
+      'de la CONVERSACIÓN RECIENTE, NO es conversar: crea las tareas que propusiste, cada una con su fecha y, si la propuesta decía cuánto tarda, con "minutos"',
+    '- {"tipo":"crear","titulo":"…",("empresa":"…"),("prioridad":"urgente|normal|cuando"),("fecha":"YYYY-MM-DD"),("hora":"HH:MM"),("importante":true),("minutos":90)}  → tarea nueva. ' +
+      '"minutos" SOLO si dijo cuánto tarda ("toma 2 horas" → 120, "media hora" → 30); nunca lo inventes. ' +
       'La fecha ("para el viernes", "el 15 de noviembre", "en 3 días", "mañana") y la hora ("3pm", "a las 10") NUNCA van en el título: van en fecha/hora. ' +
       'Si dice "y ponla en calendar" / "agrégala al calendario" / "en la agenda", pon "calendar":true y quítalo del título. Sin eso, la tarea NO va a Calendar aunque tenga hora',
     '- {"tipo":"calendar","ref":REF,("hora":"HH:MM"),("todo_el_dia":true)}  → "pon en calendar la de TOTT", "agrega al calendario el 3", "la anterior al calendar": crear el evento de una tarea que YA EXISTE en la lista (ref obligatorio)',
@@ -537,7 +550,9 @@ export function validarAcciones(raw: unknown): AccionLlm[] {
           const f = extraerFecha(h.text, cancunYmd())
           const text = f.text.replace(/\s{2,}/g, ' ').replace(/^[\s:,.\-–]+|[\s:,.\-–]+$/g, '').trim() || titulo
           const due = fecha(a.fecha) ?? f.due_date ?? undefined
-          out.push({ tipo, titulo: text, empresa: str(a.empresa), prioridad: p, fecha: due, hora: due ? hora(a.hora) ?? h.due_time ?? undefined : undefined, importante: a.importante === true || p === 'urgente', calendar: a.calendar === true || c.calendar })
+          // Fase 16: "toma 2 horas" → 120. Entre 5 minutos y 100 horas; lo demás se ignora.
+          const minutos = typeof a.minutos === 'number' && a.minutos >= 5 && a.minutos <= 6000 ? Math.round(a.minutos) : undefined
+          out.push({ tipo, titulo: text, empresa: str(a.empresa), prioridad: p, fecha: due, hora: due ? hora(a.hora) ?? h.due_time ?? undefined : undefined, importante: a.importante === true || p === 'urgente', calendar: a.calendar === true || c.calendar, minutos })
         }
         break
       }
@@ -631,6 +646,10 @@ export function validarAcciones(raw: unknown): AccionLlm[] {
         // Fase 14: sin texto no hay ni pregunta ni dato que archivar.
         if (texto) out.push({ tipo, texto })
         else out.push({ tipo: 'desconocido', texto: 'no entendí qué buscar en el archivero' })
+        break
+      case 'conversar':
+        // Fase 16: sin texto no hay de qué conversar.
+        out.push(texto ? { tipo, texto } : { tipo: 'desconocido', texto: '…' })
         break
       case 'pregunta':
       case 'desconocido':

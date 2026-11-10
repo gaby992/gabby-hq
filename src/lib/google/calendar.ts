@@ -5,7 +5,7 @@
 //   · a recurring monthly payment (fase 5-C): "💳 IM · Vercel" on day N,
 //     9:00–9:30 am Cancún, popups 7 days, 3 days and the same morning.
 
-import { CANCUN_TZ, addDays } from '@/lib/asistente/cancun'
+import { CANCUN_TZ, addDays, cancunYmd } from '@/lib/asistente/cancun'
 import { PRIORITY_LABELS, type Priority } from '@/types'
 import { GoogleError, accessToken, conexionActiva } from './oauth'
 
@@ -162,6 +162,51 @@ function horaCancun(iso: string): string {
  * (one row per instance). Throws GoogleError when there is no connection or
  * Google refuses; the caller decides how silent to be.
  */
+/** Fase 16: an event with its day, for a range of days (Gabita's week). */
+export interface EventoConFecha extends EventoDia {
+  /** 'YYYY-MM-DD' in Cancún. */
+  fecha: string
+}
+
+/**
+ * Everything on the connected calendar from `desde` (inclusive) to `hasta`
+ * (exclusive), in one call. Gabita reads it to avoid proposing a block over
+ * an appointment that already exists.
+ */
+export async function eventosEntre(desde: string, hasta: string): Promise<EventoConFecha[]> {
+  const conn = await conexionActiva()
+  if (!conn) throw new GoogleError('no hay cuenta de Google conectada (Settings → Conexiones)')
+  const token = await accessToken(conn)
+  const q = new URLSearchParams({
+    timeMin: new Date(`${desde}T00:00:00-05:00`).toISOString(),
+    timeMax: new Date(`${hasta}T00:00:00-05:00`).toISOString(),
+    singleEvents: 'true',
+    orderBy: 'startTime',
+    maxResults: '120',
+    timeZone: CANCUN_TZ,
+  })
+  const res = await fetch(`${BASE}?${q.toString()}`, { cache: 'no-store', headers: { Authorization: `Bearer ${token}` } })
+  const json = await res.json().catch(() => null)
+  if (!res.ok) throw new GoogleError(json?.error?.message ?? `Calendar HTTP ${res.status}`)
+  const items = Array.isArray(json?.items) ? (json.items as Record<string, unknown>[]) : []
+  return items
+    .filter((e) => e.status !== 'cancelled' && e.id)
+    .map((e) => {
+      const start = (e.start ?? {}) as { dateTime?: string; date?: string }
+      const end = (e.end ?? {}) as { dateTime?: string; date?: string }
+      return {
+        id: String(e.id),
+        titulo: String(e.summary ?? '(sin título)'),
+        fecha: start.dateTime ? cancunYmd(new Date(start.dateTime)) : String(start.date ?? desde),
+        hora: start.dateTime ? horaCancun(start.dateTime) : null,
+        fin: end.dateTime ? horaCancun(end.dateTime) : null,
+        todoElDia: !start.dateTime,
+        link: typeof e.htmlLink === 'string' ? e.htmlLink : null,
+        calendario: conn.email ?? null,
+      }
+    })
+}
+
 export async function eventosDelDia(ymd: string): Promise<EventoDia[]> {
   const conn = await conexionActiva()
   if (!conn) throw new GoogleError('no hay cuenta de Google conectada (Settings → Conexiones)')
