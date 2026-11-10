@@ -529,7 +529,9 @@ function parsePagos(text: string, companies: CompanyRef[]): Parsed | null {
 function parseLista(text: string, companies: CompanyRef[]): { tipo: ListaTipo; empresa?: CompanyRef | null } | null {
   const n = sinAcentos(text.replace(/^[¿?¡!\s]+|[?!.\s]+$/g, ''))
   // Fase 4d: "/pendientes IM", "pendientes de IM", "todo lo pendiente de IM", "qué tengo pendiente de PD".
-  const pend = n.match(/^\/?pendientes?(?:\s+(?:de\s+)?(.+))?$/)
+  // Ajuste 16b: "tareas pendientes y alarmas de IM", "qué son las tareas pendientes de PD".
+  const pend = n.match(/^(?:(?:que|cuales)\s+son\s+|dame\s+|mandame\s+|ver\s+)?(?:las\s+|mis\s+)?(?:tareas\s+)?pendientes?(?:\s+y\s+(?:las\s+|mis\s+)?(?:alarmas?|alarms?|recordatorios?))?\s+(?:de|en)\s+(.+)$/)
+    ?? n.match(/^\/?pendientes?(?:\s+(?:de\s+)?(.+))?$/)
     ?? n.match(/^(?:todo\s+)?lo\s+pendiente\s+(?:de|en)\s+(.+)$/)
     ?? n.match(/^(?:que|cuales)\s+(?:tengo|hay|queda)\s+pendientes?\s+(?:de|en)\s+(.+)$/)
   if (pend) {

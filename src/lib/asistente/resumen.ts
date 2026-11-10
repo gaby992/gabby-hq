@@ -36,6 +36,8 @@ export interface ItemAgenda {
   /** Payment: "$20"; event: the Calendar link. */
   detalle: string | null
   link: string | null
+  /** Ajuste 16b: she ticked it today (events and payments; a task is simply completed). */
+  hecho?: boolean
 }
 
 export interface Prioridad {
@@ -77,6 +79,35 @@ export interface Resumen {
     google_configurado: boolean
     cuentas: { email: string; calendar: boolean; correo: boolean; activa: boolean }[]
     telegram: boolean
+  }
+}
+
+/** What identifies an agenda line in agenda_hechos. */
+export function claveAgenda(it: Pick<ItemAgenda, 'tipo' | 'id'>): string {
+  return `${it.tipo}:${it.id}`
+}
+
+/** The agenda lines she ticked on `fecha`. Empty (never throws) without the 16b SQL. */
+export async function agendaHechos(fecha: string): Promise<Set<string>> {
+  try {
+    const { data, error } = await createServerClient().from('agenda_hechos').select('clave').eq('fecha', fecha)
+    if (error) return new Set()
+    return new Set(((data as { clave: string }[] | null) ?? []).map((x) => x.clave))
+  } catch {
+    return new Set()
+  }
+}
+
+/** Tick / untick one agenda line for `fecha`. Throws with a plain reason. */
+export async function marcarAgenda(fecha: string, clave: string, hecho: boolean): Promise<void> {
+  const db = createServerClient()
+  const { error } = hecho
+    ? await db.from('agenda_hechos').upsert({ fecha, clave }, { onConflict: 'fecha,clave' })
+    : await db.from('agenda_hechos').delete().eq('fecha', fecha).eq('clave', clave)
+  if (error) {
+    throw new Error(/agenda_hechos/.test(error.message) && /exist|schema|find/i.test(error.message)
+      ? 'Falta correr el SQL 2026-11-asistente-fase16b-agenda.sql en Supabase'
+      : `Supabase agenda_hechos: ${error.message}`)
   }
 }
 
@@ -134,6 +165,7 @@ export async function cargarResumen(today: string = cancunYmd()): Promise<Resume
     chipsVencimientos(today),
   ])
   const { companies, tasks, notas } = panorama
+  const hechos = await agendaHechos(today)
   // Fase 16: sin el SQL de la fase 16 esto vuelve vacío y el Resumen sigue igual.
   const teToca = await hoyTeToca(tasks, companies, today).catch((err) => {
     console.warn(`[resumen] bloques: ${mensajeError(err)}`)
@@ -196,6 +228,7 @@ export async function cargarResumen(today: string = cancunYmd()): Promise<Resume
     }
   }
   agenda.sort((a, b) => (a.hora ?? '').localeCompare(b.hora ?? ''))
+  for (const it of [...agenda, ...sinHora]) if (it.tipo !== 'tarea') it.hecho = hechos.has(claveAgenda(it))
 
   // ── Priorities: the "¿qué sigue?" ranking — now, then after, then due this week ──
   const prioridades: Prioridad[] = []
@@ -247,7 +280,11 @@ export async function cargarResumen(today: string = cancunYmd()): Promise<Resume
     correos,
     notas: notasOut,
     vencimientos,
-    bloques_hoy: teToca.bloques,
+    // Ajuste 16b: each working block carries its company's "por dónde iba".
+    bloques_hoy: teToca.bloques.map((b) => {
+      const n = b.company_id && b.toma_tareas ? (notas as NotaEmpresa[]).find((x) => x.company_id === b.company_id)?.nota.replace(/\s+/g, ' ').trim() : null
+      return { ...b, nota: n || null }
+    }),
     sin_bloque: teToca.sin_bloque,
     conexiones: {
       google_configurado: googleConfigurado(),

@@ -4,14 +4,15 @@
 // that "pasa 2,5" can resolve those numbers later, whatever the list looks
 // like by then.
 
-import { avisosConexiones } from '@/lib/google/oauth'
+import { avisosConexiones, googleConfigurado } from '@/lib/google/oauth'
+import { eventosEntre } from '@/lib/google/calendar'
 import { createServerClient } from '@/lib/supabase-server'
 import type { Company, NotaEmpresa, Task } from '@/types'
 import { CHELSEA_COMPANY_NAME } from '@/lib/chelsea'
 import { NOTA_FRESCA_DIAS } from '@/lib/notas'
 import { daysSince } from '@/lib/dates'
 import { HORIZONTES, HORIZONTE_EMOJI, HORIZONTE_LABELS, compararEnColumna, horizonteDe, type Horizonte } from '@/lib/horizonte'
-import { cancunDayBounds, cancunHm, cancunYmd, daysBetween, formatCortoEs, formatDiaLargoEs, formatHoraEs } from './cancun'
+import { addDays, cancunDayBounds, cancunHm, cancunYmd, daysBetween, formatCortoEs, formatDiaLargoEs, formatHoraEs } from './cancun'
 import { SIMBOLO, bucketFor, type Bucket } from './simbolos'
 import { allowedChatIds, escapeHtml, sendTelegram } from './telegram'
 import { cargarConfig } from './config'
@@ -453,8 +454,39 @@ export async function buildPendientes(company: Pick<Company, 'id' | 'name'>, tod
  * sent to ONE chat and recorded (tipo 'lista', with the message) so
  * "listo 3" works on it and a mail line can be struck through later.
  */
+const DIAS_CALENDAR_EMPRESA = 14
+
+/** Does this title name the company as a word? ("pago Health Insurance PD" → PD; "update" never → PD). */
+export function tituloNombra(titulo: string, empresa: string): boolean {
+  const plano = (x: string) => x.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  const e = plano(empresa).replace(/[^a-z0-9 ]/g, '').trim()
+  if (!e) return false
+  return new RegExp(`(^|[^a-z0-9])${e}([^a-z0-9]|$)`).test(plano(titulo))
+}
+
+/** The next 14 days of the calendar that name this company, as an HTML block. Null when Calendar is not connected or fails. */
+async function calendarDeEmpresa(nombre: string): Promise<string | null> {
+  if (!googleConfigurado()) return null
+  try {
+    const hoy = cancunYmd()
+    const eventos = (await eventosEntre(hoy, addDays(hoy, DIAS_CALENDAR_EMPRESA))).filter((e) => tituloNombra(e.titulo, nombre))
+    const esc = (x: string) => x.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    if (eventos.length === 0) return `⏰ <b>En tu calendario · ${esc(nombre)}</b>\n— nada que diga ${esc(nombre)} en los próximos ${DIAS_CALENDAR_EMPRESA} días`
+    const lineas = eventos.slice(0, 15).map((e) => `• ${formatCortoEs(e.fecha)}${e.hora ? ` · ${formatHoraEs(e.hora)}` : ''} — ${esc(e.titulo)}`)
+    return [`⏰ <b>En tu calendario · ${esc(nombre)} (${DIAS_CALENDAR_EMPRESA} días)</b>`, ...lineas].join('\n')
+  } catch (err) {
+    console.warn(`[lista] calendar de ${nombre}: ${errorMessage(err)}`)
+    return null
+  }
+}
+
 export async function enviarLista(chatId: number, tipo: 'manana' | 'tarde' | 'pendientes', company?: Pick<Company, 'id' | 'name'> | null): Promise<number> {
   const built = tipo === 'tarde' ? await buildTarde() : tipo === 'pendientes' && company ? await buildPendientes(company) : await buildManana()
+  // Ajuste 16b: "pendientes y alarmas de IM" — her alarms live in Calendar now, so the company view reads them from there.
+  if (tipo === 'pendientes' && company) {
+    const bloque = await calendarDeEmpresa(company.name.trim())
+    if (bloque) built.text = `${built.text}\n\n${bloque}`
+  }
   const messageId = await sendTelegram(chatId, built.text, { html: true, tag: `lista-${tipo}` })
   await guardarAlarma('lista', built.items, { chat_id: chatId, message_id: messageId, texto: built.text })
   await enviarBotonesVencimientos(chatId, built.vencimientos, `lista-${tipo}`)

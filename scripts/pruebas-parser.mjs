@@ -464,6 +464,17 @@ ok('¿qué cerré ayer? → pregunta libre', parse('¿qué cerré ayer?').kind =
     acc[0].tipo === 'documentos' && acc[1].tipo === 'documento_nota' && acc[2].tipo === 'desconocido', JSON.stringify(acc))
 }
 
+// ── Ajuste 16b: "tareas pendientes y alarmas de IM" = la vista de esa empresa ──
+{
+  for (const m of ['tareas pendientes y alarmas de IM', '¿qué son las tareas pendientes y alarms de IM?', 'pendientes y alarmas de PD', 'tareas pendientes de DATAVIA', 'pendientes de IM']) {
+    const r = parse(m)
+    ok(`16b: "${m}" → pendientes de esa empresa`, r.kind === 'lista' && r.tipo === 'pendientes' && !!r.empresa, JSON.stringify(r))
+  }
+  ok('16b: "pendientes" solo sigue siendo la lista', parse('pendientes').kind === 'lista' && parse('pendientes').tipo === 'manana')
+  const { tituloNombra } = await import('@/lib/asistente/alarmas')
+  ok('16b: el título nombra a la empresa como palabra', tituloNombra('⏰ pago Health Insurance PD', 'PD') && tituloNombra('IM: cierre', 'im') && !tituloNombra('update del sitio', 'PD') && !tituloNombra('Terminar la página', 'IM'))
+}
+
 if (fallos > 0) {
   console.error(`\n${fallos} prueba(s) fallaron`)
   process.exit(1)

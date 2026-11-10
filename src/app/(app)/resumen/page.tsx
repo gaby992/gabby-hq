@@ -123,6 +123,28 @@ export default function ResumenPage() {
     }
   }
 
+  /** Ajuste 16b: tick / untick an agenda line that is not a task (it stays in Google Calendar as is). */
+  async function marcarHecho(it: ItemAgenda) {
+    const clave = `${it.tipo}:${it.id}`
+    const hecho = !it.hecho
+    ocupar(clave, true)
+    setError(null)
+    try {
+      const res = await fetch('/api/resumen/hecho', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clave, hecho }) })
+      const json = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`)
+      setDatos((d) => {
+        if (!d) return d
+        const poner = (x: ItemAgenda) => (x.tipo === it.tipo && x.id === it.id ? { ...x, hecho } : x)
+        return { ...d, agenda: d.agenda.map(poner), sin_hora: d.sin_hora.map(poner) }
+      })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      ocupar(clave, false)
+    }
+  }
+
   async function decidirCorreo(c: CorreoResumen, accion: CorreoAccion) {
     ocupar(c.id, true)
     setMensaje(null)
@@ -165,25 +187,39 @@ export default function ResumenPage() {
     { emoji: '📧', label: 'Correos', n: datos.kpis.correos, color: '#1D9E75', href: '/hoy#col-correos' },
   ]
 
-  const renderItem = (it: ItemAgenda) => (
-    <li key={`${it.tipo}-${it.id}`} className="flex items-start gap-3 py-2">
-      <span className="w-[4.5rem] flex-shrink-0 text-xs tabular-nums pt-0.5" style={{ color: CLARO.textoSuave }}>
-        {it.hora ? hora12(it.hora) : it.tipo === 'evento' ? 'todo el día' : '—'}
-      </span>
-      <span className="flex-shrink-0 text-sm leading-5">{it.tipo === 'pago' ? '💳' : it.tipo === 'evento' ? '📆' : it.importante ? '★' : '•'}</span>
-      <div className="min-w-0 flex-1">
-        <p className="text-[13px] leading-5 truncate" style={{ color: CLARO.texto }}>
-          {it.link ? <a href={it.link} target="_blank" rel="noreferrer" className="hover:underline">{it.titulo}</a> : it.titulo}
-        </p>
-        <div className="flex items-center gap-1.5 mt-0.5">
-          <Empresa empresa={it.empresa} />
-          {it.detalle && <span className="text-[10px]" style={{ color: CLARO.textoSuave }}>{it.detalle}</span>}
-          {it.fin && it.hora && <span className="text-[10px]" style={{ color: CLARO.textoApagado }}>hasta {hora12(it.fin)}</span>}
-          {it.tipo === 'evento' && <span className="text-[10px]" style={{ color: CLARO.textoApagado }}>Google Calendar</span>}
+  const renderItem = (it: ItemAgenda) => {
+    const clave = `${it.tipo}:${it.id}`
+    const busy = ocupadas.has(clave) || ocupadas.has(it.id)
+    const hecho = !!it.hecho
+    return (
+      <li key={clave} className="flex items-start gap-3 py-2">
+        <button
+          onClick={() => void (it.tipo === 'tarea' ? completar(it.id) : marcarHecho(it))}
+          disabled={busy}
+          title={it.tipo === 'tarea' ? 'Completar la tarea' : hecho ? 'Desmarcar' : 'Ya lo hice'}
+          className="mt-0.5 flex-shrink-0 w-[18px] h-[18px] rounded-[5px] border-2 text-[11px] leading-[14px] text-white transition-colors disabled:opacity-40 hover:bg-[#262626]"
+          style={{ borderColor: hecho || busy ? CLARO.acento : '#555555', backgroundColor: hecho || busy ? CLARO.acento : 'transparent' }}
+        >
+          {hecho ? '✓' : ''}
+        </button>
+        <span className="w-[4.5rem] flex-shrink-0 text-xs tabular-nums pt-0.5" style={{ color: CLARO.textoSuave }}>
+          {it.hora ? hora12(it.hora) : it.tipo === 'evento' ? 'todo el día' : '—'}
+        </span>
+        <span className="flex-shrink-0 text-sm leading-5">{it.tipo === 'pago' ? '💳' : it.tipo === 'evento' ? '📆' : it.importante ? '★' : '•'}</span>
+        <div className={`min-w-0 flex-1 ${hecho ? 'opacity-45' : ''}`}>
+          <p className={`text-[13px] leading-5 truncate ${hecho ? 'line-through' : ''}`} style={{ color: CLARO.texto }}>
+            {it.link ? <a href={it.link} target="_blank" rel="noreferrer" className="hover:underline">{it.titulo}</a> : it.titulo}
+          </p>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <Empresa empresa={it.empresa} />
+            {it.detalle && <span className="text-[10px]" style={{ color: CLARO.textoSuave }}>{it.detalle}</span>}
+            {it.fin && it.hora && <span className="text-[10px]" style={{ color: CLARO.textoApagado }}>hasta {hora12(it.fin)}</span>}
+            {it.tipo === 'evento' && <span className="text-[10px]" style={{ color: CLARO.textoApagado }}>Google Calendar</span>}
+          </div>
         </div>
-      </div>
-    </li>
-  )
+      </li>
+    )
+  }
 
   const renderPrioridad = (p: Prioridad) => {
     const busy = ocupadas.has(p.id)
@@ -299,6 +335,11 @@ export default function ResumenPage() {
                       </span>
                     )}
                   </div>
+                  {b.nota && (
+                    <p className="mt-1 pl-[9.75rem] max-sm:pl-0 text-xs truncate" style={{ color: '#c9a227' }} title={b.nota}>
+                      📝 Por dónde iba: {b.nota}
+                    </p>
+                  )}
                   {(b.fijas.length > 0 || b.tareas.length > 0) && (
                     <ul className="mt-1.5 space-y-0.5 pl-[9.75rem] max-sm:pl-0">
                       {b.fijas.map((f) => (

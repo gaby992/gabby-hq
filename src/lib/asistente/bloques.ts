@@ -69,6 +69,10 @@ export interface BloqueDelDia {
   nombre: string
   tema: string
   empresa: string | null
+  /** The block's company (null under a month rule, like `empresa`). */
+  company_id: string | null
+  /** Ajuste 16b: the "por dónde iba" note of the block's company, filled by the Resumen. */
+  nota?: string | null
   fijas: string[]
   toma_tareas: boolean
   bloqueado: boolean
@@ -259,6 +263,7 @@ export function bloquesDelDia(
       nombre: b.nombre,
       tema: r ? `${r.regla.tema}${r.turno ? ` · hoy: ${r.turno}` : ''}` : b.tema,
       empresa: r ? null : nombreEmpresa(b.company_id),
+      company_id: r ? null : b.company_id,
       fijas: r ? r.regla.fijas : b.fijas,
       // A month rule takes the whole block: the usual tasks of that slot wait.
       toma_tareas: r ? false : b.toma_tareas,
