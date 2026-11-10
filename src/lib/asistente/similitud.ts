@@ -33,6 +33,8 @@ export const GENERICAS = new Set([
   'tarea', 'tareas', 'cosa', 'cosas', 'pendiente', 'pendientes', 'asistente', 'equipo', 'curso', 'cursos',
   'correo', 'correos', 'reunion', 'propuesta', 'cliente', 'clientes', 'proyecto', 'nuevo', 'nueva', 'mensaje', 'mensajes',
   'llamada', 'junta', 'cita', 'pago', 'pagos', 'factura', 'facturas', 'documento', 'documentos', 'archivo', 'archivos',
+  // tools she uses for every client: never the identity of a task (ajuste 16c)
+  'google', 'quickbooks', 'keywords', 'estrategia', 'reporte', 'cashflow',
   'suscripcion', 'cuenta', 'cuentas', 'persona', 'personas', 'gente', 'lista', 'nota', 'notas', 'plan', 'planes',
 ])
 
@@ -92,6 +94,22 @@ export function claveComun(a: string, b: string): string | null {
   return palabrasClave(a).find((k) => claveEn(k, b)) ?? palabrasClave(b).find((k) => claveEn(k, a)) ?? null
 }
 
+/** Acronyms that are a kind of work, not whose work it is. */
+const SIGLAS_DE_OFICIO = new Set(['SEO', 'GEO', 'GHL', 'QB', 'CRM', 'API', 'SDK', 'PDF', 'IA', 'AI', 'SQL', 'KPI', 'FB', 'IG', 'GL', 'BL'])
+
+/** The names a title carries: acronyms as written ("PTHO", "TOTT", "CPT", "IM"), minus the ones that are a kind of work. */
+export function nombresDe(s: string): string[] {
+  return Array.from(new Set((s.match(/\b[A-ZÑ][A-ZÑ0-9]{1,6}\b/g) ?? []).filter((w) => !SIGLAS_DE_OFICIO.has(w))))
+}
+
+/** True when both titles name someone and share none of the names ("… PTHO" vs "… TOTT"). */
+export function nombresDistintos(a: string, b: string): boolean {
+  const A = nombresDe(a)
+  const B = nombresDe(b)
+  if (A.length === 0 || B.length === 0) return false
+  return !A.some((x) => B.includes(x))
+}
+
 export const UMBRAL_SIMILITUD = 0.75
 
 export interface Parecida<T> {
@@ -110,6 +128,8 @@ export function candidatasParecidas<T extends { text: string }>(titulo: string, 
   const similares: Parecida<T>[] = []
   const porClave: Parecida<T>[] = []
   for (const t of abiertas) {
+    // Ajuste 16c: "Google Ads PTHO" is not «Shift Google Ads»: two different names, two tasks.
+    if (nombresDistintos(titulo, t.text)) continue
     const s = similitud(titulo, t.text)
     if (s >= UMBRAL_SIMILITUD) {
       similares.push({ tarea: t, score: s, motivo: `similar ${s.toFixed(2)}` })

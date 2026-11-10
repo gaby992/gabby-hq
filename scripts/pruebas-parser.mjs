@@ -475,6 +475,29 @@ ok('¿qué cerré ayer? → pregunta libre', parse('¿qué cerré ayer?').kind =
   ok('16b: el título nombra a la empresa como palabra', tituloNombra('⏰ pago Health Insurance PD', 'PD') && tituloNombra('IM: cierre', 'im') && !tituloNombra('update del sitio', 'PD') && !tituloNombra('Terminar la página', 'IM'))
 }
 
+// ── Ajuste 16c: fechas que no cuadran y clientes distintos ──
+{
+  const { fechasQueNoCuadran, corregirFechas } = await import('@/lib/asistente/fechas-dichas')
+  const hoy = '2026-11-10' // martes
+  const f = fechasQueNoCuadran('Dámelo de PTHO para este viernes, el viernes 14 tenemos que tener todo', hoy)
+  ok('16c: "viernes 14" cuando el viernes es 13 → gana el viernes', f.length === 1 && f[0].mala === '2026-11-14' && f[0].buena === '2026-11-13', JSON.stringify(f))
+  ok('16c: "viernes 13" cuadra → nada', fechasQueNoCuadran('para el viernes 13', hoy).length === 0)
+  ok('16c: "viernes 27" es otro viernes → nada', fechasQueNoCuadran('para el viernes 27', hoy).length === 0)
+  ok('16c: "viernes 3 pm" es una hora → nada', fechasQueNoCuadran('el viernes 3 pm reunión', hoy).length === 0 && fechasQueNoCuadran('el viernes 11:30 junta', hoy).length === 0)
+  ok('16c: "hoy martes 11" → hoy', fechasQueNoCuadran('necesita comprar hoy martes 11 pañales', hoy)[0]?.buena === hoy)
+  const acc = [{ tipo: 'crear', titulo: 'a', fecha: '2026-11-14' }, { tipo: 'crear', titulo: 'b', fecha: '2026-11-12' }]
+  const av = corregirFechas(acc, 'el viernes 14 tenemos que tener todo', hoy)
+  ok('16c: corrige solo la fecha equivocada y avisa', acc[0].fecha === '2026-11-13' && acc[1].fecha === '2026-11-12' && av.length === 1 && /viernes es 13/.test(av[0]), JSON.stringify({ acc, av }))
+
+  const { buscarParecida, nombresDistintos } = await import('@/lib/asistente/similitud')
+  const abiertas = [{ id: '1', text: 'Shift Google Ads y SEO' }, { id: '2', text: 'Terminar QuickBooks de IM' }, { id: '3', text: 'Marketing Team' }]
+  ok('16c: "Trabajar Google Ads PTHO" NO es «Shift Google Ads y SEO»', buscarParecida('Trabajar Google Ads PTHO', abiertas) === null, JSON.stringify(buscarParecida('Trabajar Google Ads PTHO', abiertas)))
+  ok('16c: "Trabajar Google Ads" a secas tampoco se pega a Shift', buscarParecida('Trabajar Google Ads', abiertas) === null)
+  ok('16c: "Terminar QuickBooks de PD" NO es el de IM', buscarParecida('Terminar QuickBooks de PD', abiertas) === null)
+  ok('16c: lo que sí es lo mismo se sigue encontrando', buscarParecida('armar el equipo de marketing', abiertas)?.tarea.id === '3' && buscarParecida('terminar quickbooks de IM', abiertas)?.tarea.id === '2')
+  ok('16c: PTHO vs TOTT son nombres distintos; SEO no es un nombre', nombresDistintos('keywords PTHO', 'keywords TOTT') && !nombresDistintos('SEO de PTHO', 'estrategia PTHO') && !nombresDistintos('Google Ads y SEO', 'Google Ads PTHO'))
+}
+
 if (fallos > 0) {
   console.error(`\n${fallos} prueba(s) fallaron`)
   process.exit(1)

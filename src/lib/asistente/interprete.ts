@@ -281,6 +281,8 @@ export function systemPrompt(today: string, cfg: AsistenteConfig = { nombre_pers
       '"necesito organizar tiempo para CPT esta semana, no sé cuándo", "¿en qué bloques hago esto?", "¿cómo reparto lo de DATAVIA?", "tengo que terminar X para el viernes, ¿me da tiempo?", ' +
       '"¿qué opinas?", "ayúdame a organizar mi semana", "esta semana necesito hacer primero esto, luego esto… dime cuándo", "tengo una idea…", "estoy pensando que…". ' +
       'texto = su mensaje COMPLETO tal cual (con los pasos, tiempos y fechas que dijo). Úsalo también cuando habla largo mezclando contexto y dudas. ' +
+      'Si ella COMENTA, reclama o pregunta por algo que le acabas de mostrar ("aquí no veo lo de PTHO", "falta X", "¿y lo de Shift?"), es SOLO conversar con su mensaje completo: ' +
+      'NUNCA agregues una acción lista, pregunta ni que_sigue para volver a mandarle lo que ya tiene en pantalla. ' +
       'NO es conversar cuando la orden es clara ("mañana llamar a Juan", "listo 3", "alarma a las 5"): eso sigue siendo su acción. Y si ella responde "sí", "dale", "déjalo así" a una propuesta tuya ' +
       'de la CONVERSACIÓN RECIENTE, NO es conversar: crea las tareas que propusiste, cada una con su fecha y, si la propuesta decía cuánto tarda, con "minutos"',
     '- {"tipo":"crear","titulo":"…",("empresa":"…"),("prioridad":"urgente|normal|cuando"),("fecha":"YYYY-MM-DD"),("hora":"HH:MM"),("importante":true),("minutos":90)}  → tarea nueva. ' +
@@ -360,6 +362,8 @@ export function systemPrompt(today: string, cfg: AsistenteConfig = { nombre_pers
     '',
     `FECHAS: hoy es ${today}; "mañana" = ${manana}; "pasado mañana" = ${addDays(today, 2)}. ` +
       'Un día de la semana es el PRÓXIMO (si hoy es lunes, "el lunes" es dentro de 7 días). ' +
+      'Si dice un día de la semana Y un número que no coinciden ("el viernes 14" y el viernes es 13), GANA EL DÍA DE LA SEMANA. ' +
+      'Una tarea nueva de un cliente lleva el nombre del cliente en el título ("Google Ads PTHO"), y NUNCA la conviertas en un cambio sobre la tarea de OTRO cliente aunque el trabajo se llame igual. ' +
       'Horas en 24 h: "3pm" → "15:00", "9" o "9am" → "09:00", "a las 10" → "10:00" (o "22:00" si dice "de la noche"). ' +
       'Si la hora de una alarma ya pasó hoy y no dijo día, es mañana.',
     'PRIORIDAD: "urgente" implica importante. EMPRESA: usa el nombre exacto de la lista EMPRESAS.',

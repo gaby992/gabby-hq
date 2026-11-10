@@ -98,6 +98,7 @@ import { probarModeloConversacion, responderConversacion } from '@/lib/asistente
 import { responderPregunta } from '@/lib/asistente/pregunta'
 import { enviarQueSigue } from '@/lib/asistente/que-sigue'
 import { enviarLista } from '@/lib/asistente/alarmas'
+import { corregirFechas } from '@/lib/asistente/fechas-dichas'
 import { enviarListaEsperando } from '@/lib/asistente/esperando'
 import { guiaTelegram } from '@/lib/asistente/comandos'
 import { cargarConfig, presentacion, type AsistenteConfig } from '@/lib/asistente/config'
@@ -755,7 +756,7 @@ function botonesAclarar(nonce: string) {
 async function preguntarQueEs(chatId: number, text: string, prefix: string | null) {
   const cfg = await cargarConfig()
   const nonce = await borradorConNonce(chatId, text, { tipo: 'aclarar', texto: text })
-  await reply(chatId, joinLines(prefix, `No entendí bien eso, ${cfg.nombre_persona}. ¿Es una tarea nueva, una orden sobre una tarea, o una alarma?`), botonesAclarar(nonce))
+  await reply(chatId, joinLines(prefix, loQueOi(chatId), `No entendí bien eso, ${cfg.nombre_persona}. ¿Es una tarea nueva, una orden sobre una tarea, o una alarma?`), botonesAclarar(nonce))
 }
 
 /** "divide X": the open task whose title contains X, then its steps. */
@@ -864,6 +865,9 @@ async function responderCorreccion(chatId: number, plan: PlanPendiente, r: Resul
  * Everything that is not an exact command. `pista` comes from the
  * [Orden] / [Alarma] buttons on a second try.
  */
+/** Actions that only read or talk: several of them together are never a plan to confirm. */
+const SOLO_LECTURA = new Set<string>(['lista', 'que_sigue', 'pregunta', 'esperando', 'conversar', 'documentos'])
+
 async function handleLibre(chatId: number, text: string, parsed: Parsed, prefix: string | null, pista?: string) {
   const companies = await cargarEmpresas()
   const r = await interpretar(chatId, text, companies, pista)
@@ -879,11 +883,15 @@ async function handleLibre(chatId: number, text: string, parsed: Parsed, prefix:
     return
   }
 
+  // Ajuste 16c: "el viernes 14" cuando el viernes es 13 → gana el día de la semana, y se dice.
+  const avisosFecha = corregirFechas(r.acciones, text, cancunYmd())
+  if (avisosFecha.length > 0) prefix = joinLines(prefix, ...avisosFecha)
+
   const utiles = r.acciones.filter((a) => a.tipo !== 'desconocido')
   if (utiles.length === 0) {
     await registrar(chatId, text, r, resolverAcciones(r.acciones, r.contexto, companies))
     if (pista) {
-      await reply(chatId, joinLines(prefix, 'Sigo sin entender. Dime por ejemplo "listo 3", "pasa el 3 al lunes" o "alarma mañana 9am revisar X".'))
+      await reply(chatId, joinLines(prefix, loQueOi(chatId), 'Sigo sin entender. Dime por ejemplo "listo 3", "pasa el 3 al lunes" o "alarma mañana 9am revisar X".'))
       return
     }
     if (clasicoEstructurado(parsed)) {
@@ -918,12 +926,24 @@ async function handleLibre(chatId: number, text: string, parsed: Parsed, prefix:
       chatId,
       joinLines(
         prefix,
+        loQueOi(chatId),
         'No encontré nada que hacer con ese mensaje.',
         motivos.length > 0 ? motivos.map((m) => `• ${m}`).join('\n') : null,
         'Dímelo de otra forma, o una cosa a la vez.'
       )
     )
     return
+  }
+
+  // Ajuste 16c: varias cosas y ninguna cambia nada (una lista, una pregunta, pensar en voz alta) → no
+  // es un plan: ni "Entendí: 1… 2…" ni botones. Si está conversando, se conversa con el mensaje
+  // entero (y NO se le vuelve a mandar la lista que está comentando); si no, se contesta lo primero.
+  if (acciones.length >= 2 && acciones.every((a) => SOLO_LECTURA.has(a.tipo))) {
+    if (acciones.some((a) => a.tipo === 'conversar')) {
+      await reply(chatId, joinLines(prefix, await responderConversacion(chatId, text)))
+      return
+    }
+    acciones = [acciones[0]]
   }
 
   // ── Several actions, or anything that cancels: show the plan, ask OK ──
@@ -1004,7 +1024,11 @@ async function handleLibre(chatId: number, text: string, parsed: Parsed, prefix:
   }
   // Fase 15: una línea puede traer un enlace (📆 abrir, 🔗 Reconectar). Va como HTML seguro:
   // nuestras etiquetas se quedan y lo que ella escribió se escapa.
-  await reply(chatId, htmlSeguro(joinLines(prefix, await ejecutarUna(chatId, a))), undefined, true)
+  const hecho = await ejecutarUna(chatId, a)
+  // Ajuste 16c: "(lista enviada arriba)" no dice nada: la lista ya está ahí.
+  const soloMarca = /^\S+ \((?:lista|cierre) enviad[oa] arriba\)$|^\S+ \(enviado arriba\)$/.test(hecho.trim())
+  if (soloMarca && !prefix) return
+  await reply(chatId, htmlSeguro(joinLines(prefix, soloMarca ? null : hecho)), undefined, true)
   if (a.tarea) await guardarTurno(chatId, 'assistant', `[${a.tipo}] ${a.tarea.text}`, { tareas: [{ id: a.tarea.id, text: a.tarea.text }] })
   if (a.tipo === 'completar' && a.tarea) await sugerir(chatId, await trasCompletar(chatId, await cargarConfig(), a.tarea.id))
 }
@@ -1015,6 +1039,13 @@ export interface TelegramAudio {
   file_id: string
   duration?: number
   mime_type?: string
+}
+
+/** Ajuste 16c: the transcription of the voice note being handled, per chat (only shown when it was not understood). */
+const oido = new Map<number, string>()
+function loQueOi(chatId: number): string | null {
+  const t = oido.get(chatId)
+  return t ? `🎤 Escuché: «${t}»` : null
 }
 
 export async function handleVoice(chatId: number, audio: TelegramAudio) {
@@ -1030,9 +1061,15 @@ export async function handleVoice(chatId: number, audio: TelegramAudio) {
     await reply(chatId, 'No entendí el audio. ¿Me lo repites?')
     return
   }
-  // 2c: the transcription always goes back first, in the same message as the
-  // confirmation or the question.
-  await handleText(chatId, texto, `🎤 Entendí: «${texto}»`)
+  // Ajuste 16c: no more "🎤 Entendí: «…»" before every answer — the answer
+  // itself shows what was understood. What she said only comes back when
+  // Gabita did NOT understand, so she can tell a bad transcription from a bad reading.
+  oido.set(chatId, texto)
+  try {
+    await handleText(chatId, texto, null)
+  } finally {
+    oido.delete(chatId)
+  }
 }
 
 // ── Fase 14: documents (segundo cerebro) ─────────────────────────────────
