@@ -43,6 +43,8 @@ export interface TareaParsed {
   due_time?: string | null
   /** "y ponla en calendar": create the Calendar event too (fase 5-B). */
   calendar?: boolean
+  /** Ajuste 16e: "recordatorio del día" — with `calendar` and no hour, the event is all-day without asking. */
+  todo_el_dia?: boolean
 }
 
 export type Faltante = 'empresa' | 'urgencia'
@@ -256,6 +258,25 @@ function resolveDay(token: string, today: string): string | null {
 }
 
 // ── Pieces ──────────────────────────────────────────────────────────────
+
+/**
+ * Ajuste 16e: the urgency she SAID, wherever it is in the message
+ * ("normal, datavia, comprar X" / "… llamar a Juan, urgente"). Used to fill
+ * it in when the model dropped it, so the bot never asks what she already said.
+ */
+export function prioridadDicha(text: string): Priority | null {
+  const m = sinAcentos(text).match(/(?:^|[\s,;.])(urgente|normal|cuando\s+pueda|prioridad\s+(?:alta|normal|baja))(?=$|[\s,;.!:])/)
+  if (!m) return null
+  const w = m[1]
+  if (w === 'urgente' || /alta$/.test(w)) return 'urgente'
+  if (w.startsWith('cuando') || /baja$/.test(w)) return 'cuando'
+  return 'normal'
+}
+
+/** Ajuste 16e: "recordatorio del día", "recuérdamelo ese día", "con recordatorio" → an all-day reminder in Calendar. */
+export function pideRecordatorioDelDia(text: string): boolean {
+  return /\brecordatorio\s+(?:de[l]?\s+|ese\s+|para\s+ese\s+)?dia\b|\brecuerdamel[oa]\s+ese\s+dia\b|\bcon\s+(?:un\s+)?recordatorio\b|\bavisame\s+ese\s+dia\b/.test(sinAcentos(text))
+}
 
 function takePriority(text: string): { priority: Priority | null; text: string } {
   // At the start, the classic form.

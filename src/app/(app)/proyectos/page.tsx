@@ -50,7 +50,7 @@ function Formulario({ forma, setForma, empresas, onGuardar, onCancelar, guardand
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="sm:col-span-2">
           <label className={etiqueta}>Nombre del proyecto</label>
-          <input value={forma.nombre} onChange={set('nombre')} placeholder="Asistente del curso" className={`${campo} w-full`} />
+          <input value={forma.nombre} onChange={set('nombre')} placeholder="Ej.: Web de DATAVIA" className={`${campo} w-full`} />
         </div>
         <div>
           <label className={etiqueta}>Empresa</label>
@@ -62,7 +62,7 @@ function Formulario({ forma, setForma, empresas, onGuardar, onCancelar, guardand
       </div>
       <div>
         <label className={etiqueta}>1 · ¿Qué es «terminado»? (la versión mínima)</label>
-        <textarea value={forma.terminado} onChange={set('terminado')} rows={2} placeholder="Kenny anota tareas por Telegram, recibe el mensaje de la mañana y marca hecho." className={`${campo} w-full`} />
+        <textarea value={forma.terminado} onChange={set('terminado')} rows={2} placeholder="Escribe aquí qué tiene que existir para decir «ya está». Ej.: la web publicada con sus 5 páginas y el formulario funcionando." className={`${campo} w-full`} />
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <div><label className={etiqueta}>2 · Producción desde</label><input type="date" value={forma.produccion_desde} onChange={set('produccion_desde')} className={`${campo} w-full`} /></div>

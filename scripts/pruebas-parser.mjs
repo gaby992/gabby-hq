@@ -563,6 +563,16 @@ ok('¿qué cerré ayer? → pregunta libre', parse('¿qué cerré ayer?').kind =
   ok('18: sin nada pendiente lo dice', /Nothing pending for Chelsea/.test(armarResumenChelsea({ nuevos: [], paraChelsea: [], tareas: [] }, '2026-11-11').texto))
 }
 
+// ── Ajuste 16e: lo que ya dijo no se le pregunta ──
+{
+  const { prioridadDicha, pideRecordatorioDelDia } = await import('@/lib/parser')
+  const m = 'normal, datavia, compra de oranguntan para el 7 de dic, recordatorio del dia'
+  ok('16e: "normal" al principio con comas es la urgencia', prioridadDicha(m) === 'normal')
+  ok('16e: urgente al final, cuando pueda, prioridad alta', prioridadDicha('llamar a Juan, urgente') === 'urgente' && prioridadDicha('ordenar el drive cuando pueda') === 'cuando' && prioridadDicha('prioridad alta: pagar la luz') === 'urgente')
+  ok('16e: sin urgencia dicha → null (y "anormal"/"normalmente" no cuentan)', prioridadDicha('comprar pañales mañana') === null && prioridadDicha('revisar lo anormal del reporte') === null && prioridadDicha('normalmente lo hago el lunes') === null)
+  ok('16e: "recordatorio del día" pide el evento de todo el día', pideRecordatorioDelDia(m) && pideRecordatorioDelDia('pagar el seguro el 20, recuérdamelo ese día') && pideRecordatorioDelDia('renovar dominio el 3 con recordatorio') && !pideRecordatorioDelDia('comprar pañales el viernes'))
+}
+
 if (fallos > 0) {
   console.error(`\n${fallos} prueba(s) fallaron`)
   process.exit(1)

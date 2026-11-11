@@ -309,6 +309,8 @@ export function systemPrompt(today: string, cfg: AsistenteConfig = { nombre_pers
       'de la CONVERSACIÓN RECIENTE, NO es conversar: crea las tareas que propusiste, cada una con su fecha y, si la propuesta decía cuánto tarda, con "minutos"',
     '- {"tipo":"crear","titulo":"…",("empresa":"…"),("prioridad":"urgente|normal|cuando"),("fecha":"YYYY-MM-DD"),("hora":"HH:MM"),("importante":true),("minutos":90),("proyecto":"…")}  → tarea nueva. ' +
       '"proyecto" SOLO si dijo que es de un proyecto de PROYECTOS ACTIVOS ("para el proyecto del curso: …"): su nombre exacto. ' +
+      'Si dice la urgencia en CUALQUIER parte ("normal, datavia, comprar X", "… urgente"), va en "prioridad" y NUNCA en el título; la empresa va en "empresa" y NUNCA en el título. ' +
+      '"recordatorio del día", "recuérdamelo ese día", "con recordatorio" → "calendar":true (sin hora = evento de todo el día). ' +
       '"minutos" SOLO si dijo cuánto tarda ("toma 2 horas" → 120, "media hora" → 30); nunca lo inventes. ' +
       'La fecha ("para el viernes", "el 15 de noviembre", "en 3 días", "mañana") y la hora ("3pm", "a las 10") NUNCA van en el título: van en fecha/hora. ' +
       'Si dice "y ponla en calendar" / "agrégala al calendario" / "en la agenda", pon "calendar":true y quítalo del título. Sin eso, la tarea NO va a Calendar aunque tenga hora',

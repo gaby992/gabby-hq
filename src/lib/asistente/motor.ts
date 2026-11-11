@@ -63,7 +63,7 @@ import {
 } from '@/lib/asistente/recordatorios'
 import { ejecutarNota, USO_NOTA } from '@/lib/asistente/notas-bot'
 import { llmConfig } from '@/lib/asistente/llm'
-import { ayuda, esOrdenDeAlarmas, faltantes, lineasConOrdenDeAlarmas, parseMensaje, type Parsed, type TareaParsed } from '@/lib/parser'
+import { ayuda, esOrdenDeAlarmas, faltantes, lineasConOrdenDeAlarmas, parseMensaje, pideRecordatorioDelDia, prioridadDicha, type Parsed, type TareaParsed } from '@/lib/parser'
 import { cancunYmd, formatHoraEs, formatVenceEs } from '@/lib/asistente/cancun'
 import { MAX_AUDIO_SECONDS, transcribirAudio } from '@/lib/asistente/whisper'
 import {
@@ -251,6 +251,12 @@ async function guardarYConfirmar(chatId: number, tarea: TareaParsed, prefix: str
   const g = await guardarTarea(tarea)
   const linea = confirmacion(tarea, g.sync)
   await guardarTurno(chatId, 'assistant', `[creada] ${tarea.text}`, { tareas: [{ id: g.id, text: tarea.text }] })
+  if (g.faltaHora && tarea.todo_el_dia) {
+    // Ajuste 16e: "recordatorio del día" → todo el día, sin preguntar la hora.
+    const sync = await agregarACalendar(g.id, { todoElDia: true })
+    await reply(chatId, joinLines(prefix, confirmacion(tarea, sync), sync.confirmacion))
+    return
+  }
   if (g.faltaHora) {
     const nonce = await borradorConNonce(chatId, tarea.text, { tipo: 'calendar_hora', task_id: g.id, texto: tarea.text })
     await reply(chatId, joinLines(prefix, linea, '📅 ¿A qué hora la pongo en calendar?'), botonesHoraCalendar(nonce))
@@ -1011,8 +1017,25 @@ async function handleLibre(chatId: number, text: string, parsed: Parsed, prefix:
     return
   }
   if (a.tipo === 'crear') {
+    const t = tareaParsedDe(a)
+    // Ajuste 16e: lo que ella YA dijo no se le vuelve a preguntar. Si el modelo soltó la urgencia
+    // ("normal, datavia, comprar X"), se toma del mensaje; y "recordatorio del día" es un evento
+    // de todo el día en Calendar, sin preguntar la hora.
+    if (!t.priority) {
+      t.priority = prioridadDicha(text)
+      if (t.priority === 'urgente') t.importante = true
+    }
+    if (t.due_date && !t.due_time && pideRecordatorioDelDia(text)) {
+      t.calendar = true
+      t.todo_el_dia = true
+    }
+    // "Compra de orangután - Datavia": la empresa ya va en su campo, no en el título.
+    if (t.company_name) {
+      const sin = t.text.replace(new RegExp(`\\s*[-–—·,(]\\s*${t.company_name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\)?\\s*$`, 'i'), '').trim()
+      if (sin.length >= 3) t.text = sin
+    }
     // Same flow as a typed task: ask company / urgency with buttons if missing.
-    await guardarOPreguntar(chatId, text, tareaParsedDe(a), prefix)
+    await guardarOPreguntar(chatId, text, t, prefix)
     return
   }
   if (a.tipo === 'borrar') {
