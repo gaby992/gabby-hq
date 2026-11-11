@@ -486,6 +486,14 @@ export async function handleText(chatId: number, text: string, prefix: string | 
     await reply(chatId, `${e.ok ? '✅' : '⚠️'} ${e.detalle}${e.ok ? '\nTe acabo de mandar ahí el resumen de Chelsea como prueba.' : ''}`)
     return
   }
+  // Ajuste 17a: "¿qué escuchaste?" — lo último que le llegó (sus notas de voz ya no se repiten en cada
+  // respuesta, así que esto es la manera de ver si falló el audio o la lectura).
+  if (/^[¿\s]*(?:que|qué)\s+(?:me\s+)?(?:escuchaste|entendiste|oiste|oíste)\b/i.test(text.trim())) {
+    const turnos = (await turnosRecientes(chatId, 14)).filter((t) => t.rol === 'user' && !t.texto.startsWith('[botón') && t.texto.trim() !== text.trim())
+    const ultimos = turnos.slice(-3)
+    await reply(chatId, ultimos.length > 0 ? ['Lo último que me llegó de ti:', ...ultimos.map((t) => `• «${t.texto.slice(0, 600)}»`)].join('\n') : 'No tengo nada reciente tuyo guardado.')
+    return
+  }
   // Fase 16: "/modelo" prueba de verdad el modelo de conversación y dice cuál contesta.
   if (/^\/modelo\b/i.test(text.trim())) {
     await reply(chatId, await probarModeloConversacion())

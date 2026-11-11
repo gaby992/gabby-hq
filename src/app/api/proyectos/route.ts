@@ -57,8 +57,14 @@ export async function POST(request: Request) {
 export async function DELETE(request: Request) {
   if (!(await isValidSession())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
-    const id = new URL(request.url).searchParams.get('id')
+    const url = new URL(request.url)
+    const id = url.searchParams.get('id')
     if (!id) throw new Error('falta el id')
+    // Ajuste 17a: ?pasos=1 borra también los pasos que no se hicieron (los hechos se quedan como historia).
+    if (url.searchParams.get('pasos') === '1') {
+      const { error: e } = await createServerClient().from('tasks').delete().eq('proyecto_id', id).eq('done', false)
+      if (e) throw new Error(e.message)
+    }
     const { error } = await createServerClient().from('proyectos').delete().eq('id', id)
     if (error) throw new Error(error.message)
     return NextResponse.json({ ok: true })

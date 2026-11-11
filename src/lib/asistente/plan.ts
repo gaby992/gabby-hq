@@ -86,7 +86,8 @@ function corto(s: string, max = 42): string {
 type RefResuelta = { tarea: TareaRef } | { candidatos: TareaRef[] } | { error: string }
 
 function resolverRef(ref: string, ctx: ContextoInterprete, anterior: TareaRef | null): RefResuelta {
-  const r = ref.trim()
+  // Ajuste 17a: the model sometimes copies the ref with its brackets ("[t9]", "[#3]"): they are not part of it.
+  const r = ref.trim().replace(/^[\[(\s]+|[\])\s]+$/g, '')
   if (/^anterior$/i.test(r) || /^la anterior$/i.test(r)) {
     return anterior ? { tarea: anterior } : { error: 'no sé cuál es "la anterior"' }
   }
@@ -311,8 +312,17 @@ function frase(a: AccionResuelta, today: string, conTarea: boolean): string {
     case 'conversar': return `Pensarlo contigo: «${corto(a.texto, 60)}»`
     case 'documentos': return `Buscar en el archivero «${corto(a.texto, 60)}»`
     case 'proyecto': {
-      const n = a.pasos?.length ?? 0
-      return `Proyecto «${corto(a.nombre, 50)}»${a.empresa_ref ? ` · ${a.empresa_ref.name.trim()}` : ''}${a.salida ? ` · sale ${formatVenceEs(a.salida)}` : ''}${n > 0 ? ` · ${n} ${n === 1 ? 'paso' : 'pasos'}` : ''}`
+      // Ajuste 17a: el plan muestra el proyecto ENTERO antes de crearlo — qué es terminado, las fechas
+      // y cada paso — para que ella vea si algo no lo dijo así, y lo que falta definir.
+      const rango = (d?: string, h?: string) => (d && h ? (d === h ? formatVenceEs(d) : `${formatVenceEs(d)} → ${formatVenceEs(h)}`) : d || h ? formatVenceEs((d ?? h)!) : null)
+      const lineas = [`Proyecto «${corto(a.nombre, 50)}»${a.empresa_ref ? ` · ${a.empresa_ref.name.trim()}` : ''}`]
+      if (a.terminado) lineas.push(`     Terminado = ${corto(a.terminado, 140)}`)
+      const prod = rango(a.produccion_desde, a.produccion_hasta)
+      const pru = rango(a.pruebas_desde, a.pruebas_hasta)
+      const fechas = [prod ? `Producción ${prod}` : null, pru ? `Pruebas ${pru}` : null, a.salida ? `Sale ${formatVenceEs(a.salida)}` : null].filter(Boolean)
+      if (fechas.length > 0) lineas.push(`     ${fechas.join(' · ')}`)
+      for (const p of a.pasos ?? []) lineas.push(`     ▫️ ${corto(p.titulo, 70)}${p.fecha ? ` · ${formatVenceEs(p.fecha)}` : ''}${p.minutos ? ` · ${p.minutos >= 60 ? `${Math.round((p.minutos / 60) * 10) / 10} h` : `${p.minutos} min`}` : ''}`)
+      return lineas.join('\n')
     }
     case 'proyectos': return 'Mostrar tus proyectos'
     case 'documento_nota': return `Archivar el dato «${corto(a.texto, 60)}»`
@@ -564,7 +574,12 @@ export function lineaCorreccion(a: AccionResuelta, semana: boolean, alarma: Extr
 export function necesitaConfirmacion(acciones: AccionResuelta[]): boolean {
   const reales = acciones.filter((a) => a.tipo !== 'desconocido')
   // Fase 6: a decision over several mails at once ("archiva los de marketing") is shown first.
-  return reales.length >= 2 || reales.some((a) => a.tipo === 'cancelar' || (a.tipo === 'correo' && (a.correos?.length ?? 0) >= 2))
+  // Ajuste 17a: un proyecto (crea varias tareas) y una "tarea nueva" que en realidad ya existe (la cambiaría)
+  // SIEMPRE se muestran antes de hacerse, aunque vengan solos.
+  return (
+    reales.length >= 2 ||
+    reales.some((a) => a.tipo === 'cancelar' || a.tipo === 'proyecto' || (a.tipo === 'crear' && !!a.existente) || (a.tipo === 'correo' && (a.correos?.length ?? 0) >= 2))
+  )
 }
 
 /**

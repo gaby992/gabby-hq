@@ -573,6 +573,16 @@ ok('¿qué cerré ayer? → pregunta libre', parse('¿qué cerré ayer?').kind =
   ok('16f: se reconoce "recordatorio del día" (tarea con fecha, sin Calendar)', pideRecordatorioDelDia(m) && pideRecordatorioDelDia('pagar el seguro el 20, recuérdamelo ese día') && pideRecordatorioDelDia('renovar dominio el 3 con recordatorio') && !pideRecordatorioDelDia('comprar pañales el viernes'))
 }
 
+// ── Ajuste 17a: refs con corchetes, proyectos y duplicados siempre se muestran antes ──
+{
+  const { necesitaConfirmacion, renderPlan } = await import('@/lib/asistente/plan')
+  const proy = { tipo: 'proyecto', nombre: 'Web de DATAVIA', terminado: 'la web publicada', salida: '2026-11-21', pasos: [{ titulo: 'Escribir los textos', fecha: '2026-11-14', minutos: 120 }, { titulo: 'Publicar' }] }
+  ok('17a: un proyecto solo también pide confirmación', necesitaConfirmacion([proy]))
+  ok('17a: una "tarea nueva" que ya existe pide confirmación; una nueva de verdad no', necesitaConfirmacion([{ tipo: 'crear', titulo: 'Compra de orangután', existente: { id: '1', text: 'Compra de orangután', motivo: 'parecida' } }]) && !necesitaConfirmacion([{ tipo: 'crear', titulo: 'Llamar a Juan' }]))
+  const plan = renderPlan([proy])
+  ok('17a: el plan muestra el proyecto entero (terminado, salida y cada paso)', plan.includes('Terminado = la web publicada') && plan.includes('Escribir los textos') && plan.includes('2 h') && plan.includes('Publicar') && /Sale/.test(plan), plan)
+}
+
 if (fallos > 0) {
   console.error(`\n${fallos} prueba(s) fallaron`)
   process.exit(1)

@@ -308,6 +308,9 @@ export function systemPrompt(today: string, cfg: AsistenteConfig = { nombre_pers
       'NO es conversar cuando la orden es clara ("mañana llamar a Juan", "listo 3", "alarma a las 5"): eso sigue siendo su acción. Y si ella responde "sí", "dale", "déjalo así" a una propuesta tuya ' +
       'de la CONVERSACIÓN RECIENTE, NO es conversar: crea las tareas que propusiste, cada una con su fecha y, si la propuesta decía cuánto tarda, con "minutos"',
     '- {"tipo":"crear","titulo":"…",("empresa":"…"),("prioridad":"urgente|normal|cuando"),("fecha":"YYYY-MM-DD"),("hora":"HH:MM"),("importante":true),("minutos":90),("proyecto":"…")}  → tarea nueva. ' +
+      'El título es SOLO lo que hay que hacer: nunca le agregues "(bloque …)", la empresa ni la fecha. ' +
+      'Si habla de una tarea que YA está en la lista o en la CONVERSACIÓN RECIENTE ("eso", "la compra", "lo de orangután") para corregirla o moverla, es cambiar/posponer con su ref, NUNCA crear otra con el mismo nombre. ' +
+      'Si el mensaje nuevo NO nombra una tarea reciente, NO la toques ni la copies: un mensaje sobre otro tema no cambia la tarea anterior. ' +
       '"proyecto" SOLO si dijo que es de un proyecto de PROYECTOS ACTIVOS ("para el proyecto del curso: …"): su nombre exacto. ' +
       'Si dice la urgencia en CUALQUIER parte ("normal, datavia, comprar X", "… urgente"), va en "prioridad" y NUNCA en el título; la empresa va en "empresa" y NUNCA en el título. ' +
       '"recordatorio del día", "recuérdamelo ese día", "con recordatorio" SIN hora → es solo la tarea con su fecha (ese día le sale en la lista): NO pongas "calendar" ni crees una alarma. Calendar y alarmas son SOLO para lo que tiene una hora puntual. ' +
@@ -319,7 +322,9 @@ export function systemPrompt(today: string, cfg: AsistenteConfig = { nombre_pers
       'terminado = qué es la versión mínima terminada, en sus palabras. salida = la fecha final ("sale el 21", "para el 30", "lo entrego el viernes"). ' +
       'TODOS los pasos del proyecto van DENTRO de "pasos" (cada uno con su fecha y sus minutos si los dijo): NO los repitas como acciones crear aparte. ' +
       'Si el proyecto ya está en PROYECTOS ACTIVOS, usa su nombre EXACTO y manda solo lo que cambia o los pasos nuevos ("el proyecto de CPT sale el 30", "agrégale al proyecto del curso el paso grabar el video"). ' +
-      'NUNCA inventes fechas ni pasos que ella no dijo: lo que falte, el bot se lo pide',
+      'REGLA DURA: NUNCA inventes nada del proyecto. "terminado" solo si ella dijo qué es terminado (con sus palabras, no las tuyas). Fechas solo las que dijo. ' +
+      '"pasos" solo los que ella ENUMERÓ; si no dio pasos, manda "pasos":[] (JAMÁS rellenes con pasos genéricos como "Empezar desarrollo", "Pruebas finales" o "Lanzamiento"). ' +
+      'Si dice "en el bloque del fin de semana" sin fecha, NO es una fecha ni va en ningún título: déjalo sin fecha. Lo que falte, el bot se lo pide',
     '- {"tipo":"proyectos"}  → "¿cómo van mis proyectos?", "muéstrame los proyectos", "qué proyectos tengo", "¿cuándo sale lo del curso?"',
     '- {"tipo":"calendar","ref":REF,("hora":"HH:MM"),("todo_el_dia":true)}  → "pon en calendar la de TOTT", "agrega al calendario el 3", "la anterior al calendar": crear el evento de una tarea que YA EXISTE en la lista (ref obligatorio)',
     '- {"tipo":"evento","titulo":"…","fecha":"YYYY-MM-DD",("hora":"HH:MM"),("duracion_min":60),("nota":"…"),("repetir":{"cada":"dia|semana|mes",("dias":["LU","MA","MI","JU","VI","SA","DO"]),("hasta":"YYYY-MM-DD"),("veces":8)})}  → ' +

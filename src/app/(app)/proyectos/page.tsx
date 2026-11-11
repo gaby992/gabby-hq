@@ -181,9 +181,12 @@ export default function ProyectosPage() {
   }
 
   async function borrar(p: ProyectoConPasos) {
-    if (!window.confirm(`¿Borrar el proyecto «${p.nombre}»? Sus pasos se quedan como tareas en el tablero.`)) return
+    if (!window.confirm(`¿Borrar el proyecto «${p.nombre}»?`)) return
+    const sinHacer = p.pasos.filter((x) => !x.done).length
+    // Aceptar = se borran también; Cancelar = se quedan como tareas sueltas en el tablero.
+    const conPasos = sinHacer > 0 && window.confirm(`Tiene ${sinHacer} ${sinHacer === 1 ? 'paso sin hacer' : 'pasos sin hacer'}. ¿Los borro también?\n\nAceptar = borrarlos · Cancelar = dejarlos como tareas en el tablero`)
     setError(null)
-    const res = await fetch(`/api/proyectos?id=${encodeURIComponent(p.id)}`, { method: 'DELETE' })
+    const res = await fetch(`/api/proyectos?id=${encodeURIComponent(p.id)}${conPasos ? '&pasos=1' : ''}`, { method: 'DELETE' })
     if (!res.ok) setError((await res.json().catch(() => null))?.error ?? `HTTP ${res.status}`)
     await cargar()
   }
