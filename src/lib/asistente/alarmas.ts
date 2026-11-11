@@ -14,7 +14,7 @@ import { daysSince } from '@/lib/dates'
 import { HORIZONTES, HORIZONTE_EMOJI, HORIZONTE_LABELS, compararEnColumna, horizonteDe, type Horizonte } from '@/lib/horizonte'
 import { addDays, cancunDayBounds, cancunHm, cancunYmd, daysBetween, formatCortoEs, formatDiaLargoEs, formatHoraEs } from './cancun'
 import { SIMBOLO, bucketFor, type Bucket } from './simbolos'
-import { allowedChatIds, escapeHtml, sendTelegram } from './telegram'
+import { allowedChatIds, chelseaChatId, escapeHtml, sendTelegram } from './telegram'
 import { cargarConfig } from './config'
 import { seccionCorreosDiaria } from '@/lib/correo/listas'
 import { guardarAlarma, type AlarmaItem, type AlarmaTipo } from './registro-listas'
@@ -238,7 +238,8 @@ function renderGrupo(g: Grupo, today: string, opts: { notas: boolean; header?: b
  */
 async function seccionCorreos(desde: number, items: AlarmaItem[]): Promise<string> {
   try {
-    return await seccionCorreosDiaria(desde, items)
+    // Fase 18: lo de Chelsea va a su canal cuando existe.
+    return await seccionCorreosDiaria(desde, items, new Date(), { sinChelsea: chelseaChatId() !== null })
   } catch (err) {
     console.error(`[alarma] sección de correos: ${errorMessage(err)}`)
     return '📧 Correos: no se pudieron consultar ahora'
@@ -332,7 +333,7 @@ function pieTotales(tasks: Task[], semana: number, despues: number): string {
 
 export async function buildManana(today: string = cancunYmd()): Promise<Mensaje> {
   // Fase 9c-C: the same rows feed the paragraph and the list, so they never disagree.
-  const [panorama, cfg] = await Promise.all([cargarPanorama(today), cargarConfig()])
+  const [panorama, cfg] = await Promise.all([cargarPanorama(today, { sinChelsea: chelseaChatId() !== null }), cargarConfig()])
   const { tasks, companies, notas } = panorama
   const items: AlarmaItem[] = []
   const link = `<a href="${appUrl()}/hoy">abrir GabbyHQ</a>`
@@ -391,7 +392,7 @@ async function enviarBotonesVencimientos(chatId: number, docs: DocumentoVence[] 
 }
 
 export async function buildTarde(today: string = cancunYmd()): Promise<Mensaje> {
-  const [panorama, done, cfg] = await Promise.all([cargarPanorama(today), loadDoneToday(today), cargarConfig()])
+  const [panorama, done, cfg] = await Promise.all([cargarPanorama(today, { sinChelsea: chelseaChatId() !== null }), loadDoneToday(today), cargarConfig()])
   const { tasks, companies } = panorama
   const items: AlarmaItem[] = []
 

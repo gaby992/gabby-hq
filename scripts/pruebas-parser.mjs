@@ -554,7 +554,10 @@ ok('¿qué cerré ayer? → pregunta libre', parse('¿qué cerré ayer?').kind =
   const correo = (o) => ({ id: 'x', cuenta_id: 'c', de_nombre: 'Andrew', de_email: 'andrew@tottatl.com', asunto: 'Menu <final>', resumen: '', recibido_en: '2026-11-09T15:00:00Z', urgencia: 'media', tipo: null, estado: 'nuevo', alertado: false, gmail_thread_id: null, vip: false, respondido_en: null, cuenta: 'IM Chelsea', ...o })
   const r = armarResumenChelsea({ nuevos: [correo({ urgencia: 'alta' })], paraChelsea: [correo({ estado: 'para_chelsea', asunto: 'Contrato' })], tareas: [{ text: 'Pagar Amex', due_date: '2026-11-09' }, { text: 'Llamar a Muse', due_date: null }] }, '2026-11-11')
   ok('18: el resumen trae las tres secciones, escapa el HTML y marca lo vencido',
-    /Le pasaste y no ha contestado \(1\)/.test(r.texto) && /sin decidir \(1\)/.test(r.texto) && /Tareas de Chelsea \(2\)/.test(r.texto) && r.texto.includes('Menu &lt;final&gt;') && /🔺 Pagar Amex · vencida/.test(r.texto) && /hace 2 días/.test(r.texto), r.texto)
+    /Le pasaste y no ha contestado \(1\)/.test(r.texto) && /que piden algo \(1\)/.test(r.texto) && /Tareas de Chelsea \(2\)/.test(r.texto) && r.texto.includes('Menu &lt;final&gt;') && /🔺 Pagar Amex · vencida/.test(r.texto) && /hace 2 días/.test(r.texto), r.texto)
+  const mezcla = armarResumenChelsea({ nuevos: [correo({ tipo: 'necesita_respuesta', asunto: 'PTHO pre-quals' }), correo({ asunto: 'Your Verizon bill' }), correo({ asunto: 'Newsletter' }), correo({ asunto: 'De un VIP', vip: true })], paraChelsea: [], tareas: [] }, '2026-11-11')
+  ok('18a: el resumen lista solo lo que pide algo y cuenta el ruido en una línea',
+    /que piden algo \(2\)/.test(mezcla.texto) && mezcla.texto.includes('PTHO pre-quals') && mezcla.texto.includes('De un VIP') && !mezcla.texto.includes('Verizon') && /Y 2 avisos y boletines sin decidir/.test(mezcla.texto) && mezcla.correos === 2, mezcla.texto)
   ok('18: sin nada pendiente lo dice', /Nada pendiente de Chelsea/.test(armarResumenChelsea({ nuevos: [], paraChelsea: [], tareas: [] }, '2026-11-11').texto))
 }
 

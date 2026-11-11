@@ -6,23 +6,16 @@
 // El resumen NO guarda números de lista ("listo 3"): esos son de la lista
 // de Gabita en su chat. Aquí se decide con los botones de cada alerta.
 
-import type { Company, CuentaCorreo } from '@/types'
+import type { CuentaCorreo } from '@/types'
+import { esCuentaDeChelsea, esEmpresaDeChelsea } from './de-chelsea'
 import { cargarCuentas } from '@/lib/correo/cuentas'
-import { correosPendientes, quienCorto, type CorreoLite } from '@/lib/correo/pendientes'
+import { correosPendientes, grupoDe, quienCorto, type CorreoLite } from '@/lib/correo/pendientes'
 import { mensajeError } from '@/lib/errores'
 import { cancunYmd, formatCortoEs, formatDiaLargoEs } from './cancun'
 import { cargarPanorama } from './narracion'
 import { chelseaChatId, escapeHtml, sendTelegram } from './telegram'
 
-/** Is this account Chelsea's? By its owner, or by its name ("IM Chelsea"). */
-export function esCuentaDeChelsea(c: Pick<CuentaCorreo, 'nombre' | 'duena'>): boolean {
-  return /chelsea/i.test(`${c.duena ?? ''} ${c.nombre ?? ''}`)
-}
-
-/** Is this company Chelsea's ("Chelsea", "Chelsea Personal")? */
-export function esEmpresaDeChelsea(c: Pick<Company, 'name'>): boolean {
-  return /chelsea/i.test(c.name)
-}
+export { esCuentaDeChelsea, esEmpresaDeChelsea }
 
 function hace(iso: string | null, hoy: string): string {
   if (!iso) return ''
@@ -53,7 +46,12 @@ export function armarResumenChelsea(
 ): ResumenChelsea {
   const partes: string[] = [`📋 <b>Chelsea · ${formatDiaLargoEs(hoy)}</b>`]
   if (d.paraChelsea.length > 0) partes.push([`📨 <b>Le pasaste y no ha contestado (${d.paraChelsea.length})</b>`, ...lineasCorreo(d.paraChelsea, hoy)].join('\n'))
-  if (d.nuevos.length > 0) partes.push([`📧 <b>Correos suyos sin decidir (${d.nuevos.length})</b>`, ...lineasCorreo(d.nuevos, hoy)].join('\n'))
+  // Ajuste 18a: solo lo que pide algo (urgente, o alguien espera respuesta). Facturas, boletines y avisos
+  // se cuentan en una línea: están en GabbyHQ → Correos, no hace falta leerlos uno por uno aquí.
+  const importan = d.nuevos.filter((c) => grupoDe(c) !== 'resto' || c.vip)
+  const ruido = d.nuevos.length - importan.length
+  if (importan.length > 0) partes.push([`📧 <b>Correos suyos que piden algo (${importan.length})</b>`, ...lineasCorreo(importan, hoy)].join('\n'))
+  if (ruido > 0) partes.push(`📭 Y ${ruido} ${ruido === 1 ? 'aviso o boletín' : 'avisos y boletines'} sin decidir (GabbyHQ → Correos).`)
   if (d.tareas.length > 0) {
     const lineas = d.tareas.slice(0, MAX_LINEAS).map((t) => {
       const vencida = !!t.due_date && t.due_date < hoy
@@ -63,7 +61,7 @@ export function armarResumenChelsea(
     partes.push([`✅ <b>Tareas de Chelsea (${d.tareas.length})</b>`, ...lineas].join('\n'))
   }
   if (partes.length === 1) partes.push('Nada pendiente de Chelsea hoy 🎉')
-  return { texto: partes.join('\n\n'), correos: d.nuevos.length, paraChelsea: d.paraChelsea.length, tareas: d.tareas.length }
+  return { texto: partes.join('\n\n'), correos: importan.length, paraChelsea: d.paraChelsea.length, tareas: d.tareas.length }
 }
 
 export async function construirResumenChelsea(hoy: string = cancunYmd()): Promise<ResumenChelsea> {

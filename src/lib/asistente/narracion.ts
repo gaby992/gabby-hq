@@ -20,6 +20,7 @@
 // `reply` as everything else and must read the same in Telegram and in
 // the web chat.
 
+import { esCuentaDeChelsea, esEmpresaDeChelsea } from './de-chelsea'
 import { createServerClient } from '@/lib/supabase-server'
 import type { Company, NotaEmpresa, Task } from '@/types'
 import { isChelseaName } from '@/lib/chelsea'
@@ -76,7 +77,7 @@ export function panoramaDe(tasks: TareaN[], companies: Company[], notas: NotaEmp
   return { today, tasks, companies, notas, correos, cuentas, chelseaId, col }
 }
 
-export async function cargarPanorama(today: string = cancunYmd()): Promise<Panorama> {
+export async function cargarPanorama(today: string = cancunYmd(), opts: { sinChelsea?: boolean } = {}): Promise<Panorama> {
   const db = createServerClient()
   const [tasksRes, companiesRes, notasRes, correos, cuentas] = await Promise.all([
     db.from('tasks').select('*, company:companies(name, color)').eq('done', false).order('created_at', { ascending: true }),
@@ -91,11 +92,21 @@ export async function cargarPanorama(today: string = cancunYmd()): Promise<Panor
   if (tasksRes.error) throw new Error(`Supabase tasks: ${tasksRes.error.message}`)
   if (companiesRes.error) throw new Error(`Supabase companies: ${companiesRes.error.message}`)
   if (notasRes.error) console.error(`[narracion] notas_empresa: ${notasRes.error.message}`)
+  // Fase 18: con el canal de Chelsea encendido, SUS tareas y SUS correos no entran en el día de Gabby
+  // (van a su canal). Se quitan aquí, antes de contar, para que el resumen y la lista nunca discrepen.
+  let tareas = (tasksRes.data as TareaN[]) ?? []
+  let correosDelDia = correos
+  if (opts.sinChelsea) {
+    const empresas = new Set(((companiesRes.data as Company[]) ?? []).filter(esEmpresaDeChelsea).map((c) => c.id))
+    const suyas = new Set(cuentas.filter(esCuentaDeChelsea).map((c) => c.id))
+    tareas = tareas.filter((t) => !t.company_id || !empresas.has(t.company_id))
+    correosDelDia = correos.filter((c) => !suyas.has(c.cuenta_id))
+  }
   return panoramaDe(
-    (tasksRes.data as TareaN[]) ?? [],
+    tareas,
     (companiesRes.data as Company[]) ?? [],
     (notasRes.data as NotaEmpresa[]) ?? [],
-    correos,
+    correosDelDia,
     cuentas.map((c) => ({ id: c.id, nombre: c.nombre, company_id: c.conexion?.company_id ?? null })),
     today
   )

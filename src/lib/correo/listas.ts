@@ -11,6 +11,7 @@
 // like "listo 3". The "correos" command sends the WHOLE pending list of one
 // account grouped by urgency and records it (tipo 'correos').
 
+import { esCuentaDeChelsea } from '@/lib/asistente/de-chelsea'
 import { CORREO_URGENCIA_EMOJI, type CuentaCorreo, type IdiomaCorreo } from '@/types'
 import { textos } from './idioma'
 import { TELEGRAM_MAX, editMessageText, escapeHtml, sendTelegram } from '@/lib/asistente/telegram'
@@ -73,8 +74,12 @@ function porCuenta<T extends { cuenta_id: string; cuenta: string }>(rows: T[]): 
  * MAX_EN_LISTA_DIARIA each, then the VIPs answered in the last 48 h.
  * Returns the HTML (one line "Sin correos pendientes" when there is none).
  */
-export async function seccionCorreosDiaria(desde: number, items: AlarmaItem[], now: Date = new Date()): Promise<string> {
-  const [pendientes, respondidos, cuentas] = await Promise.all([correosPendientes({ dias: 7 }), correosRespondidosVip(), cargarCuentasSinFallar()])
+export async function seccionCorreosDiaria(desde: number, items: AlarmaItem[], now: Date = new Date(), opts: { sinChelsea?: boolean } = {}): Promise<string> {
+  const [todos, respondidosTodos, cuentas] = await Promise.all([correosPendientes({ dias: 7 }), correosRespondidosVip(), cargarCuentasSinFallar()])
+  // Fase 18: with Chelsea's channel on, her accounts are listed there, not in Gabby's day.
+  const fuera = new Set(opts.sinChelsea ? cuentas.filter(esCuentaDeChelsea).map((c) => c.id) : [])
+  const pendientes = todos.filter((c) => !fuera.has(c.cuenta_id))
+  const respondidos = respondidosTodos.filter((c) => !fuera.has(c.cuenta_id))
   if (pendientes.length === 0 && respondidos.length === 0) return '📧 Sin correos pendientes'
   const duena = (cuentaId: string) => cuentas.find((c) => c.id === cuentaId)?.duena ?? null
   const idiomaDe = (cuentaId: string): IdiomaCorreo => cuentas.find((c) => c.id === cuentaId)?.idioma ?? 'es'
