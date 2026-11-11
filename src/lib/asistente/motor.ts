@@ -1019,16 +1019,14 @@ async function handleLibre(chatId: number, text: string, parsed: Parsed, prefix:
   if (a.tipo === 'crear') {
     const t = tareaParsedDe(a)
     // Ajuste 16e: lo que ella YA dijo no se le vuelve a preguntar. Si el modelo soltó la urgencia
-    // ("normal, datavia, comprar X"), se toma del mensaje; y "recordatorio del día" es un evento
-    // de todo el día en Calendar, sin preguntar la hora.
+    // ("normal, datavia, comprar X"), se toma del mensaje.
     if (!t.priority) {
       t.priority = prioridadDicha(text)
       if (t.priority === 'urgente') t.importante = true
     }
-    if (t.due_date && !t.due_time && pideRecordatorioDelDia(text)) {
-      t.calendar = true
-      t.todo_el_dia = true
-    }
+    // Ajuste 16f: "recordatorio del día" NO es Calendar. Es una tarea con fecha: ese día sale en su
+    // lista de la mañana. Calendar es solo para lo que tiene una HORA puntual (su regla de los tres cajones).
+    if (!t.due_time && pideRecordatorioDelDia(text)) t.calendar = false
     // "Compra de orangután - Datavia": la empresa ya va en su campo, no en el título.
     if (t.company_name) {
       const sin = t.text.replace(new RegExp(`\\s*[-–—·,(]\\s*${t.company_name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\)?\\s*$`, 'i'), '').trim()

@@ -273,7 +273,7 @@ export function prioridadDicha(text: string): Priority | null {
   return 'normal'
 }
 
-/** Ajuste 16e: "recordatorio del día", "recuérdamelo ese día", "con recordatorio" → an all-day reminder in Calendar. */
+/** Ajuste 16f: "recordatorio del día", "recuérdamelo ese día", "con recordatorio" — a dated task, NOT a Calendar event (Calendar is for things with an hour). */
 export function pideRecordatorioDelDia(text: string): boolean {
   return /\brecordatorio\s+(?:de[l]?\s+|ese\s+|para\s+ese\s+)?dia\b|\brecuerdamel[oa]\s+ese\s+dia\b|\bcon\s+(?:un\s+)?recordatorio\b|\bavisame\s+ese\s+dia\b/.test(sinAcentos(text))
 }

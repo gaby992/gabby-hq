@@ -570,7 +570,7 @@ ok('¿qué cerré ayer? → pregunta libre', parse('¿qué cerré ayer?').kind =
   ok('16e: "normal" al principio con comas es la urgencia', prioridadDicha(m) === 'normal')
   ok('16e: urgente al final, cuando pueda, prioridad alta', prioridadDicha('llamar a Juan, urgente') === 'urgente' && prioridadDicha('ordenar el drive cuando pueda') === 'cuando' && prioridadDicha('prioridad alta: pagar la luz') === 'urgente')
   ok('16e: sin urgencia dicha → null (y "anormal"/"normalmente" no cuentan)', prioridadDicha('comprar pañales mañana') === null && prioridadDicha('revisar lo anormal del reporte') === null && prioridadDicha('normalmente lo hago el lunes') === null)
-  ok('16e: "recordatorio del día" pide el evento de todo el día', pideRecordatorioDelDia(m) && pideRecordatorioDelDia('pagar el seguro el 20, recuérdamelo ese día') && pideRecordatorioDelDia('renovar dominio el 3 con recordatorio') && !pideRecordatorioDelDia('comprar pañales el viernes'))
+  ok('16f: se reconoce "recordatorio del día" (tarea con fecha, sin Calendar)', pideRecordatorioDelDia(m) && pideRecordatorioDelDia('pagar el seguro el 20, recuérdamelo ese día') && pideRecordatorioDelDia('renovar dominio el 3 con recordatorio') && !pideRecordatorioDelDia('comprar pañales el viernes'))
 }
 
 if (fallos > 0) {
