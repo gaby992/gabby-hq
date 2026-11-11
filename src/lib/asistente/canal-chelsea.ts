@@ -9,26 +9,41 @@
 import type { CuentaCorreo } from '@/types'
 import { esCuentaDeChelsea, esEmpresaDeChelsea } from './de-chelsea'
 import { cargarCuentas } from '@/lib/correo/cuentas'
-import { correosPendientes, grupoDe, quienCorto, type CorreoLite } from '@/lib/correo/pendientes'
+import { correosPendientes, pideAlgo, quienCorto, type CorreoLite } from '@/lib/correo/pendientes'
 import { mensajeError } from '@/lib/errores'
-import { cancunYmd, formatCortoEs, formatDiaLargoEs } from './cancun'
+import { cancunYmd } from './cancun'
 import { cargarPanorama } from './narracion'
 import { chelseaChatId, escapeHtml, sendTelegram } from './telegram'
 
 export { esCuentaDeChelsea, esEmpresaDeChelsea }
 
+/** Ajuste 18b: el canal de Chelsea va en INGLÉS (es lo que Gabby le copia y le pega a ella). */
+const T = {
+  dia: (ymd: string) => new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'long', month: 'short', day: 'numeric' }).format(new Date(`${ymd}T12:00:00Z`)),
+  corta: (ymd: string) => new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric' }).format(new Date(`${ymd}T12:00:00Z`)),
+  hace: (dias: number) => (dias <= 0 ? 'today' : dias === 1 ? 'yesterday' : `${dias} days ago`),
+  sinAsunto: '(no subject)',
+  masCorreos: (n: number) => `(+${n} more in GabbyHQ → Correos)`,
+  masTareas: (n: number) => `(+${n} more on the board)`,
+  pasados: (n: number) => `Passed to Chelsea, no reply yet (${n})`,
+  importan: (n: number) => `Emails that need something (${n})`,
+  ruido: (n: number) => `Plus ${n} ${n === 1 ? 'notification or newsletter' : 'notifications and newsletters'} still undecided (GabbyHQ → Correos).`,
+  tareas: (n: number) => `Chelsea's tasks (${n})`,
+  vencida: 'overdue ',
+  nada: 'Nothing pending for Chelsea today 🎉',
+}
+
 function hace(iso: string | null, hoy: string): string {
   if (!iso) return ''
   const dia = cancunYmd(new Date(iso))
-  const dias = Math.round((Date.parse(hoy) - Date.parse(dia)) / 86_400_000)
-  return dias <= 0 ? 'hoy' : dias === 1 ? 'ayer' : `hace ${dias} días`
+  return T.hace(Math.round((Date.parse(hoy) - Date.parse(dia)) / 86_400_000))
 }
 
 const MAX_LINEAS = 12
 
 function lineasCorreo(correos: CorreoLite[], hoy: string): string[] {
-  const out = correos.slice(0, MAX_LINEAS).map((c) => `• ${c.urgencia === 'alta' ? '🔺 ' : ''}<b>${escapeHtml(quienCorto(c))}</b> — ${escapeHtml(c.asunto ?? '(sin asunto)')} · ${hace(c.recibido_en, hoy)}`)
-  if (correos.length > MAX_LINEAS) out.push(`(+${correos.length - MAX_LINEAS} más en GabbyHQ → Correos)`)
+  const out = correos.slice(0, MAX_LINEAS).map((c) => `• ${c.urgencia === 'alta' ? '🔺 ' : ''}<b>${escapeHtml(quienCorto(c))}</b> — ${escapeHtml(c.asunto ?? T.sinAsunto)} · ${hace(c.recibido_en, hoy)}`)
+  if (correos.length > MAX_LINEAS) out.push(T.masCorreos(correos.length - MAX_LINEAS))
   return out
 }
 
@@ -44,23 +59,23 @@ export function armarResumenChelsea(
   d: { nuevos: CorreoLite[]; paraChelsea: CorreoLite[]; tareas: { text: string; due_date: string | null }[] },
   hoy: string
 ): ResumenChelsea {
-  const partes: string[] = [`📋 <b>Chelsea · ${formatDiaLargoEs(hoy)}</b>`]
-  if (d.paraChelsea.length > 0) partes.push([`📨 <b>Le pasaste y no ha contestado (${d.paraChelsea.length})</b>`, ...lineasCorreo(d.paraChelsea, hoy)].join('\n'))
-  // Ajuste 18a: solo lo que pide algo (urgente, o alguien espera respuesta). Facturas, boletines y avisos
+  const partes: string[] = [`📋 <b>Chelsea · ${T.dia(hoy)}</b>`]
+  if (d.paraChelsea.length > 0) partes.push([`📨 <b>${T.pasados(d.paraChelsea.length)}</b>`, ...lineasCorreo(d.paraChelsea, hoy)].join('\n'))
+  // Ajuste 18a: solo lo que pide algo (urgente, VIP, o alguien espera respuesta). Facturas, boletines y avisos
   // se cuentan en una línea: están en GabbyHQ → Correos, no hace falta leerlos uno por uno aquí.
-  const importan = d.nuevos.filter((c) => grupoDe(c) !== 'resto' || c.vip)
+  const importan = d.nuevos.filter(pideAlgo)
   const ruido = d.nuevos.length - importan.length
-  if (importan.length > 0) partes.push([`📧 <b>Correos suyos que piden algo (${importan.length})</b>`, ...lineasCorreo(importan, hoy)].join('\n'))
-  if (ruido > 0) partes.push(`📭 Y ${ruido} ${ruido === 1 ? 'aviso o boletín' : 'avisos y boletines'} sin decidir (GabbyHQ → Correos).`)
+  if (importan.length > 0) partes.push([`📧 <b>${T.importan(importan.length)}</b>`, ...lineasCorreo(importan, hoy)].join('\n'))
+  if (ruido > 0) partes.push(`📭 ${T.ruido(ruido)}`)
   if (d.tareas.length > 0) {
     const lineas = d.tareas.slice(0, MAX_LINEAS).map((t) => {
       const vencida = !!t.due_date && t.due_date < hoy
-      return `• ${vencida ? '🔺 ' : ''}${escapeHtml(t.text)}${t.due_date ? ` · ${vencida ? 'vencida ' : ''}${formatCortoEs(t.due_date)}` : ''}`
+      return `• ${vencida ? '🔺 ' : ''}${escapeHtml(t.text)}${t.due_date ? ` · ${vencida ? T.vencida : ''}${T.corta(t.due_date)}` : ''}`
     })
-    if (d.tareas.length > MAX_LINEAS) lineas.push(`(+${d.tareas.length - MAX_LINEAS} más en el tablero)`)
-    partes.push([`✅ <b>Tareas de Chelsea (${d.tareas.length})</b>`, ...lineas].join('\n'))
+    if (d.tareas.length > MAX_LINEAS) lineas.push(T.masTareas(d.tareas.length - MAX_LINEAS))
+    partes.push([`✅ <b>${T.tareas(d.tareas.length)}</b>`, ...lineas].join('\n'))
   }
-  if (partes.length === 1) partes.push('Nada pendiente de Chelsea hoy 🎉')
+  if (partes.length === 1) partes.push(T.nada)
   return { texto: partes.join('\n\n'), correos: importan.length, paraChelsea: d.paraChelsea.length, tareas: d.tareas.length }
 }
 
@@ -86,7 +101,7 @@ export async function enviarResumenChelsea(opts: { test?: boolean } = {}): Promi
   if (chat === null) return null
   try {
     const r = await construirResumenChelsea()
-    await sendTelegram(chat, (opts.test ? '🧪 <i>prueba manual</i>\n' : '') + r.texto, { html: true, tag: 'canal-chelsea' })
+    await sendTelegram(chat, (opts.test ? '🧪 <i>test</i>\n' : '') + r.texto, { html: true, tag: 'canal-chelsea' })
     return r
   } catch (err) {
     console.error(`[canal-chelsea] resumen: ${mensajeError(err)}`)

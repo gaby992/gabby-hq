@@ -3566,3 +3566,5 @@ Lo de Chelsea sale del Telegram de Gabby y va a **su propio chat**, por un segun
 - **Cómo se elige el bot:** por el chat de destino (`telegram.ts → tokenPara`), y dentro de una petición del webhook de Chelsea, por el canal (`canal.bot`).
 
 **Versión curso:** no aplica (un solo bot).
+
+**Ajustes 18a / 18b.** Con el canal encendido, las tareas y correos de Chelsea no entran en el día de Gabby (`cargarPanorama(…, { sinChelsea })`). El resumen del canal va en **inglés** y, igual que la sección 📧 de la lista de las 8:00 de Gabby, lista solo los correos que **piden algo** (`pideAlgo`: urgente, VIP, alguien espera respuesta, o ya pasado a Chelsea); facturas, boletines y avisos se cuentan en una línea.

@@ -18,10 +18,10 @@ import { TELEGRAM_MAX, editMessageText, escapeHtml, sendTelegram } from '@/lib/a
 import { actualizarTextoAlarma, guardarAlarma, ultimaListaCon, type AlarmaItem } from '@/lib/asistente/registro-listas'
 import { mensajeError } from '@/lib/errores'
 import { cargarCuentas } from './cuentas'
-import { correosPendientes, correosRespondidosVip, grupoDe, haceCuanto, quienCorto, type CorreoLite, type GrupoCorreo } from './pendientes'
+import { correosPendientes, correosRespondidosVip, grupoDe, haceCuanto, pideAlgo, quienCorto, type CorreoLite, type GrupoCorreo } from './pendientes'
 
 /** Lines per account inside the 8:00 / 6:00 pm lists before "+N más → correos". */
-export const MAX_EN_LISTA_DIARIA = 5
+export const MAX_EN_LISTA_DIARIA = 8
 /** Lines in the "correos" list before "+N más → /correo" (Telegram splits at 4000 chars anyway). */
 export const MAX_EN_LISTA_CORREOS = 40
 
@@ -90,13 +90,24 @@ export async function seccionCorreosDiaria(desde: number, items: AlarmaItem[], n
   const primero = desde + 1
   for (const [cuentaId, g] of Array.from(grupos.entries())) {
     const idioma = idiomaDe(cuentaId)
-    const lines = [`📧 <b>${escapeHtml(g.nombre)} (${g.rows.length})</b>`]
-    for (const c of g.rows.slice(0, MAX_EN_LISTA_DIARIA)) {
+    // Ajuste 18b: como el resumen de Chelsea — se listan (y numeran) solo los correos que piden algo;
+    // facturas, boletines y avisos se cuentan en una línea. Siguen completos en /correo y en "correos".
+    const importan = g.rows.filter(pideAlgo)
+    const ruido = g.rows.length - importan.length
+    const lines = [`📧 <b>${escapeHtml(g.nombre)} (${importan.length})</b>`]
+    for (const c of importan.slice(0, MAX_EN_LISTA_DIARIA)) {
       n += 1
       items.push({ n, correo_id: c.id })
       lines.push(lineaCorreo(n, c, now, idioma))
     }
-    if (g.rows.length > MAX_EN_LISTA_DIARIA) lines.push(`· ${textos(idioma).mas(g.rows.length - MAX_EN_LISTA_DIARIA, linkCorreo())}`)
+    if (importan.length > MAX_EN_LISTA_DIARIA) lines.push(`· ${textos(idioma).mas(importan.length - MAX_EN_LISTA_DIARIA, linkCorreo())}`)
+    if (ruido > 0) {
+      lines.push(
+        idioma === 'en'
+          ? `📭 ${importan.length > 0 ? 'Plus ' : ''}${ruido} ${ruido === 1 ? 'notification or newsletter' : 'notifications and newsletters'} still undecided (${linkCorreo()})`
+          : `📭 ${importan.length > 0 ? 'Y ' : ''}${ruido} ${ruido === 1 ? 'aviso o boletín' : 'avisos y boletines'} sin decidir (${linkCorreo()})`
+      )
+    }
     for (const r of respondidos.filter((x) => x.cuenta_id === cuentaId)) lines.push(lineaRespondido(r, duena(cuentaId), idioma))
     bloques.push(lines.join('\n'))
   }

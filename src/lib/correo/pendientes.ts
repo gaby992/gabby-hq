@@ -59,6 +59,15 @@ export function grupoDe(c: Pick<CorreoLite, 'urgencia' | 'tipo'>): GrupoCorreo {
   return 'resto'
 }
 
+/**
+ * Ajuste 18a: does this mail ASK for something — urgent, from a VIP, a person
+ * waiting for an answer, or already handed to Chelsea? The rest (bills,
+ * newsletters, notices) is counted, not listed, in the daily summaries.
+ */
+export function pideAlgo(c: Pick<CorreoLite, 'urgencia' | 'tipo'> & Partial<Pick<CorreoLite, 'vip' | 'estado'>>): boolean {
+  return grupoDe(c) !== 'resto' || c.vip === true || c.estado === 'para_chelsea'
+}
+
 const RANGO: Record<GrupoCorreo, number> = { alta: 0, respuesta: 1, resto: 2 }
 
 /** Alta first, then "someone waits", then the rest; newest first inside each. */

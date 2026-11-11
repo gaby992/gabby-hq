@@ -553,12 +553,14 @@ ok('¿qué cerré ayer? → pregunta libre', parse('¿qué cerré ayer?').kind =
   for (const [k, v] of [['TELEGRAM_BOT_TOKEN_CHELSEA', antes.t], ['CHELSEA_CHAT_ID', antes.c], ['ALLOWED_CHAT_IDS', antes.a]]) { if (v === undefined) delete process.env[k]; else process.env[k] = v }
   const correo = (o) => ({ id: 'x', cuenta_id: 'c', de_nombre: 'Andrew', de_email: 'andrew@tottatl.com', asunto: 'Menu <final>', resumen: '', recibido_en: '2026-11-09T15:00:00Z', urgencia: 'media', tipo: null, estado: 'nuevo', alertado: false, gmail_thread_id: null, vip: false, respondido_en: null, cuenta: 'IM Chelsea', ...o })
   const r = armarResumenChelsea({ nuevos: [correo({ urgencia: 'alta' })], paraChelsea: [correo({ estado: 'para_chelsea', asunto: 'Contrato' })], tareas: [{ text: 'Pagar Amex', due_date: '2026-11-09' }, { text: 'Llamar a Muse', due_date: null }] }, '2026-11-11')
-  ok('18: el resumen trae las tres secciones, escapa el HTML y marca lo vencido',
-    /Le pasaste y no ha contestado \(1\)/.test(r.texto) && /que piden algo \(1\)/.test(r.texto) && /Tareas de Chelsea \(2\)/.test(r.texto) && r.texto.includes('Menu &lt;final&gt;') && /🔺 Pagar Amex · vencida/.test(r.texto) && /hace 2 días/.test(r.texto), r.texto)
+  ok('18b: el resumen de Chelsea va en inglés, con sus tres secciones, HTML escapado y lo vencido marcado',
+    /Passed to Chelsea, no reply yet \(1\)/.test(r.texto) && /Emails that need something \(1\)/.test(r.texto) && /Chelsea's tasks \(2\)/.test(r.texto) && r.texto.includes('Menu &lt;final&gt;') && /🔺 Pagar Amex · overdue Nov 9/.test(r.texto) && /2 days ago/.test(r.texto) && /Chelsea · Wednesday, Nov 11/.test(r.texto), r.texto)
   const mezcla = armarResumenChelsea({ nuevos: [correo({ tipo: 'necesita_respuesta', asunto: 'PTHO pre-quals' }), correo({ asunto: 'Your Verizon bill' }), correo({ asunto: 'Newsletter' }), correo({ asunto: 'De un VIP', vip: true })], paraChelsea: [], tareas: [] }, '2026-11-11')
   ok('18a: el resumen lista solo lo que pide algo y cuenta el ruido en una línea',
-    /que piden algo \(2\)/.test(mezcla.texto) && mezcla.texto.includes('PTHO pre-quals') && mezcla.texto.includes('De un VIP') && !mezcla.texto.includes('Verizon') && /Y 2 avisos y boletines sin decidir/.test(mezcla.texto) && mezcla.correos === 2, mezcla.texto)
-  ok('18: sin nada pendiente lo dice', /Nada pendiente de Chelsea/.test(armarResumenChelsea({ nuevos: [], paraChelsea: [], tareas: [] }, '2026-11-11').texto))
+    /need something \(2\)/.test(mezcla.texto) && mezcla.texto.includes('PTHO pre-quals') && mezcla.texto.includes('De un VIP') && !mezcla.texto.includes('Verizon') && /Plus 2 notifications and newsletters still undecided/.test(mezcla.texto) && mezcla.correos === 2, mezcla.texto)
+  const { pideAlgo } = await import('@/lib/correo/pendientes')
+  ok('18a: pide algo = urgente, VIP, alguien espera o ya pasado a Chelsea', pideAlgo({ urgencia: 'alta', tipo: null }) && pideAlgo({ urgencia: 'media', tipo: 'necesita_respuesta' }) && pideAlgo({ urgencia: 'baja', tipo: null, vip: true }) && pideAlgo({ urgencia: 'baja', tipo: null, estado: 'para_chelsea' }) && !pideAlgo({ urgencia: 'media', tipo: null, vip: false, estado: 'nuevo' }))
+  ok('18: sin nada pendiente lo dice', /Nothing pending for Chelsea/.test(armarResumenChelsea({ nuevos: [], paraChelsea: [], tareas: [] }, '2026-11-11').texto))
 }
 
 if (fallos > 0) {
