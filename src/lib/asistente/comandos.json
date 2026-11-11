@@ -396,6 +396,21 @@
           "que": "cada proyecto con su fecha de salida, avance y lo que falta definir"
         }
       ]
+    },
+    {
+      "id": "canal-chelsea",
+      "emoji": "📨",
+      "titulo": "El canal de Chelsea",
+      "lineas": [
+        {
+          "ejemplo": "/canal",
+          "que": "conecta el bot de Chelsea a GabbyHQ y te manda ahí su resumen de prueba"
+        },
+        {
+          "ejemplo": "/resumen (en el chat de Chelsea)",
+          "que": "lo que Chelsea tiene abierto ahora: correos que le pasaste, correos sin decidir y sus tareas"
+        }
+      ]
     }
   ]
 }

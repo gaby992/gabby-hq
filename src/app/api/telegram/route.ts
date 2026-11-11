@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { isAllowedChat } from '@/lib/asistente/telegram'
+import { esChatChelsea, isAllowedChat } from '@/lib/asistente/telegram'
+import { enviarResumenChelsea } from '@/lib/asistente/canal-chelsea'
 import { conCanal } from '@/lib/asistente/canal'
 import { ERROR_GENERICO, handleCallback, handleDocumento, handleText, handleVoice, reply, type TelegramAudio } from '@/lib/asistente/motor'
 import { fotoMasGrande } from '@/lib/documentos/entrada'
@@ -16,6 +17,23 @@ export const maxDuration = 60
 export async function POST(request: Request) {
   const update = await request.json().catch(() => null)
   if (!update) return NextResponse.json({ ok: true })
+
+  // Fase 18: the second bot (Chelsea's channel) posts here with ?bot=chelsea, so the answers go out through it.
+  const esChelsea = new URL(request.url).searchParams.get('bot') === 'chelsea'
+  if (esChelsea) {
+    const chat: number | undefined = update.callback_query?.message?.chat?.id ?? update.message?.chat?.id
+    // That bot only works in its one chat: anything else is ignored without a word.
+    if (!esChatChelsea(chat)) return NextResponse.json({ ok: true })
+    if (update.callback_query) {
+      await conCanal({ tipo: 'telegram', bot: 'chelsea' }, () => handleCallback(update.callback_query))
+    } else if (typeof update.message?.text === 'string' && /^\/(start|help|ayuda|resumen|chelsea)\b/i.test(update.message.text.trim())) {
+      // Text is not Gabita here (her numbered lists live in Gabby's own chat): only the summary on demand.
+      await conCanal({ tipo: 'telegram', bot: 'chelsea' }, async () => {
+        await enviarResumenChelsea()
+      })
+    }
+    return NextResponse.json({ ok: true })
+  }
 
   if (update.callback_query) {
     await conCanal({ tipo: 'telegram' }, () => handleCallback(update.callback_query))

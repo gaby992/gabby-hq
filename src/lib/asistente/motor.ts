@@ -6,6 +6,8 @@
 // Telegram → /api/telegram → handleText / handleVoice / handleCallback.
 // Web      → /api/asistente/chat → handleText / procesarBoton.
 
+import { conectarCanalChelsea } from '@/lib/asistente/telegram'
+import { enviarResumenChelsea } from '@/lib/asistente/canal-chelsea'
 import { createServerClient } from '@/lib/supabase-server'
 import {
   TelegramError,
@@ -469,6 +471,13 @@ async function correccionDeFicha(chatId: number, text: string, prefix: string | 
 export async function handleText(chatId: number, text: string, prefix: string | null) {
   if (!text) {
     await reply(chatId, joinLines(prefix, 'No entendí nada. ¿Me lo repites?'))
+    return
+  }
+  // Fase 18: "/canal" conecta el bot de Chelsea a GabbyHQ, le manda su resumen y dice cómo quedó.
+  if (/^\/canal\b/i.test(text.trim())) {
+    const e = await conectarCanalChelsea(appUrl())
+    if (e.ok) await enviarResumenChelsea({ test: true })
+    await reply(chatId, `${e.ok ? '✅' : '⚠️'} ${e.detalle}${e.ok ? '\nTe acabo de mandar ahí el resumen de Chelsea como prueba.' : ''}`)
     return
   }
   // Fase 16: "/modelo" prueba de verdad el modelo de conversación y dice cuál contesta.

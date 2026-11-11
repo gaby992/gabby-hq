@@ -26,6 +26,8 @@ export interface MensajeWeb {
 
 export interface Canal {
   tipo: TipoCanal
+  /** Fase 18: the update came through the SECOND bot (Chelsea's channel), so answers use its token. */
+  bot?: 'chelsea'
   /** Web only: every message the engine "sent" during this request. */
   mensajes?: MensajeWeb[]
   /** Telegram only: attach the persistent menu to the next reply without buttons. */

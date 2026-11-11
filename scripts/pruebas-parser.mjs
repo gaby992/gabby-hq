@@ -531,6 +531,33 @@ ok('¿qué cerré ayer? → pregunta libre', parse('¿qué cerré ayer?').kind =
     && acc[1].tipo === 'desconocido' && acc[2].tipo === 'proyectos', JSON.stringify(acc))
 }
 
+// ── Fase 18: el canal de Chelsea ──
+{
+  const { armarResumenChelsea, esCuentaDeChelsea, esEmpresaDeChelsea } = await import('@/lib/asistente/canal-chelsea')
+  const { chatsDeAlerta } = await import('@/lib/correo/alertas')
+  const { chelseaChatId, isAllowedChat } = await import('@/lib/asistente/telegram')
+  ok('18: reconoce la cuenta y la empresa de Chelsea', esCuentaDeChelsea({ nombre: 'IM Chelsea', duena: null }) && esCuentaDeChelsea({ nombre: 'IM', duena: 'Chelsea' }) && !esCuentaDeChelsea({ nombre: 'IM Gabby', duena: 'Gabby' }) && esEmpresaDeChelsea({ name: 'Chelsea Personal' }) && !esEmpresaDeChelsea({ name: 'PD' }))
+  const antes = { t: process.env.TELEGRAM_BOT_TOKEN_CHELSEA, c: process.env.CHELSEA_CHAT_ID, a: process.env.ALLOWED_CHAT_IDS }
+  process.env.ALLOWED_CHAT_IDS = '111'
+  delete process.env.TELEGRAM_BOT_TOKEN_CHELSEA
+  delete process.env.CHELSEA_CHAT_ID
+  ok('18: sin las variables no hay canal y todo sigue yendo al chat de Gabby', chelseaChatId() === null && chatsDeAlerta({ chat_id_alertas: null, nombre: 'IM Chelsea', duena: 'Chelsea' })[0] === 111)
+  process.env.CHELSEA_CHAT_ID = '-5220092476'
+  ok('18: el chat sin el token tampoco activa el canal', chelseaChatId() === null)
+  process.env.TELEGRAM_BOT_TOKEN_CHELSEA = 'x'
+  ok('18: con el canal, las alertas de Chelsea van a su chat y las demás no', chelseaChatId() === -5220092476
+    && chatsDeAlerta({ chat_id_alertas: null, nombre: 'IM Chelsea', duena: 'Chelsea' })[0] === -5220092476
+    && chatsDeAlerta({ chat_id_alertas: null, nombre: 'IM Gabby', duena: 'Gabby' })[0] === 111
+    && chatsDeAlerta({ chat_id_alertas: 999, nombre: 'IM Chelsea', duena: 'Chelsea' })[0] === 999)
+  ok('18: los botones del canal de Chelsea están permitidos; un chat ajeno no', isAllowedChat(-5220092476) && isAllowedChat(111) && !isAllowedChat(222))
+  for (const [k, v] of [['TELEGRAM_BOT_TOKEN_CHELSEA', antes.t], ['CHELSEA_CHAT_ID', antes.c], ['ALLOWED_CHAT_IDS', antes.a]]) { if (v === undefined) delete process.env[k]; else process.env[k] = v }
+  const correo = (o) => ({ id: 'x', cuenta_id: 'c', de_nombre: 'Andrew', de_email: 'andrew@tottatl.com', asunto: 'Menu <final>', resumen: '', recibido_en: '2026-11-09T15:00:00Z', urgencia: 'media', tipo: null, estado: 'nuevo', alertado: false, gmail_thread_id: null, vip: false, respondido_en: null, cuenta: 'IM Chelsea', ...o })
+  const r = armarResumenChelsea({ nuevos: [correo({ urgencia: 'alta' })], paraChelsea: [correo({ estado: 'para_chelsea', asunto: 'Contrato' })], tareas: [{ text: 'Pagar Amex', due_date: '2026-11-09' }, { text: 'Llamar a Muse', due_date: null }] }, '2026-11-11')
+  ok('18: el resumen trae las tres secciones, escapa el HTML y marca lo vencido',
+    /Le pasaste y no ha contestado \(1\)/.test(r.texto) && /sin decidir \(1\)/.test(r.texto) && /Tareas de Chelsea \(2\)/.test(r.texto) && r.texto.includes('Menu &lt;final&gt;') && /🔺 Pagar Amex · vencida/.test(r.texto) && /hace 2 días/.test(r.texto), r.texto)
+  ok('18: sin nada pendiente lo dice', /Nada pendiente de Chelsea/.test(armarResumenChelsea({ nuevos: [], paraChelsea: [], tareas: [] }, '2026-11-11').texto))
+}
+
 if (fallos > 0) {
   console.error(`\n${fallos} prueba(s) fallaron`)
   process.exit(1)

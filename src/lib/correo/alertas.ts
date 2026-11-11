@@ -9,7 +9,7 @@
 //   razón
 //   [Para Chelsea] [Lo hago yo]
 //   [Tarea]        [Archivar]
-//   [📋 Correos de IM Chelsea]
+//   [📋 Correos de IM Chelsea]      (not in Chelsea's channel, fase 18: numbered lists are Gabita's)
 //
 // Ajuste 6-6: "✅ Chelsea respondió" keeps [Lo hago yo] [Tarea] for 48 h
 // (answered is not closed for Gabby); "📨 Para Chelsea" keeps [Lo hago yo].
@@ -17,7 +17,7 @@
 import { createServerClient } from '@/lib/supabase-server'
 import { CORREO_URGENCIA_EMOJI, type Correo, type CorreoAccion, type CuentaCorreo, type IdiomaCorreo } from '@/types'
 import { textos } from './idioma'
-import { allowedChatIds, editMessageText, escapeHtml, inlineKeyboard, sendTelegram, type InlineButton } from '@/lib/asistente/telegram'
+import { allowedChatIds, chelseaChatId, editMessageText, escapeHtml, inlineKeyboard, sendTelegram, type InlineButton } from '@/lib/asistente/telegram'
 import { mensajeError } from '@/lib/errores'
 import { remitenteCorto } from './decisiones'
 import { HORAS_RESPONDIDO_VISIBLE } from './pendientes'
@@ -73,8 +73,11 @@ export function textoAlerta(c: Correo, cuenta: Pick<CuentaCorreo, 'nombre'> & { 
 }
 
 /** The chat an account alerts: its own, or the bot's allowed chats. */
-export function chatsDeAlerta(cuenta: Pick<CuentaCorreo, 'chat_id_alertas'>): number[] {
+export function chatsDeAlerta(cuenta: Pick<CuentaCorreo, 'chat_id_alertas'> & Partial<Pick<CuentaCorreo, 'nombre' | 'duena'>>): number[] {
   if (cuenta.chat_id_alertas) return [Number(cuenta.chat_id_alertas)]
+  // Fase 18: lo de Chelsea va a SU canal cuando está configurado, no al Telegram de Gabby.
+  const chelsea = chelseaChatId()
+  if (chelsea !== null && /chelsea/i.test(`${cuenta.duena ?? ''} ${cuenta.nombre ?? ''}`)) return [chelsea]
   return allowedChatIds()
 }
 
@@ -89,7 +92,7 @@ export async function enviarAlerta(c: Correo, cuenta: CuentaCorreo): Promise<boo
   let primero: { chat: number; message: number } | null = null
   for (const chat of chats) {
     try {
-      const id = await sendTelegram(chat, texto, { html: true, tag: 'correo-alerta', replyMarkup: botonesCorreo(c.id, cuenta) })
+      const id = await sendTelegram(chat, texto, { html: true, tag: 'correo-alerta', replyMarkup: botonesCorreo(c.id, chat === chelseaChatId() ? null : cuenta) })
       if (!primero && id) primero = { chat, message: id }
     } catch (err) {
       console.error(`[correo] alerta a ${chat} falló: ${mensajeError(err)}`)

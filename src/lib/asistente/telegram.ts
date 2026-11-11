@@ -8,10 +8,32 @@
 // there. The persistent menu (menu.ts) rides on the first plain reply when
 // the request asked for it.
 
-import { esWeb, registrarMensajeWeb, tomarMenuPendiente } from './canal'
+import { canalActual, esWeb, registrarMensajeWeb, tomarMenuPendiente } from './canal'
 import { tecladoMenu } from './menu'
 
-const API = () => `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`
+// Fase 18: el canal de Chelsea. Un SEGUNDO bot (TELEGRAM_BOT_TOKEN_CHELSEA) que habla en UN
+// chat (CHELSEA_CHAT_ID): ahí van las alertas de sus correos y su resumen del día, para que
+// lo de Chelsea no se mezcle con el Telegram de Gabby. Todo lo que va a ese chat sale por ese
+// bot, y lo que llega por su webhook (?bot=chelsea) se contesta por él.
+
+/** The chat of Chelsea's channel, or null when the channel is not configured (both variables are needed). */
+export function chelseaChatId(): number | null {
+  const n = Number((process.env.CHELSEA_CHAT_ID ?? '').trim())
+  return process.env.TELEGRAM_BOT_TOKEN_CHELSEA && Number.isFinite(n) && n !== 0 ? n : null
+}
+
+export function esChatChelsea(chatId: number | null | undefined): boolean {
+  const c = chelseaChatId()
+  return c !== null && chatId === c
+}
+
+/** Which bot speaks: Chelsea's for her chat or inside her webhook's request; the main one otherwise. */
+function tokenPara(chatId?: number | null): string | undefined {
+  if (chelseaChatId() !== null && (esChatChelsea(chatId) || (chatId == null && canalActual()?.bot === 'chelsea'))) return process.env.TELEGRAM_BOT_TOKEN_CHELSEA
+  return process.env.TELEGRAM_BOT_TOKEN
+}
+
+const API = (chatId?: number | null) => `https://api.telegram.org/bot${tokenPara(chatId)}`
 
 /** Telegram's hard limit is 4096; we split a bit earlier to leave room. */
 export const TELEGRAM_MAX = 4000
@@ -27,7 +49,8 @@ export function allowedChatIds(): number[] {
 }
 
 export function isAllowedChat(chatId: number): boolean {
-  return allowedChatIds().includes(chatId)
+  // Fase 18: the buttons of Chelsea's channel are hers to tap too. (The alarms still go only to ALLOWED_CHAT_IDS.)
+  return allowedChatIds().includes(chatId) || esChatChelsea(chatId)
 }
 
 /**
@@ -99,7 +122,8 @@ export async function sendTelegram(chatId: number, text: string, opts: SendOptio
   const parts = splitMessage(text)
   const tag = opts.tag ?? 'telegram'
   // Fase 9c-A: the menu rides on the first reply of the request that has no buttons of its own.
-  const replyMarkup = opts.replyMarkup ?? (tomarMenuPendiente() ? tecladoMenu() : undefined)
+  // (Fase 18: the menu is Gabita's — it never rides on a message of Chelsea's channel.)
+  const replyMarkup = opts.replyMarkup ?? (!esChatChelsea(chatId) && tomarMenuPendiente() ? tecladoMenu() : undefined)
   let messageId: number | null = null
   for (let i = 0; i < parts.length; i++) {
     const body: Record<string, unknown> = {
@@ -112,7 +136,7 @@ export async function sendTelegram(chatId: number, text: string, opts: SendOptio
 
     let res: Response
     try {
-      res = await fetch(`${API()}/sendMessage`, {
+      res = await fetch(`${API(chatId)}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -160,7 +184,7 @@ export async function sendPhoto(chatId: number, png: Uint8Array, opts: { caption
   if (opts.replyMarkup) form.append('reply_markup', JSON.stringify(opts.replyMarkup))
   let res: Response
   try {
-    res = await fetch(`${API()}/sendPhoto`, { method: 'POST', body: form })
+    res = await fetch(`${API(chatId)}/sendPhoto`, { method: 'POST', body: form })
   } catch (err) {
     console.error(`[${tag}] telegram sendPhoto error chat=${chatId}: ${String(err)}`)
     throw err
@@ -220,7 +244,7 @@ export async function answerCallbackQuery(callbackQueryId: string, text?: string
 export async function removeInlineKeyboard(chatId: number, messageId: number): Promise<void> {
   if (esWeb()) return
   try {
-    await fetch(`${API()}/editMessageReplyMarkup`, {
+    await fetch(`${API(chatId)}/editMessageReplyMarkup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } }),
@@ -237,7 +261,7 @@ export async function editMessageText(chatId: number, messageId: number, text: s
     const body: Record<string, unknown> = { chat_id: chatId, message_id: messageId, text: text.slice(0, TELEGRAM_MAX), disable_web_page_preview: true }
     if (opts.html) body.parse_mode = 'HTML'
     body.reply_markup = opts.replyMarkup ?? { inline_keyboard: [] }
-    const res = await fetch(`${API()}/editMessageText`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    const res = await fetch(`${API(chatId)}/editMessageText`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     if (!res.ok) console.error(`[bot] editMessageText: ${res.status} ${await res.text().catch(() => '')}`)
     return res.ok
   } catch (err) {
@@ -256,7 +280,52 @@ export async function downloadTelegramFile(fileId: string): Promise<{ bytes: Arr
     throw new TelegramError(meta.status, json?.description ?? 'getFile sin file_path')
   }
   const path: string = json.result.file_path
-  const file = await fetch(`https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${path}`)
+  const file = await fetch(`https://api.telegram.org/file/bot${tokenPara()}/${path}`)
   if (!file.ok) throw new TelegramError(file.status, `descarga de ${path}`)
   return { bytes: await file.arrayBuffer(), path }
+}
+
+// ── Fase 18: conectar el canal de Chelsea ────────────────────────────────
+
+export interface EstadoCanalChelsea {
+  configurado: boolean
+  bot?: string
+  webhook?: string
+  ok: boolean
+  detalle: string
+}
+
+/**
+ * Points Chelsea's bot at this deployment (so its buttons arrive here) and
+ * says hello in her chat. Safe to run again. Never throws: the result says
+ * what happened, in plain words.
+ */
+export async function conectarCanalChelsea(appUrl: string): Promise<EstadoCanalChelsea> {
+  const chat = chelseaChatId()
+  if (chat === null) {
+    return { configurado: false, ok: false, detalle: 'Faltan las variables TELEGRAM_BOT_TOKEN_CHELSEA y CHELSEA_CHAT_ID en Vercel (y hacer Redeploy después de ponerlas).' }
+  }
+  const base = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN_CHELSEA}`
+  const webhook = `${appUrl.replace(/\/$/, '')}/api/telegram?bot=chelsea`
+  try {
+    const me = await (await fetch(`${base}/getMe`)).json().catch(() => null)
+    if (!me?.ok) return { configurado: true, ok: false, detalle: `Telegram no reconoce el token del bot de Chelsea (${me?.description ?? 'sin respuesta'}). Revisa TELEGRAM_BOT_TOKEN_CHELSEA.` }
+    const bot = `@${me.result?.username ?? '?'}`
+    const wh = await (
+      await fetch(`${base}/setWebhook`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: webhook, allowed_updates: ['message', 'callback_query'] }) })
+    ).json().catch(() => null)
+    if (!wh?.ok) return { configurado: true, bot, ok: false, detalle: `No pude apuntar ${bot} a GabbyHQ: ${wh?.description ?? 'sin respuesta'}.` }
+    const hola = await fetch(`${base}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chat, text: '✅ Canal de Chelsea conectado a GabbyHQ. Aquí llegan las alertas de sus correos y su resumen del día.' }),
+    })
+    if (!hola.ok) {
+      const d = await hola.json().catch(() => null)
+      return { configurado: true, bot, webhook, ok: false, detalle: `${bot} quedó apuntando a GabbyHQ, pero no pudo escribir en el chat ${chat}: ${d?.description ?? hola.status}. Revisa CHELSEA_CHAT_ID y que el bot esté en ese grupo.` }
+    }
+    return { configurado: true, bot, webhook, ok: true, detalle: `${bot} conectado: ya escribió en el chat de Chelsea y sus botones llegan a GabbyHQ.` }
+  } catch (err) {
+    return { configurado: true, ok: false, detalle: `No pude hablar con Telegram: ${err instanceof Error ? err.message : String(err)}` }
+  }
 }

@@ -3553,3 +3553,16 @@ Un **proyecto** es lo que tiene un final: "asistente del curso", "agente de CPT"
 SQL: `sql/2026-11-asistente-fase17-proyectos.sql`.
 
 **Versión curso:** proyectos con las 4 definiciones y pasos; sin bloques ni calendario.
+
+
+## 18. El canal de Chelsea (fase 18)
+
+Lo de Chelsea sale del Telegram de Gabby y va a **su propio chat**, por un segundo bot. Gabby es quien lo lee: es su vista aparte para saber qué tiene Chelsea y recordárselo. Sustituye a los flujos de n8n (`im_triaje_*`, `im_chelsea_digest`).
+
+- **Variables (Vercel):** `TELEGRAM_BOT_TOKEN_CHELSEA` (el bot) y `CHELSEA_CHAT_ID` (el chat). Sin las dos, el canal no existe y todo sigue como antes.
+- **Conectar:** `/canal` en el chat de Gabita. Apunta el bot de Chelsea a `/api/telegram?bot=chelsea`, saluda en su chat y manda el resumen de prueba. Dice en claro qué falló si algo falla.
+- **Qué llega ahí:** las alertas de los correos de las cuentas de Chelsea (con sus botones Para Chelsea · Lo hago yo · Tarea · Archivar, que funcionan ahí mismo) y, cada mañana con el cron de las 8:00, el resumen: lo que le pasó y no ha contestado, sus correos sin decidir y las tareas de la empresa Chelsea. `/resumen` en ese chat lo manda al momento.
+- **Qué NO hace ese chat:** no es Gabita. El texto libre se ignora; las listas numeradas ("listo 3") viven en el chat de Gabby.
+- **Cómo se elige el bot:** por el chat de destino (`telegram.ts → tokenPara`), y dentro de una petición del webhook de Chelsea, por el canal (`canal.bot`).
+
+**Versión curso:** no aplica (un solo bot).

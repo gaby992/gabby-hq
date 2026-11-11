@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { isCronAuthorized } from '@/lib/asistente/cron-auth'
 import { ejecutarAlarma } from '@/lib/asistente/alarmas'
+import { enviarResumenChelsea } from '@/lib/asistente/canal-chelsea'
 import { mensajeError } from '@/lib/errores'
 
 // Vercel Cron → GET here (see vercel.json). Also callable by hand with
@@ -18,6 +19,10 @@ export async function GET(request: Request) {
   }
   const test = new URL(request.url).searchParams.get('test') === '1'
   console.log(`[alarma-manana] inicio (${test ? 'manual' : 'cron'})`)
+
+  // Fase 18: el resumen de Chelsea va a su canal (si está configurado). Nunca tumba la alarma de Gabby.
+  const chelsea = await enviarResumenChelsea({ test })
+  if (chelsea) console.log(`[alarma-manana] canal de Chelsea: ${chelsea.correos} correos · ${chelsea.paraChelsea} para Chelsea · ${chelsea.tareas} tareas`)
 
   try {
     const r = await ejecutarAlarma('manana', { test })
