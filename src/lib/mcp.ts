@@ -17,6 +17,7 @@ import { cargarPanorama } from '@/lib/asistente/narracion'
 import { cargarEmpresas, guardarTarea } from '@/lib/asistente/tareas'
 import { elegirProyecto, guardarProyecto, listarProyectos, textoProyecto, type ProyectoEstado } from '@/lib/proyectos'
 import { mensajeError } from '@/lib/errores'
+import { agregarACalendar, sincronizarTarea, type ResultadoSync } from '@/lib/google/sync'
 import type { Cambios } from '@/lib/parser'
 import type { Priority } from '@/types'
 import { sinHtml } from '@/lib/asistente/html'
@@ -190,7 +191,7 @@ export const HERRAMIENTAS: Herramienta[] = [
   },
   {
     name: 'crear_tareas',
-    description: 'Crea una o varias tareas en GabbyHQ. Cada una debe llevar empresa y, si Gabby dio una, su fecha exacta. Una tarea con fecha aparece ese día en su lista y en su bloque: NO hace falta crear una alarma ni un evento. No inventes fechas, tiempos ni tareas que ella no dijo.',
+    description: 'Crea una o varias tareas en GabbyHQ. Cada una debe llevar empresa y, si Gabby dio una, su fecha exacta. Una tarea con fecha aparece ese día en su lista y en su bloque. Si además lleva HORA puntual, se crea sola su cita en Google Calendar (sin hora, nunca va al calendario). No inventes fechas, tiempos ni tareas que ella no dijo.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -204,7 +205,7 @@ export const HERRAMIENTAS: Herramienta[] = [
               titulo: { type: 'string', description: 'Solo lo que hay que hacer. Sin la empresa, la fecha ni el bloque.' },
               empresa: { type: 'string', description: 'IM, PD, DATAVIA, Personal, Chelsea…' },
               fecha: FECHA,
-              hora: { type: 'string', description: 'HH:MM en 24 h, solo si tiene hora puntual.' },
+              hora: { type: 'string', description: 'HH:MM en 24 h, solo si tiene hora puntual (entonces también va a Google Calendar).' },
               prioridad: { type: 'string', enum: ['urgente', 'normal', 'cuando'] },
               importante: { type: 'boolean', description: 'true = con estrella ★ (lo primero del día).' },
               minutos: { type: 'number', description: 'Cuánto tarda, solo si ella lo dijo.' },
@@ -253,7 +254,10 @@ export const HERRAMIENTAS: Herramienta[] = [
           if (nombreProyecto && !proy) out.push(`⚠️ no encontré el proyecto «${nombreProyecto}»: la tarea quedó suelta`)
           if (proy) extra.proyecto_id = proy.id
           if (Object.keys(extra).length > 0) await db.from('tasks').update(extra).eq('id', g.id)
-          out.push(`✅ [${g.id}] ${titulo}${e ? ` · ${e.name}` : ' · SIN EMPRESA'}${fecha ? ` · ${fecha}${hhmm(t.hora) ? ` ${hhmm(t.hora)}` : ''}` : ' · sin fecha'}${t.importante === true ? ' · ★' : ''}${proy ? ` · proyecto «${proy.nombre}»` : ''}`)
+          // Connector rule: an hour means Calendar too (no hour → task only, never an event).
+          const cal = fecha && hhmm(t.hora) ? await agregarACalendar(g.id).catch((err): ResultadoSync => ({ estado: 'error', aviso: `⚠️ sin evento en Calendar: ${mensajeError(err)}` })) : null
+          out.push(`✅ [${g.id}] ${titulo}${e ? ` · ${e.name}` : ' · SIN EMPRESA'}${fecha ? ` · ${fecha}${hhmm(t.hora) ? ` ${hhmm(t.hora)}` : ''}` : ' · sin fecha'}${t.importante === true ? ' · ★' : ''}${proy ? ` · proyecto «${proy.nombre}»` : ''}${cal?.confirmacion ? ' · 📅 en Calendar' : ''}`)
+          if (cal?.aviso) out.push(`   ${cal.aviso}`)
         } catch (err) {
           out.push(`⚠️ «${titulo}» no se creó: ${mensajeError(err)}`)
         }
@@ -272,7 +276,7 @@ export const HERRAMIENTAS: Herramienta[] = [
         titulo: { type: 'string', description: 'Nombre nuevo.' },
         fecha: { ...FECHA, description: 'Fecha nueva YYYY-MM-DD.' },
         quitar_fecha: { type: 'boolean' },
-        hora: { type: 'string', description: 'HH:MM en 24 h.' },
+        hora: { type: 'string', description: 'HH:MM en 24 h. Con hora, la tarea también queda en Google Calendar.' },
         prioridad: { type: 'string', enum: ['urgente', 'normal', 'cuando'] },
         importante: { type: 'boolean' },
         empresa: { type: 'string' },
@@ -294,7 +298,10 @@ export const HERRAMIENTAS: Herramienta[] = [
       if (a.fecha !== undefined && !fecha) throw new Error(`la fecha «${String(a.fecha)}» no es YYYY-MM-DD`)
       if (fecha) cambios.due_date = fecha
       const hora = hhmm(a.hora)
-      if (hora) cambios.due_time = hora
+      if (hora) {
+        cambios.due_time = hora
+        cambios.calendar = true // connector rule: an hour means Calendar too
+      }
       const p = prioridad(a.prioridad)
       if (p) cambios.priority = p
       if (typeof a.importante === 'boolean') cambios.importante = a.importante
@@ -317,6 +324,11 @@ export const HERRAMIENTAS: Herramienta[] = [
         const { error } = await db.from('tasks').update(directo).eq('id', t.id)
         if (error) throw new Error(error.message)
         hechos.push(`✏️ «${titulo ?? t.text}»${min ? ` · ${min} min` : ''}${directo.due_date === null ? ' · sin fecha' : ''}`)
+        // Keep an existing Calendar event in step (new title, or no date → event removed).
+        if (directo.text !== undefined || directo.due_date === null) {
+          const r = await sincronizarTarea(t.id)
+          if (r.aviso) hechos.push(r.aviso)
+        }
       }
       if (hechos.length === 0) throw new Error('no me dijiste qué cambiar')
       return hechos.join('\n')
