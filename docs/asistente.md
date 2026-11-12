@@ -3568,3 +3568,15 @@ Lo de Chelsea sale del Telegram de Gabby y va a **su propio chat**, por un segun
 **Versión curso:** no aplica (un solo bot).
 
 **Ajustes 18a / 18b.** Con el canal encendido, las tareas y correos de Chelsea no entran en el día de Gabby (`cargarPanorama(…, { sinChelsea })`). El resumen del canal va en **inglés** y, igual que la sección 📧 de la lista de las 8:00 de Gabby, lista solo los correos que **piden algo** (`pideAlgo`: urgente, VIP, alguien espera respuesta, o ya pasado a Chelsea); facturas, boletines y avisos se cuentan en una línea.
+
+## 19. GabbyHQ como conector de Claude (fase 19)
+
+Gabby le habla a Claude en cualquier chat y Claude trabaja directo en su HQ. Es un servidor MCP remoto dentro de la misma app.
+
+- **Dónde:** `POST /api/mcp/<llave>` (Streamable HTTP sin estado, JSON-RPC). La llave sale de un secreto del servidor (`MCP_SECRET`, o `API_SECRET_SEED`/`CRON_SECRET`); sin la URL completa responde 404.
+- **Cómo se conecta:** Settings → Conectar a Claude muestra la URL y los pasos (claude.ai → Configuración → Conectores → conector personalizado).
+- **Herramientas** (`src/lib/mcp.ts`): `hoy`, `listar_tareas`, `crear_tareas`, `actualizar_tarea` (mover, completar, borrar…), `listar_proyectos`, `guardar_proyecto`, `semana_por_bloques`. Usan las mismas funciones que Gabita y la web.
+- **Reglas que viajan con el conector:** toda tarea lleva empresa; lo que tiene hora va al calendario y lo demás es tarea con fecha; todo proyecto lleva sus 4 definiciones; no se inventan pasos ni fechas.
+- **Para cambiar la llave** (si el enlace se filtró): poner o cambiar `MCP_SECRET` en Vercel y volver a agregar el conector con la URL nueva.
+
+**Versión curso:** no aplica (el alumno usa su asistente dentro de la IA que ya tiene).

@@ -107,6 +107,12 @@ export default function SettingsPage() {
         <h1 className="text-lg font-semibold text-[#e8e8e8]">Settings</h1>
         <div className="flex items-center gap-1">
           <Link
+            href="/settings/claude"
+            className="px-3 py-1.5 text-sm rounded-md text-[#888888] hover:text-[#e8e8e8] hover:bg-[#2a2a2a] transition-colors"
+          >
+            Conectar a Claude →
+          </Link>
+          <Link
             href="/settings/semana"
             className="px-3 py-1.5 text-sm rounded-md text-[#888888] hover:text-[#e8e8e8] hover:bg-[#2a2a2a] transition-colors"
           >

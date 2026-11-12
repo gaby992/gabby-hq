@@ -583,6 +583,25 @@ ok('¿qué cerré ayer? → pregunta libre', parse('¿qué cerré ayer?').kind =
   ok('17a: el plan muestra el proyecto entero (terminado, salida y cada paso)', plan.includes('Terminado = la web publicada') && plan.includes('Escribir los textos') && plan.includes('2 h') && plan.includes('Publicar') && /Sale/.test(plan), plan)
 }
 
+// ── Fase 19: el conector de Claude (MCP) ──
+{
+  const { atender, llaveMcp, llaveValida, HERRAMIENTAS } = await import('@/lib/mcp')
+  process.env.API_SECRET_SEED = process.env.API_SECRET_SEED || 'secreto-de-prueba'
+  const llave = llaveMcp()
+  ok('19: la llave sale del secreto del servidor y solo ella entra', typeof llave === 'string' && llave.length === 40 && llaveValida(llave) && !llaveValida(llave.slice(0, 39) + (llave.endsWith('0') ? '1' : '0')) && !llaveValida('') && !llaveValida(undefined))
+  const ini = await atender({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'claude', version: '1' } } })
+  ok('19: initialize contesta con la versión pedida y dice que tiene herramientas', ini.result.protocolVersion === '2025-06-18' && !!ini.result.capabilities.tools && ini.result.serverInfo.name === 'gabbyhq', JSON.stringify(ini))
+  ok('19: una versión desconocida recibe la más nueva que sí habla', (await atender({ jsonrpc: '2.0', id: 2, method: 'initialize', params: { protocolVersion: '2099-01-01' } })).result.protocolVersion === '2025-06-18')
+  ok('19: las notificaciones no se contestan', (await atender({ jsonrpc: '2.0', method: 'notifications/initialized' })) === null)
+  const lista = await atender({ jsonrpc: '2.0', id: 3, method: 'tools/list' })
+  const nombres = lista.result.tools.map((t) => t.name)
+  ok('19: tools/list trae las 7 herramientas, cada una con su esquema', nombres.length === HERRAMIENTAS.length && ['hoy', 'listar_tareas', 'crear_tareas', 'actualizar_tarea', 'listar_proyectos', 'guardar_proyecto', 'semana_por_bloques'].every((n) => nombres.includes(n)) && lista.result.tools.every((t) => t.inputSchema?.type === 'object' && t.description.length > 20), nombres.join(','))
+  ok('19: las de solo lectura lo dicen', lista.result.tools.find((t) => t.name === 'hoy').annotations.readOnlyHint === true && lista.result.tools.find((t) => t.name === 'crear_tareas').annotations.readOnlyHint === false)
+  ok('19: una herramienta que no existe es error de protocolo; un método raro también', (await atender({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'nope' } })).error.code === -32602 && (await atender({ jsonrpc: '2.0', id: 5, method: 'foo/bar' })).error.code === -32601 && (await atender({ id: 6, method: 'ping' })).error.code === -32600)
+  const mala = await atender({ jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'actualizar_tarea', arguments: {} } })
+  ok('19: una herramienta que falla devuelve un resultado legible (isError), no rompe', mala.result?.isError === true && /No se pudo/.test(mala.result.content[0].text), JSON.stringify(mala))
+}
+
 if (fallos > 0) {
   console.error(`\n${fallos} prueba(s) fallaron`)
   process.exit(1)
