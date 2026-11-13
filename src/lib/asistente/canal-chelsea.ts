@@ -9,11 +9,12 @@
 import type { CuentaCorreo } from '@/types'
 import { esCuentaDeChelsea, esEmpresaDeChelsea } from './de-chelsea'
 import { cargarCuentas } from '@/lib/correo/cuentas'
-import { correosPendientes, pideAlgo, quienCorto, type CorreoLite } from '@/lib/correo/pendientes'
+import { correosPendientes, correosVipRecientes, pideAlgo, quienCorto, type CorreoLite } from '@/lib/correo/pendientes'
 import { mensajeError } from '@/lib/errores'
 import { cancunYmd } from './cancun'
 import { cargarPanorama } from './narracion'
-import { chelseaChatId, escapeHtml, sendTelegram } from './telegram'
+import { modeloChelsea, type ModeloChelsea } from './chelsea-imagen-datos'
+import { chelseaChatId, escapeHtml, sendPhoto, sendTelegram } from './telegram'
 
 export { esCuentaDeChelsea, esEmpresaDeChelsea }
 
@@ -91,14 +92,35 @@ export async function construirResumenChelsea(hoy: string = cancunYmd()): Promis
   return armarResumenChelsea({ nuevos: pendientes.filter((c) => c.estado === 'nuevo'), paraChelsea: pendientes.filter((c) => c.estado === 'para_chelsea'), tareas }, hoy)
 }
 
+/** Ajuste 18c: what the PICTURE shows — the VIP mails of Chelsea's accounts (any state, 7 days) and all her open tasks. */
+export async function construirModeloChelsea(hoy: string = cancunYmd()): Promise<ModeloChelsea> {
+  const [cuentas, panorama] = await Promise.all([cargarCuentas().catch(() => [] as CuentaCorreo[]), cargarPanorama(hoy)])
+  const vip = (await Promise.all(cuentas.filter(esCuentaDeChelsea).map((c) => correosVipRecientes({ cuentaId: c.id })))).flat()
+  const empresas = new Set(panorama.companies.filter(esEmpresaDeChelsea).map((c) => c.id))
+  const tareas = panorama.tasks.filter((t) => t.company_id && empresas.has(t.company_id)).map((t) => ({ text: t.text, due_date: t.due_date }))
+  return modeloChelsea({ vip, tareas }, hoy, (d) => cancunYmd(d))
+}
+
 /**
  * Sends the summary to Chelsea's channel. Returns null (and sends nothing)
  * when the channel is not configured. Never throws: the morning alarm of
  * Gabby must not fail because of this.
+ *
+ * Ajuste 18c: it goes as a PICTURE (VIP mails with what is left to do + all
+ * her tasks). If the picture cannot be drawn or sent, the text of before
+ * goes instead: the summary never goes missing.
  */
 export async function enviarResumenChelsea(opts: { test?: boolean } = {}): Promise<ResumenChelsea | null> {
   const chat = chelseaChatId()
   if (chat === null) return null
+  try {
+    const m = await construirModeloChelsea()
+    const { generarChelseaPng } = await import('./chelsea-imagen')
+    await sendPhoto(chat, await generarChelseaPng(m), { caption: opts.test ? 'test' : undefined, tag: 'canal-chelsea' })
+    return { texto: m.titulo, correos: m.vipPendientes, paraChelsea: m.vip.filter((f) => f.etiqueta === 'Waiting on Chelsea').length, tareas: m.tareas.length + m.tareasDeMas }
+  } catch (err) {
+    console.error(`[canal-chelsea] imagen: ${mensajeError(err)} — va el texto`)
+  }
   try {
     const r = await construirResumenChelsea()
     await sendTelegram(chat, (opts.test ? '🧪 <i>test</i>\n' : '') + r.texto, { html: true, tag: 'canal-chelsea' })

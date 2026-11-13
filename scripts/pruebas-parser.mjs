@@ -563,6 +563,19 @@ ok('¿qué cerré ayer? → pregunta libre', parse('¿qué cerré ayer?').kind =
   ok('18: sin nada pendiente lo dice', /Nothing pending for Chelsea/.test(armarResumenChelsea({ nuevos: [], paraChelsea: [], tareas: [] }, '2026-11-11').texto))
 }
 
+// ── Ajuste 18c: el resumen de Chelsea como imagen (solo VIP + todas las tareas) ──
+{
+  const { modeloChelsea, estadoVip, MAX_TAREAS, ALTO_MAX_CHELSEA } = await import('@/lib/asistente/chelsea-imagen-datos')
+  const v = (extra = {}) => ({ de_nombre: 'Helga Queen', de_email: 'helga@louisbrown.com', asunto: 'Re: Lubbock PTHO pre-quals', recibido_en: '2026-11-11T15:00:00Z', estado: 'nuevo', respondido_en: null, ...extra })
+  ok('18c: cada estado dice si falta hacer algo', estadoVip(v()).etiqueta === 'Needs action' && estadoVip(v({ estado: 'para_chelsea' })).etiqueta === 'Waiting on Chelsea' && estadoVip(v({ estado: 'archivado' })).estado === 'listo' && estadoVip(v({ respondido_en: '2026-11-12T10:00:00Z' })).etiqueta === 'Replied' && estadoVip(v({ estado: 'lo_hago_yo' })).estado === 'esperando')
+  const m = modeloChelsea({ vip: [v({ estado: 'respondido', de_nombre: 'Ya' }), v({ estado: 'para_chelsea', de_nombre: 'Medio' }), v({ de_nombre: 'Primero' })], tareas: [{ text: 'Sin fecha', due_date: null }, { text: 'PTHO hosting', due_date: '2026-09-21' }, { text: 'TOTT ad', due_date: '2026-11-27' }] }, '2026-11-13')
+  ok('18c: lo pendiente va primero, luego lo que espera, al final lo listo', m.vip.map((f) => f.quien).join() === 'Primero,Medio,Ya' && m.vipPendientes === 1 && m.vip[0].cuando === '2 days ago', JSON.stringify(m.vip))
+  ok('18c: todas las tareas, por fecha, y la vencida marcada', m.tareas.map((t) => t.texto).join() === 'PTHO hosting,TOTT ad,Sin fecha' && m.tareas[0].vencida && !m.tareas[1].vencida && m.tareasVencidas === 1 && m.titulo === 'Chelsea — Friday, Nov 13, 2026', JSON.stringify(m.tareas))
+  const vacio = modeloChelsea({ vip: [], tareas: [] }, '2026-11-13')
+  const lleno = modeloChelsea({ vip: [], tareas: Array.from({ length: 80 }, (_, i) => ({ text: `Tarea ${i} `.repeat(20), due_date: null })) }, '2026-11-13')
+  ok('18c: el alto crece con las filas y tiene tope; lo que no cabe se cuenta', vacio.alto < m.alto && lleno.alto === ALTO_MAX_CHELSEA && lleno.tareas.length === MAX_TAREAS && lleno.tareasDeMas === 50, `${vacio.alto} ${m.alto} ${lleno.alto}`)
+}
+
 // ── Ajuste 16e: lo que ya dijo no se le pregunta ──
 {
   const { prioridadDicha, pideRecordatorioDelDia } = await import('@/lib/parser')

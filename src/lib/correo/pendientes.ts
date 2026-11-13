@@ -105,6 +105,21 @@ export async function correosRespondidosVip(opts: { cuentaId?: string | null; ho
   }
 }
 
+/** Ajuste 18c: every mail of a VIP sender in the last `dias` days, WHATEVER its state (the picture says if something is left to do). */
+export async function correosVipRecientes(opts: { cuentaId?: string | null; dias?: number; max?: number } = {}): Promise<CorreoLite[]> {
+  try {
+    const desde = new Date(Date.now() - (opts.dias ?? 7) * 86_400_000).toISOString()
+    let q = createServerClient().from('correos').select(COLS).eq('vip', true).gte('recibido_en', desde).order('recibido_en', { ascending: false }).limit(opts.max ?? 60)
+    if (opts.cuentaId) q = q.eq('cuenta_id', opts.cuentaId)
+    const { data, error } = await q
+    if (error) throw error
+    return conCuenta(data as unknown as Fila[])
+  } catch (err) {
+    console.error(`[correo] correosVipRecientes: ${err instanceof Error ? err.message : String(err)}`)
+    return []
+  }
+}
+
 /** Waiting on Gabby and worth "¿qué sigue?": alta, or a person expects an answer / asked for something. */
 export async function correosQueEsperan(opts: { dias?: number; max?: number } = {}): Promise<CorreoLite[]> {
   const todos = await correosRecientes({ estados: ['nuevo'], dias: opts.dias ?? 7, max: 120 })

@@ -3580,3 +3580,13 @@ Gabby le habla a Claude en cualquier chat y Claude trabaja directo en su HQ. Es 
 - **Para cambiar la llave** (si el enlace se filtró): poner o cambiar `MCP_SECRET` en Vercel y volver a agregar el conector con la URL nueva.
 
 **Versión curso:** no aplica (el alumno usa su asistente dentro de la IA que ya tiene).
+
+### 18c · El resumen de Chelsea va como imagen
+
+El resumen de las 8:00 (y `/resumen` en su canal) ya no es texto: es una imagen blanca, en inglés, con solo dos secciones.
+
+- **VIP EMAILS**: los correos de remitentes VIP de las cuentas de Chelsea de los últimos 7 días, en cualquier estado, cada uno con su etiqueta: `Needs action` (nuevo), `Waiting on Chelsea`, `Gabby is on it`, `Now a task`, `Replied`, `Nothing to do`. Lo pendiente va primero.
+- **CHELSEA'S TASKS**: todas sus tareas abiertas, por fecha; las vencidas en rojo.
+
+No lleva facturas, boletines ni el conteo de avisos. Las alertas sueltas de correo siguen en texto con botones. Si la imagen falla, sale el texto de antes. Vista previa con sesión: `/api/asistente/chelsea.png`.
+Archivos: `chelsea-imagen-datos.ts` (modelo), `chelsea-imagen.tsx` (dibujo), `fuentes-inter.ts` (letra embebida).
