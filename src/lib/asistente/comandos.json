@@ -11,6 +11,10 @@
           "que": "la lista completa de hoy, por empresa (la misma de las 8:00)"
         },
         {
+          "ejemplo": "/resumen",
+          "que": "tu resumen como imagen: tus correos VIP (con si falta hacer algo o no) y tus tareas de hoy y vencidas, con su empresa"
+        },
+        {
           "ejemplo": "cierre",
           "que": "el cierre del día (el mismo de las 7:30 pm)"
         },
@@ -408,7 +412,7 @@
         },
         {
           "ejemplo": "/resumen (en el chat de Chelsea)",
-          "que": "lo que Chelsea tiene abierto ahora: correos que le pasaste, correos sin decidir y sus tareas"
+          "que": "el resumen de Chelsea como imagen: sus correos VIP (con si falta hacer algo o no) y todas sus tareas"
         }
       ]
     }

@@ -102,6 +102,27 @@ export async function construirModeloChelsea(hoy: string = cancunYmd()): Promise
 }
 
 /**
+ * Ajuste 18d: the same picture for Gabby, in Spanish and dark — the VIP mails of HER accounts
+ * (not Chelsea's) and her tasks of today plus what is overdue, each with its company.
+ */
+export async function construirModeloGabby(hoy: string = cancunYmd()): Promise<ModeloChelsea> {
+  const [cuentas, panorama] = await Promise.all([cargarCuentas().catch(() => [] as CuentaCorreo[]), cargarPanorama(hoy, { sinChelsea: true })])
+  const vip = (await Promise.all(cuentas.filter((c) => !esCuentaDeChelsea(c)).map((c) => correosVipRecientes({ cuentaId: c.id })))).flat()
+  const nombre = new Map(panorama.companies.map((c) => [c.id, c.name]))
+  const tareas = panorama.tasks
+    .filter((t) => !!t.due_date && t.due_date <= hoy)
+    .map((t) => ({ text: t.text, due_date: t.due_date, empresa: t.company_id ? nombre.get(t.company_id) ?? null : null }))
+  return modeloChelsea({ vip, tareas }, hoy, (d) => cancunYmd(d), { nombre: 'Gabby', idioma: 'es', tema: 'oscuro', seccionTareas: 'TUS TAREAS · HOY Y VENCIDAS' })
+}
+
+/** Sends Gabby's picture to her chat. Throws on failure: the command reports it. */
+export async function enviarResumenGabby(chatId: number): Promise<void> {
+  const m = await construirModeloGabby()
+  const { generarChelseaPng } = await import('./chelsea-imagen')
+  await sendPhoto(chatId, await generarChelseaPng(m), { tag: 'resumen-gabby' })
+}
+
+/**
  * Sends the summary to Chelsea's channel. Returns null (and sends nothing)
  * when the channel is not configured. Never throws: the morning alarm of
  * Gabby must not fail because of this.

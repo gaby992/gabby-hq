@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { isCronAuthorized } from '@/lib/asistente/cron-auth'
 import { isValidSession } from '@/lib/session'
-import { construirModeloChelsea } from '@/lib/asistente/canal-chelsea'
+import { construirModeloChelsea, construirModeloGabby } from '@/lib/asistente/canal-chelsea'
 import { generarChelseaPng } from '@/lib/asistente/chelsea-imagen'
 import { mensajeError } from '@/lib/errores'
 
@@ -16,7 +16,9 @@ export const maxDuration = 30
 export async function GET(request: Request) {
   if (!isCronAuthorized(request) && !(await isValidSession())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
-    const png = await generarChelseaPng(await construirModeloChelsea())
+    // Ajuste 18d: ?de=gabby dibuja el de Gabby.
+    const deGabby = new URL(request.url).searchParams.get('de') === 'gabby'
+    const png = await generarChelseaPng(deGabby ? await construirModeloGabby() : await construirModeloChelsea())
     return new Response(Buffer.from(png), { status: 200, headers: { 'Content-Type': 'image/png', 'Cache-Control': 'no-store', 'Content-Disposition': 'inline; filename="chelsea.png"' } })
   } catch (err) {
     const error = mensajeError(err)

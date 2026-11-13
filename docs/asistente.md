@@ -3590,3 +3590,7 @@ El resumen de las 8:00 (y `/resumen` en su canal) ya no es texto: es una imagen 
 
 No lleva facturas, boletines ni el conteo de avisos. Las alertas sueltas de correo siguen en texto con botones. Si la imagen falla, sale el texto de antes. Vista previa con sesión: `/api/asistente/chelsea.png`.
 Archivos: `chelsea-imagen-datos.ts` (modelo), `chelsea-imagen.tsx` (dibujo), `fuentes-inter.ts` (letra embebida).
+
+### 18d · El mismo resumen para Gabby
+
+`/resumen` en el chat de Gabby manda su imagen: en español y en oscuro. **CORREOS VIP** de sus cuentas (no las de Chelsea), con `Falta hacer algo`, `Lo hago yo`, `Esperando a Chelsea`, `Ya es tarea`, `Respondido` o `Nada que hacer`; y **TUS TAREAS · HOY Y VENCIDAS**, cada una con su empresa. Solo sale cuando lo pide: el mensaje de las 8:00 no cambió. Vista previa con sesión: `/api/asistente/chelsea.png?de=gabby`.

@@ -7,7 +7,7 @@
 // Web      → /api/asistente/chat → handleText / procesarBoton.
 
 import { conectarCanalChelsea } from '@/lib/asistente/telegram'
-import { enviarResumenChelsea } from '@/lib/asistente/canal-chelsea'
+import { enviarResumenChelsea, enviarResumenGabby } from '@/lib/asistente/canal-chelsea'
 import { createServerClient } from '@/lib/supabase-server'
 import {
   TelegramError,
@@ -484,6 +484,15 @@ export async function handleText(chatId: number, text: string, prefix: string | 
     const e = await conectarCanalChelsea(appUrl())
     if (e.ok) await enviarResumenChelsea({ test: true })
     await reply(chatId, `${e.ok ? '✅' : '⚠️'} ${e.detalle}${e.ok ? '\nTe acabo de mandar ahí el resumen de Chelsea como prueba.' : ''}`)
+    return
+  }
+  // Ajuste 18d: "/resumen" en el chat de Gabby — su resumen como imagen (correos VIP + tareas de hoy y vencidas).
+  if (/^\/resumen\b/i.test(text.trim())) {
+    try {
+      await enviarResumenGabby(chatId)
+    } catch (err) {
+      await reply(chatId, `⚠️ No pude armar la imagen del resumen: ${mensajeError(err)}`)
+    }
     return
   }
   // Ajuste 17a: "¿qué escuchaste?" — lo último que le llegó (sus notas de voz ya no se repiten en cada

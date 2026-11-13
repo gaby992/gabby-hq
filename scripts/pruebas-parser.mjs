@@ -576,6 +576,15 @@ ok('¿qué cerré ayer? → pregunta libre', parse('¿qué cerré ayer?').kind =
   ok('18c: el alto crece con las filas y tiene tope; lo que no cabe se cuenta', vacio.alto < m.alto && lleno.alto === ALTO_MAX_CHELSEA && lleno.tareas.length === MAX_TAREAS && lleno.tareasDeMas === 50, `${vacio.alto} ${m.alto} ${lleno.alto}`)
 }
 
+// ── Ajuste 18d: el mismo resumen para Gabby, en español y oscuro ──
+{
+  const { modeloChelsea, estadoVip } = await import('@/lib/asistente/chelsea-imagen-datos')
+  const v = (extra = {}) => ({ de_nombre: 'Julie', de_email: 'julie@pd.com', asunto: 'Numbers', recibido_en: '2026-11-12T15:00:00Z', estado: 'nuevo', respondido_en: null, ...extra })
+  const g = modeloChelsea({ vip: [v(), v({ estado: 'lo_hago_yo' }), v({ estado: 'archivado' })], tareas: [{ text: 'Terminar el cashflow', due_date: '2026-11-13', empresa: 'IM' }, { text: 'QuickBooks', due_date: '2026-11-10', empresa: 'PD' }] }, '2026-11-13', undefined, { nombre: 'Gabby', idioma: 'es', tema: 'oscuro', seccionTareas: 'TUS TAREAS · HOY Y VENCIDAS' })
+  ok('18d: el de Gabby va en español, oscuro y con la empresa en cada tarea', g.tema === 'oscuro' && /^Gabby — Viernes, 13 de noviembre de 2026$/.test(g.titulo) && g.textos.seccionVip === 'CORREOS VIP' && g.textos.notaVip === '2 piden algo' && g.vip[0].cuando === 'ayer' && g.vip[2].etiqueta === 'Nada que hacer' && g.tareas[0].empresa === 'PD' && g.tareas[0].vencida && g.textos.notaTareas === '2 abiertas · 1 vencida', JSON.stringify(g))
+  ok('18d: "lo hago yo" es pendiente de Gabby, pero no de Chelsea; el de Chelsea sigue en inglés y claro', estadoVip(v({ estado: 'lo_hago_yo' }), 'es').estado === 'pendiente' && estadoVip(v({ estado: 'lo_hago_yo' })).estado === 'esperando' && modeloChelsea({ vip: [], tareas: [] }, '2026-11-13').tema === 'claro' && modeloChelsea({ vip: [], tareas: [] }, '2026-11-13').textos.seccionTareas === "CHELSEA'S TASKS")
+}
+
 // ── Ajuste 16e: lo que ya dijo no se le pregunta ──
 {
   const { prioridadDicha, pideRecordatorioDelDia } = await import('@/lib/parser')

@@ -9,6 +9,7 @@ Es lo mismo que manda el bot con `/ayuda todo`. La guía técnica está en [asis
 ## 👀 Ver
 
 - `/hoy` — la lista completa de hoy, por empresa (la misma de las 8:00)
+- `/resumen` — tu resumen como imagen: tus correos VIP (con si falta hacer algo o no) y tus tareas de hoy y vencidas, con su empresa
 - `cierre` — el cierre del día (el mismo de las 7:30 pm)
 - `¿qué sigue?` — una tarea para ahora, tres después, tres por vencer y tus notas recientes
 - `solo urgentes` — lo mismo, sin la parte de "por vencer"
@@ -118,4 +119,4 @@ Es lo mismo que manda el bot con `/ayuda todo`. La guía técnica está en [asis
 ## 📨 El canal de Chelsea
 
 - `/canal` — conecta el bot de Chelsea a GabbyHQ y te manda ahí su resumen de prueba
-- `/resumen (en el chat de Chelsea)` — lo que Chelsea tiene abierto ahora: correos que le pasaste, correos sin decidir y sus tareas
+- `/resumen (en el chat de Chelsea)` — el resumen de Chelsea como imagen: sus correos VIP (con si falta hacer algo o no) y todas sus tareas
