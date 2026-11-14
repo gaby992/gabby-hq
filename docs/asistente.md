@@ -3613,3 +3613,8 @@ La alarma de la mañana manda, después de la foto del tablero y antes del texto
 - **4:00 pm** (antes 7:30 pm; cron `0 21 * * 1-6`): lo hecho hoy, lo que sigue pendiente y los VIP por acomodar.
 - Si el texto corto falla, sale el texto largo de antes. `/hoy`, `cierre` y `tablero` siguen igual a pedido.
 - **Tareas con hora**: el evento de Google Calendar avisa 1 hora antes y 15 minutos antes (`AVISOS_TAREA_MIN`). Aplica a lo que se cree o se cambie desde ahora.
+
+### 18h · La alerta de correo llega como ficha
+
+Cada alerta de correo (VIP o urgente) llega como imagen con el estilo del resumen: cuenta, etiquetas (VIP · tipo · urgencia), quién escribe, asunto, qué pide y por qué avisó. Clara en el canal de Chelsea, oscura en el chat de Gabby. Debajo, una línea con quién y el asunto (es lo que muestra la notificación del teléfono) y los botones de siempre. Al decidir o al responderse, se edita esa línea. Si la imagen falla, sale el texto de antes.
+Archivos: `src/lib/correo/alerta-imagen.tsx`, `fichaDeAlerta` y `pieDeAlerta` en `alertas.ts`; `editMessageText` cae a `editMessageCaption` cuando el mensaje es una foto.

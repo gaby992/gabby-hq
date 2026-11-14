@@ -605,6 +605,15 @@ ok('¿qué cerré ayer? → pregunta libre', parse('¿qué cerré ayer?').kind =
   ok('18g: una tarea con hora avisa en Calendar 1 hora antes y 15 min antes', JSON.stringify(ev.reminders.overrides.map((x) => x.minutes)) === '[60,15]', JSON.stringify(ev.reminders))
 }
 
+// ── Ajuste 18h: la alerta de correo como ficha ──
+{
+  const { fichaDeAlerta, pieDeAlerta } = await import('@/lib/correo/alertas')
+  const c = { id: 'x', de_nombre: 'Helga Queen', de_email: 'streetsmarthelga@louisbrown.com', asunto: 'Re: Lubbock PTHO <pre-quals>', resumen: 'Helga asks to remove entries who have already paid.', razon: 'alert: louisbrown.com', urgencia: 'alta', tipo: 'pedido_de_tarea', vip: true }
+  const f = fichaDeAlerta(c, { nombre: 'IM Chelsea', idioma: 'en' })
+  ok('18h: la ficha lleva cuenta, quién, asunto, qué pide y si es VIP, en el idioma de la cuenta', f.cuenta === 'IM Chelsea' && f.alta && f.vip && /Helga Queen/.test(f.quien) && f.resumen.startsWith('Helga asks') && f.urgencia.toLowerCase() === 'high' && !!f.tipo, JSON.stringify(f))
+  ok('18h: el pie nombra quién y el asunto (es lo que muestra la notificación) y escapa el HTML', /^📧 <b>Helga Queen/.test(pieDeAlerta(c, { nombre: 'IM Chelsea', idioma: 'en' })) && /&lt;pre-quals&gt;/.test(pieDeAlerta(c, { nombre: 'IM Chelsea', idioma: 'en' })))
+}
+
 // ── Ajuste 18d: el mismo resumen para Gabby, en español y oscuro ──
 {
   const { modeloChelsea, estadoVip } = await import('@/lib/asistente/chelsea-imagen-datos')

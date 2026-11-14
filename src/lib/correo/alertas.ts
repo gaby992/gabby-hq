@@ -17,7 +17,7 @@
 import { createServerClient } from '@/lib/supabase-server'
 import { CORREO_URGENCIA_EMOJI, type Correo, type CorreoAccion, type CuentaCorreo, type IdiomaCorreo } from '@/types'
 import { textos } from './idioma'
-import { allowedChatIds, chelseaChatId, editMessageText, escapeHtml, inlineKeyboard, sendTelegram, type InlineButton } from '@/lib/asistente/telegram'
+import { allowedChatIds, chelseaChatId, editMessageText, escapeHtml, inlineKeyboard, sendPhoto, sendTelegram, type InlineButton } from '@/lib/asistente/telegram'
 import { mensajeError } from '@/lib/errores'
 import { remitenteCorto } from './decisiones'
 import { HORAS_RESPONDIDO_VISIBLE } from './pendientes'
@@ -72,6 +72,21 @@ export function textoAlerta(c: Correo, cuenta: Pick<CuentaCorreo, 'nombre'> & { 
   return lines.join('\n')
 }
 
+/**
+ * Ajuste 18h: what the card (picture) of an alert shows, in the account's language.
+ * Pure, so it is tested without drawing.
+ */
+export function fichaDeAlerta(c: Correo, cuenta: Pick<CuentaCorreo, 'nombre'> & { idioma?: IdiomaCorreo }) {
+  const t = textos(cuenta.idioma)
+  const u = c.urgencia ?? 'media'
+  return { cuenta: cuenta.nombre, urgencia: t.urgencia(u), alta: u === 'alta', tipo: c.tipo ? t.tipo(c.tipo) : null, vip: c.vip === true, quien: remitenteCorto(c), asunto: c.asunto ?? t.sinAsunto, resumen: c.resumen ?? null, razon: c.razon ?? null }
+}
+
+/** The line under the card — also what the phone's notification shows, so it names who wrote and about what. */
+export function pieDeAlerta(c: Correo, cuenta: Pick<CuentaCorreo, 'nombre'> & { idioma?: IdiomaCorreo }): string {
+  return `📧 <b>${escapeHtml(remitenteCorto(c))}</b> — ${escapeHtml((c.asunto ?? textos(cuenta.idioma).sinAsunto).slice(0, 300))}`
+}
+
 /** The chat an account alerts: its own, or the bot's allowed chats. */
 export function chatsDeAlerta(cuenta: Pick<CuentaCorreo, 'chat_id_alertas'> & Partial<Pick<CuentaCorreo, 'nombre' | 'duena'>>): number[] {
   if (cuenta.chat_id_alertas) return [Number(cuenta.chat_id_alertas)]
@@ -92,7 +107,16 @@ export async function enviarAlerta(c: Correo, cuenta: CuentaCorreo): Promise<boo
   let primero: { chat: number; message: number } | null = null
   for (const chat of chats) {
     try {
-      const id = await sendTelegram(chat, texto, { html: true, tag: 'correo-alerta', replyMarkup: botonesCorreo(c.id, chat === chelseaChatId() ? null : cuenta) })
+      const replyMarkup = botonesCorreo(c.id, chat === chelseaChatId() ? null : cuenta)
+      // Ajuste 18h: the alert goes as a CARD (picture) with its buttons; if the picture cannot be drawn or sent, the text of before goes.
+      let id: number | null = null
+      try {
+        const { generarAlertaPng } = await import('./alerta-imagen')
+        id = await sendPhoto(chat, await generarAlertaPng(fichaDeAlerta(c, cuenta), chat === chelseaChatId() ? 'claro' : 'oscuro'), { caption: pieDeAlerta(c, cuenta), html: true, replyMarkup, tag: 'correo-alerta' })
+      } catch (err) {
+        console.error(`[correo] ficha de alerta: ${mensajeError(err)} — va el texto`)
+        id = await sendTelegram(chat, texto, { html: true, tag: 'correo-alerta', replyMarkup })
+      }
       if (!primero && id) primero = { chat, message: id }
     } catch (err) {
       console.error(`[correo] alerta a ${chat} falló: ${mensajeError(err)}`)

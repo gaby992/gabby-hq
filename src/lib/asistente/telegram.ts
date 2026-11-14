@@ -255,6 +255,9 @@ export async function removeInlineKeyboard(chatId: number, messageId: number): P
 }
 
 /** Rewrites a message the bot sent (fase 6: "✅ Respondido" on a mail alert). Best-effort; drops its buttons. */
+/** Telegram's limit for the caption of a photo. */
+const CAPTION_MAX = 1024
+
 export async function editMessageText(chatId: number, messageId: number, text: string, opts: { html?: boolean; replyMarkup?: unknown } = {}): Promise<boolean> {
   if (esWeb()) return false
   try {
@@ -262,8 +265,18 @@ export async function editMessageText(chatId: number, messageId: number, text: s
     if (opts.html) body.parse_mode = 'HTML'
     body.reply_markup = opts.replyMarkup ?? { inline_keyboard: [] }
     const res = await fetch(`${API(chatId)}/editMessageText`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-    if (!res.ok) console.error(`[bot] editMessageText: ${res.status} ${await res.text().catch(() => '')}`)
-    return res.ok
+    if (res.ok) return true
+    const detalle = await res.text().catch(() => '')
+    // Ajuste 18h: the alert of a mail is now a picture — a picture has no text to edit, it has a caption.
+    if (res.status === 400 && /no text in the message/i.test(detalle)) {
+      const pie: Record<string, unknown> = { chat_id: chatId, message_id: messageId, caption: text.slice(0, CAPTION_MAX), reply_markup: opts.replyMarkup ?? { inline_keyboard: [] } }
+      if (opts.html) pie.parse_mode = 'HTML'
+      const r2 = await fetch(`${API(chatId)}/editMessageCaption`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pie) })
+      if (!r2.ok) console.error(`[bot] editMessageCaption: ${r2.status} ${await r2.text().catch(() => '')}`)
+      return r2.ok
+    }
+    console.error(`[bot] editMessageText: ${res.status} ${detalle}`)
+    return false
   } catch (err) {
     console.error(`[bot] editMessageText: ${String(err)}`)
     return false
