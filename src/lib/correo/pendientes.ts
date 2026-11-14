@@ -7,7 +7,8 @@
 // inbox-IM's `im_triaje`. "Pending" = estado nuevo or para_chelsea.
 
 import { createServerClient } from '@/lib/supabase-server'
-import type { Correo, CorreoEstado, IdiomaCorreo } from '@/types'
+import type { Correo, CorreoEstado, CuentaCorreo, IdiomaCorreo } from '@/types'
+import { nivelDe } from './cuentas'
 import { textos } from './idioma'
 
 /** A mail as the lists and the interpreter see it: no body. */
@@ -106,10 +107,26 @@ export async function correosRespondidosVip(opts: { cuentaId?: string | null; ho
 }
 
 /** Ajuste 18c: every mail of a VIP sender in the last `dias` days, WHATEVER its state (the picture says if something is left to do). */
-export async function correosVipRecientes(opts: { cuentaId?: string | null; dias?: number; max?: number } = {}): Promise<CorreoLite[]> {
+export async function correosVipRecientes(opts: { cuentaId?: string | null; cuenta?: Pick<CuentaCorreo, 'id' | 'vip' | 'ruido' | 'solo_app'>; dias?: number; max?: number } = {}): Promise<CorreoLite[]> {
   try {
     const desde = new Date(Date.now() - (opts.dias ?? 7) * 86_400_000).toISOString()
-    let q = createServerClient().from('correos').select(COLS).eq('vip', true).gte('recibido_en', desde).order('recibido_en', { ascending: false }).limit(opts.max ?? 60)
+    const db = createServerClient()
+    // Ajuste 18e: with the account in hand, VIP is decided NOW against its 🔔 list, not only by the
+    // mark the mail got when it arrived — a sender added to the list today shows from today,
+    // with the mails she already sent. Those mails get the mark too, so the reply check sees them.
+    if (opts.cuenta) {
+      const { data, error } = await db.from('correos').select(COLS).eq('cuenta_id', opts.cuenta.id).gte('recibido_en', desde).order('recibido_en', { ascending: false }).limit(500)
+      if (error) throw error
+      const todos = conCuenta(data as unknown as Fila[])
+      const deLista = todos.filter((c) => !c.vip && nivelDe(opts.cuenta!, c.de_email)?.nivel === 'alerta')
+      if (deLista.length > 0) {
+        const { error: e } = await db.from('correos').update({ vip: true }).in('id', deLista.map((c) => c.id))
+        if (e) console.error(`[correo] marcar VIP: ${e.message}`)
+      }
+      const ids = new Set(deLista.map((c) => c.id))
+      return todos.filter((c) => c.vip || ids.has(c.id)).map((c) => ({ ...c, vip: true })).slice(0, opts.max ?? 60)
+    }
+    let q = db.from('correos').select(COLS).eq('vip', true).gte('recibido_en', desde).order('recibido_en', { ascending: false }).limit(opts.max ?? 60)
     if (opts.cuentaId) q = q.eq('cuenta_id', opts.cuentaId)
     const { data, error } = await q
     if (error) throw error

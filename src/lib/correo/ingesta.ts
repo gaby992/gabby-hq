@@ -129,7 +129,7 @@ export async function autoresolver(cuenta: CuentaCorreo, conn: ConexionRow): Pro
     .in('estado', ['nuevo', 'para_chelsea', 'lo_hago_yo', 'tarea'])
     .not('gmail_thread_id', 'is', null)
     .gte('recibido_en', hace7)
-    .or('alertado.eq.true,tipo.in.(necesita_respuesta,pedido_de_tarea)')
+    .or('alertado.eq.true,vip.eq.true,tipo.in.(necesita_respuesta,pedido_de_tarea)')
     .order('recibido_en', { ascending: false })
     .limit(MAX_AUTORESOLVER)
   if (error) throw new Error(`Supabase correos: ${error.message}`)

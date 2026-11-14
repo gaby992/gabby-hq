@@ -95,7 +95,7 @@ export async function construirResumenChelsea(hoy: string = cancunYmd()): Promis
 /** Ajuste 18c: what the PICTURE shows — the VIP mails of Chelsea's accounts (any state, 7 days) and all her open tasks. */
 export async function construirModeloChelsea(hoy: string = cancunYmd()): Promise<ModeloChelsea> {
   const [cuentas, panorama] = await Promise.all([cargarCuentas().catch(() => [] as CuentaCorreo[]), cargarPanorama(hoy)])
-  const vip = (await Promise.all(cuentas.filter(esCuentaDeChelsea).map((c) => correosVipRecientes({ cuentaId: c.id })))).flat()
+  const vip = (await Promise.all(cuentas.filter(esCuentaDeChelsea).map((c) => correosVipRecientes({ cuenta: c })))).flat()
   const empresas = new Set(panorama.companies.filter(esEmpresaDeChelsea).map((c) => c.id))
   const tareas = panorama.tasks.filter((t) => t.company_id && empresas.has(t.company_id)).map((t) => ({ text: t.text, due_date: t.due_date }))
   return modeloChelsea({ vip, tareas }, hoy, (d) => cancunYmd(d))
@@ -107,7 +107,7 @@ export async function construirModeloChelsea(hoy: string = cancunYmd()): Promise
  */
 export async function construirModeloGabby(hoy: string = cancunYmd()): Promise<ModeloChelsea> {
   const [cuentas, panorama] = await Promise.all([cargarCuentas().catch(() => [] as CuentaCorreo[]), cargarPanorama(hoy, { sinChelsea: true })])
-  const vip = (await Promise.all(cuentas.filter((c) => !esCuentaDeChelsea(c)).map((c) => correosVipRecientes({ cuentaId: c.id })))).flat()
+  const vip = (await Promise.all(cuentas.filter((c) => !esCuentaDeChelsea(c)).map((c) => correosVipRecientes({ cuenta: c })))).flat()
   const nombre = new Map(panorama.companies.map((c) => [c.id, c.name]))
   const tareas = panorama.tasks
     .filter((t) => !!t.due_date && t.due_date <= hoy)

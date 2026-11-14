@@ -65,6 +65,7 @@ function Vip({ p, f }: { p: Paleta; f: FilaVip }) {
           <span style={{ fontWeight: 700, marginRight: 10 }}>{f.quien}</span>
           <span>{`— ${f.asunto}`}</span>
         </div>
+        {f.detalle && <span style={{ fontSize: 21, lineHeight: 1.35, color: p.gris, marginTop: 5 }}>{f.detalle}</span>}
         {f.cuando && <span style={{ fontSize: 19, color: p.gris, marginTop: 3 }}>{f.cuando}</span>}
       </div>
       <span style={{ fontSize: 19, fontWeight: 700, color: t.color, background: t.fondo, borderRadius: 6, padding: '6px 12px', marginTop: 2, whiteSpace: 'nowrap' }}>{f.etiqueta}</span>

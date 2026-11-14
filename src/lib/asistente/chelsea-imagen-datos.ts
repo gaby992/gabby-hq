@@ -19,6 +19,8 @@ export type EstadoFila = 'pendiente' | 'esperando' | 'listo'
 export interface FilaVip {
   quien: string
   asunto: string
+  /** Ajuste 18e: what the mail asks, in one line — only while it is not replied. */
+  detalle?: string
   cuando: string
   estado: EstadoFila
   etiqueta: string
@@ -69,24 +71,33 @@ export interface CorreoVip {
   recibido_en: string | null
   estado: CorreoEstado
   respondido_en: string | null
+  /** Ajuste 18e: does it expect an answer? Notices and FYIs do not. */
+  tipo?: string | null
+  resumen?: string | null
+  gmail_thread_id?: string | null
 }
 
 const LOCAL: Record<IdiomaResumen, string> = { en: 'en-US', es: 'es-MX' }
 const dia = (ymd: string, i: IdiomaResumen = 'en') => new Intl.DateTimeFormat(LOCAL[i], { timeZone: 'UTC', weekday: 'long', month: i === 'es' ? 'long' : 'short', day: 'numeric', year: 'numeric' }).format(new Date(`${ymd}T12:00:00Z`))
 const corta = (ymd: string, i: IdiomaResumen = 'en') => new Intl.DateTimeFormat(LOCAL[i], { timeZone: 'UTC', month: 'short', day: 'numeric' }).format(new Date(`${ymd}T12:00:00Z`)).replace('.', '')
 
-const ETIQUETA: Record<IdiomaResumen, Record<'respondido' | 'nuevo' | 'chelsea' | 'yo' | 'tarea' | 'nada', string>> = {
-  en: { respondido: 'Replied', nuevo: 'Needs action', chelsea: 'Waiting on Chelsea', yo: 'Gabby is on it', tarea: 'Now a task', nada: 'Nothing to do' },
-  es: { respondido: 'Respondido', nuevo: 'Falta hacer algo', chelsea: 'Esperando a Chelsea', yo: 'Lo hago yo', tarea: 'Ya es tarea', nada: 'Nada que hacer' },
+const ETIQUETA: Record<IdiomaResumen, Record<'respondido' | 'nuevo' | 'chelsea' | 'yo' | 'tarea' | 'nada' | 'aviso', string>> = {
+  en: { respondido: 'Replied', nuevo: 'Not replied', chelsea: 'Waiting on Chelsea', yo: 'Gabby is on it', tarea: 'Now a task', nada: 'Closed · no reply', aviso: 'No reply needed' },
+  es: { respondido: 'Respondido', nuevo: 'Sin responder', chelsea: 'Esperando a Chelsea', yo: 'Lo hago yo', tarea: 'Ya es tarea', nada: 'Cerrado sin responder', aviso: 'No pide respuesta' },
+}
+
+/** Ajuste 18e: a mail waits for an answer unless the model read it as a notice or an FYI. With no type, it waits (safer). */
+export function esperaRespuesta(tipo: string | null | undefined): boolean {
+  return !tipo || tipo === 'necesita_respuesta' || tipo === 'pedido_de_tarea'
 }
 
 /** Is something still to be done with this mail, and by whom? */
-export function estadoVip(c: Pick<CorreoVip, 'estado' | 'respondido_en'>, idioma: IdiomaResumen = 'en'): { estado: EstadoFila; etiqueta: string } {
+export function estadoVip(c: Pick<CorreoVip, 'estado' | 'respondido_en' | 'tipo'>, idioma: IdiomaResumen = 'en'): { estado: EstadoFila; etiqueta: string } {
   const e = ETIQUETA[idioma]
   if (c.respondido_en || c.estado === 'respondido') return { estado: 'listo', etiqueta: e.respondido }
   switch (c.estado) {
     case 'nuevo':
-      return { estado: 'pendiente', etiqueta: e.nuevo }
+      return esperaRespuesta(c.tipo) ? { estado: 'pendiente', etiqueta: e.nuevo } : { estado: 'listo', etiqueta: e.aviso }
     case 'para_chelsea':
       return { estado: 'esperando', etiqueta: e.chelsea }
     case 'lo_hago_yo':
@@ -112,12 +123,16 @@ function hace(iso: string | null, hoy: string, ymdDe: (d: Date) => string, i: Id
   return dias <= 0 ? 'today' : dias === 1 ? 'yesterday' : `${dias} days ago`
 }
 
+function recortar(t: string, max: number): string {
+  return t.length <= max ? t : `${t.slice(0, max - 1).trimEnd()}…`
+}
+
 /** Renglones que ocupa un texto a `porRenglon` letras (cálculo holgado: sobra aire, nunca se corta). */
 export function renglones(texto: string, porRenglon: number): number {
   return Math.max(1, Math.ceil(texto.length / porRenglon))
 }
 
-export const MEDIDAS = { margen: 56, cabecera: 150, seccion: 84, filaVip: 44, renglonVip: 34, filaTarea: 26, renglonTarea: 36, vacio: 60, deMas: 44, pie: 70, letrasVip: 62, letrasTarea: 58 }
+export const MEDIDAS = { margen: 56, cabecera: 150, seccion: 84, filaVip: 44, renglonVip: 34, filaTarea: 26, renglonTarea: 36, vacio: 60, deMas: 44, pie: 70, letrasVip: 62, letrasTarea: 58, renglonDetalle: 30, letrasDetalle: 78 }
 
 export interface OpcionesResumen {
   /** Whose summary it is: the name in the title. Default "Chelsea". */
@@ -136,15 +151,25 @@ export function modeloChelsea(
 ): ModeloChelsea {
   const i = opts.idioma ?? 'en'
   const es = i === 'es'
-  const todas = d.vip
+  // Ajuste 18e: one row per thread — the newest mail of each conversation speaks for it.
+  const vistos = new Set<string>()
+  const porHilo = [...d.vip]
+    .sort((a, b) => (b.recibido_en ?? '').localeCompare(a.recibido_en ?? ''))
+    .filter((c) => {
+      if (!c.gmail_thread_id) return true
+      if (vistos.has(c.gmail_thread_id)) return false
+      vistos.add(c.gmail_thread_id)
+      return true
+    })
+  const todas = porHilo
     .map((c) => ({ c, e: estadoVip(c, i) }))
     .sort((a, b) => ORDEN[a.e.estado] - ORDEN[b.e.estado] || (b.c.recibido_en ?? '').localeCompare(a.c.recibido_en ?? ''))
-  const vip: FilaVip[] = todas.slice(0, MAX_VIP).map(({ c, e }) => ({ quien: quien(c, i), asunto: (c.asunto ?? (es ? '(sin asunto)' : '(no subject)')).trim(), cuando: hace(c.recibido_en, hoy, ymdDe, i), ...e }))
+  const vip: FilaVip[] = todas.slice(0, MAX_VIP).map(({ c, e }) => ({ ...(e.estado !== 'listo' && c.resumen?.trim() ? { detalle: recortar(c.resumen.trim(), 170) } : {}), quien: quien(c, i), asunto: (c.asunto ?? (es ? '(sin asunto)' : '(no subject)')).trim(), cuando: hace(c.recibido_en, hoy, ymdDe, i), ...e }))
   const orden = [...d.tareas].sort((a, b) => (a.due_date ?? '9999').localeCompare(b.due_date ?? '9999') || (a.empresa ?? '').localeCompare(b.empresa ?? ''))
   const tareas: FilaTarea[] = orden.slice(0, MAX_TAREAS).map((t) => ({ ...(t.empresa ? { empresa: t.empresa } : {}), texto: t.text.trim(), fecha: t.due_date ? corta(t.due_date, i) : '', vencida: !!t.due_date && t.due_date < hoy }))
   const m = MEDIDAS
   let alto = m.margen + m.cabecera
-  alto += m.seccion + (vip.length === 0 ? m.vacio : vip.reduce((s, f) => s + m.filaVip + m.renglonVip * renglones(`${f.quien} — ${f.asunto}`, m.letrasVip), 0))
+  alto += m.seccion + (vip.length === 0 ? m.vacio : vip.reduce((s, f) => s + m.filaVip + m.renglonVip * renglones(`${f.quien} — ${f.asunto}`, m.letrasVip) + (f.detalle ? m.renglonDetalle * renglones(f.detalle, m.letrasDetalle) + 6 : 0), 0))
   if (todas.length > vip.length) alto += m.deMas
   alto += m.seccion + (tareas.length === 0 ? m.vacio : tareas.reduce((s, f) => s + m.filaTarea + m.renglonTarea * renglones(`${f.empresa ? `${f.empresa}  ` : ''}${f.texto}`, m.letrasTarea - (f.empresa ? 6 : 0)), 0))
   if (orden.length > tareas.length) alto += m.deMas
@@ -156,7 +181,7 @@ export function modeloChelsea(
     ? {
         subtitulo: 'Resumen del día · correos VIP y tareas',
         seccionVip: 'CORREOS VIP',
-        notaVip: vip.length === 0 ? '' : vipPendientes === 0 ? 'todo atendido' : `${vipPendientes} ${vipPendientes === 1 ? 'pide' : 'piden'} algo`,
+        notaVip: vip.length === 0 ? '' : vipPendientes === 0 ? 'nada por responder' : `${vipPendientes} sin responder`,
         sinVip: 'Sin correos VIP en los últimos 7 días.',
         vipDeMas: `+${todas.length - vip.length} más en GabbyHQ`,
         seccionTareas: opts.seccionTareas ?? 'TUS TAREAS',
@@ -168,7 +193,7 @@ export function modeloChelsea(
     : {
         subtitulo: 'Daily summary · VIP emails and tasks',
         seccionVip: 'VIP EMAILS',
-        notaVip: vip.length === 0 ? '' : vipPendientes === 0 ? 'all handled' : `${vipPendientes} need action`,
+        notaVip: vip.length === 0 ? '' : vipPendientes === 0 ? 'nothing to reply' : `${vipPendientes} not replied`,
         sinVip: 'No VIP emails in the last 7 days.',
         vipDeMas: `+${todas.length - vip.length} more in GabbyHQ`,
         seccionTareas: opts.seccionTareas ?? `${nombre.toUpperCase()}'S TASKS`,
