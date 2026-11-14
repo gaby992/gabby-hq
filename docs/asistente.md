@@ -3601,3 +3601,7 @@ Archivos: `chelsea-imagen-datos.ts` (modelo), `chelsea-imagen.tsx` (dibujo), `fu
 - **Etiquetas centradas en la respuesta**: `Needs reply` (rojo, con la línea de qué pide), `Waiting on Chelsea`, `Gabby is on it`, `Now a task`, `Replied`, `No reply needed` (avisos y FYI) y `Closed · no reply`. En español: `Falta responder`, `Respondido`, `No pide respuesta`, `Cerrado sin responder`.
 - **Una fila por hilo**: el correo más nuevo de cada conversación.
 - El chequeo automático de respuestas ahora también revisa los hilos de remitentes VIP, aunque el modelo los haya leído como aviso.
+
+### 18f · El resumen en imagen de Gabby también llega a las 8:00
+
+La alarma de la mañana manda, después de la foto del tablero y antes del texto, la misma imagen de `/resumen` (correos VIP con si falta responder + tareas de hoy y vencidas). Si falla, la alarma sigue igual.

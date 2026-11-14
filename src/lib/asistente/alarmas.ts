@@ -530,6 +530,16 @@ export async function ejecutarAlarma(tipo: AlarmaTipo, opts: { test?: boolean } 
       } catch (err) {
         console.error(`[${tag}] foto del tablero: ${errorMessage(err)}`)
       }
+      // Ajuste 18f: en la mañana, también SU resumen en imagen (correos VIP con si falta responder + tareas de hoy y vencidas),
+      // igual que el que recibe el canal de Chelsea. Best effort, como el tablero.
+      if (tipo === 'manana') {
+        try {
+          const { enviarResumenGabby } = await import('./canal-chelsea')
+          await enviarResumenGabby(chat)
+        } catch (err) {
+          console.error(`[${tag}] resumen en imagen: ${errorMessage(err)}`)
+        }
+      }
       // Fase 9c-A: the persistent menu rides on the alarm, so it is always there.
       const id = await sendTelegram(chat, text, { html: true, tag, replyMarkup: tecladoMenu() })
       if (!primero) primero = { chat_id: chat, message_id: id }
