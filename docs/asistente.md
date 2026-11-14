@@ -3598,6 +3598,6 @@ Archivos: `chelsea-imagen-datos.ts` (modelo), `chelsea-imagen.tsx` (dibujo), `fu
 ### 18e · Respondido o no, y VIP con la lista de hoy
 
 - **VIP se decide al armar la imagen**, contra la lista 🔔 Alerta que la cuenta tiene en ese momento. Un remitente agregado hoy sale desde hoy, con los correos que ya había mandado (y esos correos quedan marcados VIP).
-- **Etiquetas centradas en la respuesta**: `Not replied` (rojo, con la línea de qué pide), `Waiting on Chelsea`, `Gabby is on it`, `Now a task`, `Replied`, `No reply needed` (avisos y FYI) y `Closed · no reply`. En español: `Sin responder`, `Respondido`, `No pide respuesta`, `Cerrado sin responder`.
+- **Etiquetas centradas en la respuesta**: `Needs reply` (rojo, con la línea de qué pide), `Waiting on Chelsea`, `Gabby is on it`, `Now a task`, `Replied`, `No reply needed` (avisos y FYI) y `Closed · no reply`. En español: `Falta responder`, `Respondido`, `No pide respuesta`, `Cerrado sin responder`.
 - **Una fila por hilo**: el correo más nuevo de cada conversación.
 - El chequeo automático de respuestas ahora también revisa los hilos de remitentes VIP, aunque el modelo los haya leído como aviso.

@@ -82,8 +82,8 @@ const dia = (ymd: string, i: IdiomaResumen = 'en') => new Intl.DateTimeFormat(LO
 const corta = (ymd: string, i: IdiomaResumen = 'en') => new Intl.DateTimeFormat(LOCAL[i], { timeZone: 'UTC', month: 'short', day: 'numeric' }).format(new Date(`${ymd}T12:00:00Z`)).replace('.', '')
 
 const ETIQUETA: Record<IdiomaResumen, Record<'respondido' | 'nuevo' | 'chelsea' | 'yo' | 'tarea' | 'nada' | 'aviso', string>> = {
-  en: { respondido: 'Replied', nuevo: 'Not replied', chelsea: 'Waiting on Chelsea', yo: 'Gabby is on it', tarea: 'Now a task', nada: 'Closed · no reply', aviso: 'No reply needed' },
-  es: { respondido: 'Respondido', nuevo: 'Sin responder', chelsea: 'Esperando a Chelsea', yo: 'Lo hago yo', tarea: 'Ya es tarea', nada: 'Cerrado sin responder', aviso: 'No pide respuesta' },
+  en: { respondido: 'Replied', nuevo: 'Needs reply', chelsea: 'Waiting on Chelsea', yo: 'Gabby is on it', tarea: 'Now a task', nada: 'Closed · no reply', aviso: 'No reply needed' },
+  es: { respondido: 'Respondido', nuevo: 'Falta responder', chelsea: 'Esperando a Chelsea', yo: 'Lo hago yo', tarea: 'Ya es tarea', nada: 'Cerrado sin responder', aviso: 'No pide respuesta' },
 }
 
 /** Ajuste 18e: a mail waits for an answer unless the model read it as a notice or an FYI. With no type, it waits (safer). */
@@ -181,7 +181,7 @@ export function modeloChelsea(
     ? {
         subtitulo: 'Resumen del día · correos VIP y tareas',
         seccionVip: 'CORREOS VIP',
-        notaVip: vip.length === 0 ? '' : vipPendientes === 0 ? 'nada por responder' : `${vipPendientes} sin responder`,
+        notaVip: vip.length === 0 ? '' : vipPendientes === 0 ? 'nada por responder' : `${vipPendientes} por responder`,
         sinVip: 'Sin correos VIP en los últimos 7 días.',
         vipDeMas: `+${todas.length - vip.length} más en GabbyHQ`,
         seccionTareas: opts.seccionTareas ?? 'TUS TAREAS',
@@ -193,7 +193,7 @@ export function modeloChelsea(
     : {
         subtitulo: 'Daily summary · VIP emails and tasks',
         seccionVip: 'VIP EMAILS',
-        notaVip: vip.length === 0 ? '' : vipPendientes === 0 ? 'nothing to reply' : `${vipPendientes} not replied`,
+        notaVip: vip.length === 0 ? '' : vipPendientes === 0 ? 'nothing to reply' : `${vipPendientes} ${vipPendientes === 1 ? 'needs' : 'need'} reply`,
         sinVip: 'No VIP emails in the last 7 days.',
         vipDeMas: `+${todas.length - vip.length} more in GabbyHQ`,
         seccionTareas: opts.seccionTareas ?? `${nombre.toUpperCase()}'S TASKS`,
