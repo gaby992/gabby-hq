@@ -11,6 +11,8 @@ import { GoogleError, accessToken, conexionActiva } from './oauth'
 
 export const DURACION_MIN = 30
 export const AVISO_MIN = 15
+/** Ajuste 18g: una tarea con hora avisa en el teléfono una hora antes y otra vez 15 minutos antes. */
+export const AVISOS_TAREA_MIN = [60, AVISO_MIN]
 /** Payments are a 30-minute slot at this hour so the "same day" reminder can be at 9 am. */
 export const PAGO_HORA = '09:00'
 
@@ -49,7 +51,7 @@ export function cuerpoEvento(t: TareaEvento): Record<string, unknown> {
   const body: Record<string, unknown> = {
     summary: `${t.company_name ? `[${t.company_name}] ` : ''}${t.text}`,
     description: `Prioridad: ${PRIORITY_LABELS[t.priority]}${t.importante ? ' ★' : ''}\n${appUrl()}/tasks`,
-    reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: AVISO_MIN }] },
+    reminders: { useDefault: false, overrides: AVISOS_TAREA_MIN.map((minutes) => ({ method: 'popup', minutes })) },
     source: { title: 'GabbyHQ', url: `${appUrl()}/tasks` },
   }
   if (t.due_time) {

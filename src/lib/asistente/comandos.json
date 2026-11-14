@@ -15,8 +15,12 @@
           "que": "tu resumen como imagen: tus correos VIP (con si falta hacer algo o no) y tus tareas de hoy y vencidas, con su empresa"
         },
         {
+          "ejemplo": "/cierre",
+          "que": "el cierre en imagen: lo hecho hoy, lo que sigue pendiente y tus correos VIP (el mismo que llega a las 4:00 pm)"
+        },
+        {
           "ejemplo": "cierre",
-          "que": "el cierre del día (el mismo de las 7:30 pm)"
+          "que": "el cierre del día (en lista)"
         },
         {
           "ejemplo": "¿qué sigue?",

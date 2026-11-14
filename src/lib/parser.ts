@@ -783,7 +783,7 @@ export function ayuda(modelo: string): string {
     '🎯 ¿QUÉ SIGUE? · "qué hago primero" · "solo urgentes" · "qué vence esta semana" · "qué sigue de IM" → una tarea para ahora, 3 después, 3 por vencer; luego "listo 1" / "pasa el segundo"',
     '⏳ ESPERANDO · "la de TOTT está esperando a Andrew" (sale de Hoy sí o sí) · "la de TOTT ya no espera" · "qué tengo esperando" → la lista ⏳',
     '📧 CORREOS · "correos" · "correos de Chelsea" → todos los pendientes numerados; luego "el 3 lo hago yo" · "el 2 para Chelsea" · "archiva el 5"',
-    '📋 /hoy · "dame la lista" · "todo lo pendiente" → la lista completa de las 8:00, ahora · "cierre" → la de las 7:30 pm · /pendientes IM → solo esa empresa',
+    '📋 /hoy · "dame la lista" · "todo lo pendiente" → la lista completa de las 8:00, ahora · "cierre" → la lista del cierre · /resumen y /cierre → en imagen · /pendientes IM → solo esa empresa',
     '💳 PAGOS: "pagos de IM" · "qué pagos hay esta semana" (se administran en /settings → Pagos recurrentes)',
     '📥 AGREGAR',
     'urgente/normal/cuando [empresa] tarea [importante] [hoy · mañana · pasado mañana · el viernes · en 3 días · el 15 de nov] [3pm · a las 10] · "… y ponla en calendar" → también evento 📅 · "pon en calendar la de TOTT"',
@@ -799,7 +799,7 @@ export function ayuda(modelo: string): string {
     '📋 MENÚ · los botones bajo el teclado son estas preguntas (/menu lo trae, /ocultar lo quita) · "mándame el tablero" → la foto del tablero · 💬 en /hoy está el mismo chat',
     '⏰ ALARMAS PROPIAS (no son tareas)',
     'alarma mañana 3pm revisar pagos · recuérdame el viernes a las 10 llamar al contador · avísame en 2 horas X · mis alarmas · quita alarma 2',
-    '⏰ Alarmas ☀️ 8:00 am y 🌙 7:30 pm, lun–sáb · 🏢 IM · DATAVIA · PD · Personal · Chelsea',
+    '⏰ Alarmas ☀️ 8:00 am y 🌙 4:00 pm, lun–sáb · 🏢 IM · DATAVIA · PD · Personal · Chelsea',
     `📖 /ayuda todo → la guía completa con ejemplos · 🤖 Modelo actual: ${modelo}`,
   ].join('\n')
 }

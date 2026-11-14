@@ -10,7 +10,8 @@ Es lo mismo que manda el bot con `/ayuda todo`. La guía técnica está en [asis
 
 - `/hoy` — la lista completa de hoy, por empresa (la misma de las 8:00)
 - `/resumen` — tu resumen como imagen: tus correos VIP (con si falta hacer algo o no) y tus tareas de hoy y vencidas, con su empresa
-- `cierre` — el cierre del día (el mismo de las 7:30 pm)
+- `/cierre` — el cierre en imagen: lo hecho hoy, lo que sigue pendiente y tus correos VIP (el mismo que llega a las 4:00 pm)
+- `cierre` — el cierre del día (en lista)
 - `¿qué sigue?` — una tarea para ahora, tres después, tres por vencer y tus notas recientes
 - `solo urgentes` — lo mismo, sin la parte de "por vencer"
 - `qué vence esta semana` — solo lo que vence de aquí al domingo

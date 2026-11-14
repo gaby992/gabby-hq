@@ -49,6 +49,10 @@ export interface TextosResumen {
   sinTareas: string
   tareasDeMas: string
   vencida: string
+  /** Ajuste 18g: el cierre de la tarde lleva además lo que se hizo hoy. */
+  seccionHechas: string
+  notaHechas: string
+  sinHechas: string
 }
 
 export interface ModeloChelsea {
@@ -61,6 +65,9 @@ export interface ModeloChelsea {
   tareas: FilaTarea[]
   tareasDeMas: number
   tareasVencidas: number
+  /** Ajuste 18g: solo en el cierre. `null` = esta imagen no lleva la sección. */
+  hechas: FilaTarea[] | null
+  hechasDeMas: number
   alto: number
 }
 
@@ -141,10 +148,17 @@ export interface OpcionesResumen {
   tema?: TemaResumen
   /** The title of the tasks section when it is not "all her tasks" (Gabby's: today and overdue). */
   seccionTareas?: string
+  subtitulo?: string
+}
+
+/** "13:00" → "1:00 pm" */
+export function hora12(hm: string): string {
+  const [h, m] = hm.slice(0, 5).split(':').map(Number)
+  return `${h % 12 === 0 ? 12 : h % 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'am' : 'pm'}`
 }
 
 export function modeloChelsea(
-  d: { vip: CorreoVip[]; tareas: { text: string; due_date: string | null; empresa?: string | null }[] },
+  d: { vip: CorreoVip[]; tareas: { text: string; due_date: string | null; due_time?: string | null; empresa?: string | null }[]; hechas?: { text: string; empresa?: string | null }[] },
   hoy: string,
   ymdDe: (d: Date) => string = (x) => x.toISOString().slice(0, 10),
   opts: OpcionesResumen = {}
@@ -165,21 +179,31 @@ export function modeloChelsea(
     .map((c) => ({ c, e: estadoVip(c, i) }))
     .sort((a, b) => ORDEN[a.e.estado] - ORDEN[b.e.estado] || (b.c.recibido_en ?? '').localeCompare(a.c.recibido_en ?? ''))
   const vip: FilaVip[] = todas.slice(0, MAX_VIP).map(({ c, e }) => ({ ...(e.estado !== 'listo' && c.resumen?.trim() ? { detalle: recortar(c.resumen.trim(), 170) } : {}), quien: quien(c, i), asunto: (c.asunto ?? (es ? '(sin asunto)' : '(no subject)')).trim(), cuando: hace(c.recibido_en, hoy, ymdDe, i), ...e }))
-  const orden = [...d.tareas].sort((a, b) => (a.due_date ?? '9999').localeCompare(b.due_date ?? '9999') || (a.empresa ?? '').localeCompare(b.empresa ?? ''))
-  const tareas: FilaTarea[] = orden.slice(0, MAX_TAREAS).map((t) => ({ ...(t.empresa ? { empresa: t.empresa } : {}), texto: t.text.trim(), fecha: t.due_date ? corta(t.due_date, i) : '', vencida: !!t.due_date && t.due_date < hoy }))
+  // Ajuste 18g: lo de HOY con hora sale primero dentro de su día y muestra la hora en vez de la fecha.
+  const orden = [...d.tareas].sort((a, b) => (a.due_date ?? '9999').localeCompare(b.due_date ?? '9999') || (a.due_time ?? '99').localeCompare(b.due_time ?? '99') || (a.empresa ?? '').localeCompare(b.empresa ?? ''))
+  const tareas: FilaTarea[] = orden.slice(0, MAX_TAREAS).map((t) => ({ ...(t.empresa ? { empresa: t.empresa } : {}), texto: t.text.trim(), fecha: t.due_date ? (t.due_date === hoy && t.due_time ? hora12(t.due_time) : corta(t.due_date, i)) : '', vencida: !!t.due_date && t.due_date < hoy }))
+  const hechasTodas = d.hechas ?? null
+  const hechas: FilaTarea[] | null = hechasTodas ? hechasTodas.slice(0, MAX_TAREAS).map((t) => ({ ...(t.empresa ? { empresa: t.empresa } : {}), texto: t.text.trim(), fecha: '', vencida: false })) : null
   const m = MEDIDAS
   let alto = m.margen + m.cabecera
   alto += m.seccion + (vip.length === 0 ? m.vacio : vip.reduce((s, f) => s + m.filaVip + m.renglonVip * renglones(`${f.quien} — ${f.asunto}`, m.letrasVip) + (f.detalle ? m.renglonDetalle * renglones(f.detalle, m.letrasDetalle) + 6 : 0), 0))
   if (todas.length > vip.length) alto += m.deMas
   alto += m.seccion + (tareas.length === 0 ? m.vacio : tareas.reduce((s, f) => s + m.filaTarea + m.renglonTarea * renglones(`${f.empresa ? `${f.empresa}  ` : ''}${f.texto}`, m.letrasTarea - (f.empresa ? 6 : 0)), 0))
   if (orden.length > tareas.length) alto += m.deMas
+  if (hechas) {
+    alto += m.seccion + (hechas.length === 0 ? m.vacio : hechas.reduce((s, f) => s + m.filaTarea + m.renglonTarea * renglones(`${f.empresa ? `${f.empresa}  ` : ''}${f.texto}`, m.letrasTarea - (f.empresa ? 6 : 0)), 0))
+    if (hechasTodas!.length > hechas.length) alto += m.deMas
+  }
   alto += m.pie
   const vipPendientes = todas.filter((x) => x.e.estado === 'pendiente').length
   const tareasVencidas = orden.filter((t) => !!t.due_date && t.due_date < hoy).length
   const nombre = opts.nombre ?? 'Chelsea'
   const textos: TextosResumen = es
     ? {
-        subtitulo: 'Resumen del día · correos VIP y tareas',
+        subtitulo: opts.subtitulo ?? 'Resumen del día · correos VIP y tareas',
+        seccionHechas: 'HECHO HOY',
+        notaHechas: hechasTodas ? `${hechasTodas.length} ${hechasTodas.length === 1 ? 'cerrada' : 'cerradas'}` : '',
+        sinHechas: 'Nada cerrado hoy todavía.',
         seccionVip: 'CORREOS VIP',
         notaVip: vip.length === 0 ? '' : vipPendientes === 0 ? 'nada por responder' : `${vipPendientes} por responder`,
         sinVip: 'Sin correos VIP en los últimos 7 días.',
@@ -191,7 +215,10 @@ export function modeloChelsea(
         vencida: 'vencida',
       }
     : {
-        subtitulo: 'Daily summary · VIP emails and tasks',
+        subtitulo: opts.subtitulo ?? 'Daily summary · VIP emails and tasks',
+        seccionHechas: 'DONE TODAY',
+        notaHechas: hechasTodas ? `${hechasTodas.length} closed` : '',
+        sinHechas: 'Nothing closed today yet.',
         seccionVip: 'VIP EMAILS',
         notaVip: vip.length === 0 ? '' : vipPendientes === 0 ? 'nothing to reply' : `${vipPendientes} ${vipPendientes === 1 ? 'needs' : 'need'} reply`,
         sinVip: 'No VIP emails in the last 7 days.',
@@ -213,6 +240,8 @@ export function modeloChelsea(
     tareas,
     tareasDeMas: orden.length - tareas.length,
     tareasVencidas,
+    hechas,
+    hechasDeMas: hechasTodas && hechas ? hechasTodas.length - hechas.length : 0,
     alto: Math.min(ALTO_MAX_CHELSEA, Math.max(520, alto)),
   }
 }

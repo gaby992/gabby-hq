@@ -73,12 +73,12 @@ function Vip({ p, f }: { p: Paleta; f: FilaVip }) {
   )
 }
 
-function Tarea({ p, f, vencida }: { p: Paleta; f: FilaTarea; vencida: string }) {
+function Tarea({ p, f, vencida, hecha }: { p: Paleta; f: FilaTarea; vencida: string; hecha?: boolean }) {
   return (
     <div style={{ display: 'flex', alignItems: 'flex-start', padding: '12px 4px', borderBottom: `1px solid ${p.linea}` }}>
-      <div style={{ display: 'flex', width: 12, height: 12, borderRadius: 6, background: f.vencida ? p.rojo : p.punto, marginTop: 12, marginRight: 16 }} />
+      <div style={{ display: 'flex', width: 12, height: 12, borderRadius: 6, background: hecha ? p.tono.listo.color : f.vencida ? p.rojo : p.punto, marginTop: 12, marginRight: 16 }} />
       {f.empresa && <span style={{ fontSize: 18, fontWeight: 700, color: p.chip.color, background: p.chip.fondo, borderRadius: 6, padding: '4px 10px', marginTop: 4, marginRight: 14, whiteSpace: 'nowrap' }}>{f.empresa}</span>}
-      <span style={{ flex: 1, fontSize: 26, lineHeight: 1.35, color: p.texto, paddingRight: 20 }}>{f.texto}</span>
+      <span style={{ flex: 1, fontSize: 26, lineHeight: 1.35, color: hecha ? p.gris : p.texto, paddingRight: 20 }}>{f.texto}</span>
       {f.fecha && <span style={{ fontSize: 22, fontWeight: f.vencida ? 700 : 400, color: f.vencida ? p.rojo : p.gris, marginTop: 4, whiteSpace: 'nowrap' }}>{f.vencida ? `${vencida} · ${f.fecha}` : f.fecha}</span>}
     </div>
   )
@@ -101,6 +101,11 @@ export function ChelseaImagen({ m }: { m: ModeloChelsea }) {
         <Vip key={i} p={p} f={f} />
       ))}
       {m.vipDeMas > 0 && <Vacio p={p} texto={t.vipDeMas} />}
+      {m.hechas && <Seccion p={p} titulo={t.seccionHechas} nota={t.notaHechas} />}
+      {m.hechas && m.hechas.length === 0 && <Vacio p={p} texto={t.sinHechas} />}
+      {m.hechas?.map((f, i) => (
+        <Tarea key={`h${i}`} p={p} f={f} vencida={t.vencida} hecha />
+      ))}
       <Seccion p={p} titulo={t.seccionTareas} nota={t.notaTareas} />
       {m.tareas.length === 0 && <Vacio p={p} texto={t.sinTareas} />}
       {m.tareas.map((f, i) => (

@@ -1,4 +1,4 @@
-// The two daily alarms: "☀️ Hoy" at 8:00 and "🌙 Cierre del día" at 7:30 pm (fase 16: when her last block ends)
+// The two daily alarms: "☀️ Hoy" at 8:00 and "🌙 Cierre del día" at 4:00 pm (ajuste 18g; antes 7:30 pm) (fase 16: when her last block ends)
 // (Cancún). Both build one HTML message from the GabbyHQ Supabase, send it to
 // every chat in ALLOWED_CHAT_IDS and record the numbering in `bot_alarmas` so
 // that "pasa 2,5" can resolve those numbers later, whatever the list looks
@@ -20,7 +20,6 @@ import { seccionCorreosDiaria } from '@/lib/correo/listas'
 import { guardarAlarma, type AlarmaItem, type AlarmaTipo } from './registro-listas'
 import { mensajeError } from '@/lib/errores'
 import { cargarPanorama, resumenManana, resumenTarde } from './narracion'
-import { enviarTablero } from './tablero-imagen'
 import { tecladoMenu } from './menu'
 import { avisoVencimientos, tituloRenovar } from '@/lib/documentos/vencimientos'
 import type { Documento as DocumentoVence } from '@/lib/documentos/tipos'
@@ -513,7 +512,7 @@ export interface AlarmaResultado {
  */
 export async function ejecutarAlarma(tipo: AlarmaTipo, opts: { test?: boolean } = {}): Promise<AlarmaResultado> {
   const tag = `alarma-${tipo}`
-  const hora = tipo === 'manana' ? '8:00' : '7:30 pm'
+  const hora = tipo === 'manana' ? '8:00' : '4:00 pm'
   const chats = allowedChatIds()
   if (chats.length === 0) {
     throw new Error('ALLOWED_CHAT_IDS está vacío: no hay a quién mandar la alarma')
@@ -523,29 +522,25 @@ export async function ejecutarAlarma(tipo: AlarmaTipo, opts: { test?: boolean } 
     const built = tipo === 'manana' ? await buildManana() : await buildTarde()
     const text = (opts.test ? '🧪 <i>prueba manual</i>\n' : '') + built.text
     let primero: { chat_id: number; message_id: number | null } | null = null
+    // Ajuste 18g: la alarma es un texto CORTO — en la mañana, lo de hoy (lo que tiene hora, con su hora) y sus correos VIP sin acomodar;
+    // a las 4:00 pm, lo hecho hoy y lo que sigue pendiente. Sin foto del tablero ni la lista larga: el tablero lo abre en la computadora,
+    // y la imagen queda para cuando escribe /resumen (en el teléfono la suya se ve muy chiquita). Si el corto falla, va el texto de siempre.
+    let corto: string | null = null
+    try {
+      const { construirModeloGabby, textoResumenGabby } = await import('./canal-chelsea')
+      corto = (opts.test ? '🧪 <i>prueba manual</i>\n' : '') + textoResumenGabby(await construirModeloGabby(cancunYmd(), { cierre: tipo === 'tarde' }))
+    } catch (err) {
+      console.error(`[${tag}] resumen corto: ${errorMessage(err)} — va el texto de siempre`)
+    }
     for (const chat of chats) {
-      // Fase 9c-B: the board as a picture BEFORE the text. Best effort: a failure is a log line, never a missing alarm.
-      try {
-        await enviarTablero(chat, { tag: `${tag}-tablero` })
-      } catch (err) {
-        console.error(`[${tag}] foto del tablero: ${errorMessage(err)}`)
-      }
-      // Ajuste 18f: en la mañana, también SU resumen en imagen (correos VIP con si falta responder + tareas de hoy y vencidas),
-      // igual que el que recibe el canal de Chelsea. Best effort, como el tablero.
-      if (tipo === 'manana') {
-        try {
-          const { enviarResumenGabby } = await import('./canal-chelsea')
-          await enviarResumenGabby(chat)
-        } catch (err) {
-          console.error(`[${tag}] resumen en imagen: ${errorMessage(err)}`)
-        }
-      }
       // Fase 9c-A: the persistent menu rides on the alarm, so it is always there.
-      const id = await sendTelegram(chat, text, { html: true, tag, replyMarkup: tecladoMenu() })
+      const id = await sendTelegram(chat, corto ?? text, { html: true, tag, replyMarkup: tecladoMenu() })
       if (!primero) primero = { chat_id: chat, message_id: id }
       // Fase 14: los vencimientos del día, con su botón para hacerlos tarea.
       await enviarBotonesVencimientos(chat, built.vencimientos, tag)
     }
+    // El corto no lleva números: no hay lista que registrar ni "día difícil" que sugerir.
+    if (corto) return built.items
     // Ajuste 6-7: the close records its numbers like the morning (and where it went, for in-place strikes).
     await guardarAlarma(tipo, built.items, primero ? { ...primero, texto: text } : null)
     // Fase 7-E: nothing closed and things still open → offer a clean start (one draft per chat).

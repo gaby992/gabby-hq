@@ -586,6 +586,25 @@ ok('¿qué cerré ayer? → pregunta libre', parse('¿qué cerré ayer?').kind =
   ok('18e: con detalle la imagen es más alta', m.alto > modeloChelsea({ vip: [v({ resumen: null })], tareas: [] }, '2026-11-14').alto - 200)
 }
 
+// ── Ajuste 18g: alarmas cortas en texto, cierre con lo hecho, hora de hoy y aviso 1 h antes ──
+{
+  const { modeloChelsea, hora12 } = await import('@/lib/asistente/chelsea-imagen-datos')
+  const { textoResumenGabby } = await import('@/lib/asistente/canal-chelsea')
+  const { cuerpoEvento } = await import('@/lib/google/calendar')
+  const v = (extra = {}) => ({ de_nombre: 'Julie', de_email: 'j@pd.com', asunto: 'Numbers', recibido_en: '2026-11-13T15:00:00Z', estado: 'nuevo', respondido_en: null, tipo: 'necesita_respuesta', resumen: 'Julie asks for October numbers.', gmail_thread_id: 'a', ...extra })
+  const o = { nombre: 'Gabby', idioma: 'es', tema: 'oscuro' }
+  const t = [{ text: 'Reunión con CPT', due_date: '2026-11-14', due_time: '13:00', empresa: 'DATAVIA' }, { text: 'Cashflow', due_date: '2026-11-14', empresa: 'IM' }, { text: 'QuickBooks', due_date: '2026-11-10', empresa: 'PD' }]
+  const man = modeloChelsea({ vip: [v(), v({ gmail_thread_id: 'b', estado: 'archivado' })], tareas: t }, '2026-11-14', undefined, o)
+  ok('18g: lo de hoy con hora muestra la hora y va antes que lo de hoy sin hora', hora12('13:00') === '1:00 pm' && hora12('00:30') === '12:30 am' && man.tareas.map((f) => f.fecha).join() === '10 nov,1:00 pm,14 nov' && man.hechas === null, JSON.stringify(man.tareas))
+  const tm = textoResumenGabby(man)
+  ok('18g: la alarma de la mañana es corta: lo de hoy y solo los VIP por acomodar, sin "hecho hoy"', /^☀️ <b>Sábado, 14 de noviembre/.test(tm) && /Hoy y vencidas \(3 · 1 vencida\)/.test(tm) && /1:00 pm/.test(tm) && /🔴 <b>PD<\/b> · QuickBooks <i>· vencida 10 nov/.test(tm) && /Correos VIP por acomodar \(1\)/.test(tm) && /Julie asks for October/.test(tm) && !/Hecho hoy/.test(tm), tm)
+  const cie = modeloChelsea({ vip: [], tareas: t, hechas: [{ text: 'Bancos', empresa: 'PD' }] }, '2026-11-14', undefined, { ...o, seccionTareas: 'SIGUE PENDIENTE · HOY Y VENCIDAS' })
+  const tc = textoResumenGabby(cie)
+  ok('18g: el cierre dice lo hecho hoy y lo que sigue pendiente', cie.hechas?.length === 1 && cie.textos.notaHechas === '1 cerrada' && cie.alto > man.alto - 400 && /^🌙 <b>Cierre · Sábado/.test(tc) && /Hecho hoy \(1\)/.test(tc) && /<b>PD<\/b> · Bancos/.test(tc) && /Sigue pendiente \(3/.test(tc), tc)
+  const ev = cuerpoEvento({ text: 'Reunión con CPT', due_date: '2026-11-14', due_time: '13:00', priority: 'normal', importante: false, company_name: 'DATAVIA' })
+  ok('18g: una tarea con hora avisa en Calendar 1 hora antes y 15 min antes', JSON.stringify(ev.reminders.overrides.map((x) => x.minutes)) === '[60,15]', JSON.stringify(ev.reminders))
+}
+
 // ── Ajuste 18d: el mismo resumen para Gabby, en español y oscuro ──
 {
   const { modeloChelsea, estadoVip } = await import('@/lib/asistente/chelsea-imagen-datos')

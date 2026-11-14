@@ -487,9 +487,9 @@ export async function handleText(chatId: number, text: string, prefix: string | 
     return
   }
   // Ajuste 18d: "/resumen" en el chat de Gabby — su resumen como imagen (correos VIP + tareas de hoy y vencidas).
-  if (/^\/resumen\b/i.test(text.trim())) {
+  if (/^\/(resumen|cierre)\b/i.test(text.trim())) {
     try {
-      await enviarResumenGabby(chatId)
+      await enviarResumenGabby(chatId, { cierre: /^\/cierre\b/i.test(text.trim()) })
     } catch (err) {
       await reply(chatId, `⚠️ No pude armar la imagen del resumen: ${mensajeError(err)}`)
     }

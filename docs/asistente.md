@@ -3605,3 +3605,11 @@ Archivos: `chelsea-imagen-datos.ts` (modelo), `chelsea-imagen.tsx` (dibujo), `fu
 ### 18f · El resumen en imagen de Gabby también llega a las 8:00
 
 La alarma de la mañana manda, después de la foto del tablero y antes del texto, la misma imagen de `/resumen` (correos VIP con si falta responder + tareas de hoy y vencidas). Si falla, la alarma sigue igual.
+
+### 18g · Alarmas cortas, cierre a las 4:00 pm y aviso una hora antes
+
+- **Las alarmas de Gabby vuelven a ser texto, y corto** (reemplaza 18f): sin foto del tablero ni la lista larga. La imagen queda solo a pedido con `/resumen` y `/cierre`, porque la suya es larga y en el teléfono se ve muy chiquita. La de Chelsea sigue en imagen.
+- **8:00 am**: lo de hoy y lo vencido (lo que tiene hora, con su hora) y los correos VIP por acomodar.
+- **4:00 pm** (antes 7:30 pm; cron `0 21 * * 1-6`): lo hecho hoy, lo que sigue pendiente y los VIP por acomodar.
+- Si el texto corto falla, sale el texto largo de antes. `/hoy`, `cierre` y `tablero` siguen igual a pedido.
+- **Tareas con hora**: el evento de Google Calendar avisa 1 hora antes y 15 minutos antes (`AVISOS_TAREA_MIN`). Aplica a lo que se cree o se cambie desde ahora.

@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/asistente/tarde",
-      "schedule": "30 0 * * 0,2-6"
+      "schedule": "0 21 * * 1-6"
     },
     {
       "path": "/api/asistente/recordatorios",

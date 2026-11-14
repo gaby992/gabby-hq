@@ -11,7 +11,8 @@ import { esCuentaDeChelsea, esEmpresaDeChelsea } from './de-chelsea'
 import { cargarCuentas } from '@/lib/correo/cuentas'
 import { correosPendientes, correosVipRecientes, pideAlgo, quienCorto, type CorreoLite } from '@/lib/correo/pendientes'
 import { mensajeError } from '@/lib/errores'
-import { cancunYmd } from './cancun'
+import { createServerClient } from '@/lib/supabase-server'
+import { cancunDayBounds, cancunYmd } from './cancun'
 import { cargarPanorama } from './narracion'
 import { modeloChelsea, type ModeloChelsea } from './chelsea-imagen-datos'
 import { chelseaChatId, escapeHtml, sendPhoto, sendTelegram } from './telegram'
@@ -104,22 +105,73 @@ export async function construirModeloChelsea(hoy: string = cancunYmd()): Promise
 /**
  * Ajuste 18d: the same picture for Gabby, in Spanish and dark — the VIP mails of HER accounts
  * (not Chelsea's) and her tasks of today plus what is overdue, each with its company.
+ *
+ * Ajuste 18g: `cierre` is the 4:00 pm one — it adds what she closed today on top, so she sees
+ * what is still open before shutting the computer.
  */
-export async function construirModeloGabby(hoy: string = cancunYmd()): Promise<ModeloChelsea> {
+export async function construirModeloGabby(hoy: string = cancunYmd(), opts: { cierre?: boolean } = {}): Promise<ModeloChelsea> {
   const [cuentas, panorama] = await Promise.all([cargarCuentas().catch(() => [] as CuentaCorreo[]), cargarPanorama(hoy, { sinChelsea: true })])
   const vip = (await Promise.all(cuentas.filter((c) => !esCuentaDeChelsea(c)).map((c) => correosVipRecientes({ cuenta: c })))).flat()
-  const nombre = new Map(panorama.companies.map((c) => [c.id, c.name]))
+  const nombre = new Map(panorama.companies.map((c) => [c.id, c.name.trim()]))
+  const deChelsea = new Set(panorama.companies.filter(esEmpresaDeChelsea).map((c) => c.id))
   const tareas = panorama.tasks
     .filter((t) => !!t.due_date && t.due_date <= hoy)
-    .map((t) => ({ text: t.text, due_date: t.due_date, empresa: t.company_id ? nombre.get(t.company_id) ?? null : null }))
-  return modeloChelsea({ vip, tareas }, hoy, (d) => cancunYmd(d), { nombre: 'Gabby', idioma: 'es', tema: 'oscuro', seccionTareas: 'TUS TAREAS · HOY Y VENCIDAS' })
+    .map((t) => ({ text: t.text, due_date: t.due_date, due_time: t.due_time ?? null, empresa: t.company_id ? nombre.get(t.company_id) ?? null : null }))
+  let hechas: { text: string; empresa: string | null }[] | undefined
+  if (opts.cierre) {
+    const { startIso, endIso } = cancunDayBounds(hoy)
+    const { data, error } = await createServerClient().from('tasks').select('text, company_id, completed_at').eq('done', true).gte('completed_at', startIso).lt('completed_at', endIso).order('completed_at', { ascending: true })
+    if (error) throw new Error(`Supabase tasks (hechas): ${error.message}`)
+    hechas = ((data as { text: string; company_id: string | null }[]) ?? []).filter((t) => !t.company_id || !deChelsea.has(t.company_id)).map((t) => ({ text: t.text, empresa: t.company_id ? nombre.get(t.company_id) ?? null : null }))
+  }
+  return modeloChelsea({ vip, tareas, hechas }, hoy, (d) => cancunYmd(d), {
+    nombre: 'Gabby',
+    idioma: 'es',
+    tema: 'oscuro',
+    seccionTareas: opts.cierre ? 'SIGUE PENDIENTE · HOY Y VENCIDAS' : 'TUS TAREAS · HOY Y VENCIDAS',
+    subtitulo: opts.cierre ? 'Cierre del día · lo hecho y lo que sigue pendiente' : 'Tu día · correos VIP y pendientes',
+  })
 }
 
-/** Sends Gabby's picture to her chat. Throws on failure: the command reports it. */
-export async function enviarResumenGabby(chatId: number): Promise<void> {
-  const m = await construirModeloGabby()
+/**
+ * Ajuste 18g: the same summary as SHORT TEXT — what her 8:00 and 4:00 pm alarms carry.
+ * On the phone her picture is long and reads tiny, so the picture stays for "/resumen";
+ * the alarm lists only what is open: VIP mails not handled yet, and the tasks.
+ */
+export function textoResumenGabby(m: ModeloChelsea): string {
+  const cierre = m.hechas !== null
+  const b: string[] = [`${cierre ? '🌙' : '☀️'} <b>${escapeHtml(m.titulo.replace(/^Gabby — /, cierre ? 'Cierre · ' : ''))}</b>`]
+  if (m.hechas) {
+    b.push(
+      m.hechas.length === 0
+        ? '✅ <b>Hecho hoy (0)</b> · nada cerrado todavía'
+        : [`✅ <b>Hecho hoy (${m.hechas.length + m.hechasDeMas})</b>`, ...m.hechas.map((f) => `• ${f.empresa ? `<b>${escapeHtml(f.empresa)}</b> · ` : ''}${escapeHtml(f.texto)}`), ...(m.hechasDeMas > 0 ? [`… y ${m.hechasDeMas} más`] : [])].join('\n')
+    )
+  }
+  const abiertas = m.tareas.length + m.tareasDeMas
+  b.push(
+    abiertas === 0
+      ? `📌 <b>${cierre ? 'Sigue pendiente' : 'Hoy'}</b> · nada 🎉`
+      : [
+          `📌 <b>${cierre ? 'Sigue pendiente' : 'Hoy y vencidas'} (${abiertas}${m.tareasVencidas > 0 ? ` · ${m.tareasVencidas} ${m.tareasVencidas === 1 ? 'vencida' : 'vencidas'}` : ''})</b>`,
+          ...m.tareas.map((f) => `${f.vencida ? '🔴' : '•'} ${f.empresa ? `<b>${escapeHtml(f.empresa)}</b> · ` : ''}${escapeHtml(f.texto)}${f.fecha ? ` <i>· ${f.vencida ? `vencida ${escapeHtml(f.fecha)}` : escapeHtml(f.fecha)}</i>` : ''}`),
+          ...(m.tareasDeMas > 0 ? [`… y ${m.tareasDeMas} más en el tablero`] : []),
+        ].join('\n')
+  )
+  const porAcomodar = m.vip.filter((f) => f.estado !== 'listo')
+  if (porAcomodar.length > 0) {
+    b.push([`📧 <b>Correos VIP por acomodar (${porAcomodar.length})</b>`, ...porAcomodar.map((f) => `${f.estado === 'pendiente' ? '🔴' : '🟡'} <b>${escapeHtml(f.quien)}</b> — ${escapeHtml(f.asunto)} <i>· ${escapeHtml(f.etiqueta)}${f.cuando ? ` · ${escapeHtml(f.cuando)}` : ''}</i>${f.detalle ? `\n   <i>${escapeHtml(f.detalle)}</i>` : ''}`)].join('\n'))
+  } else if (m.vip.length > 0) {
+    b.push('📧 Correos VIP: nada por responder')
+  }
+  return b.join('\n\n')
+}
+
+/** Sends Gabby's picture to her chat. Throws on failure: the caller reports it or falls back to text. */
+export async function enviarResumenGabby(chatId: number, opts: { cierre?: boolean } = {}): Promise<void> {
+  const m = await construirModeloGabby(cancunYmd(), opts)
   const { generarChelseaPng } = await import('./chelsea-imagen')
-  await sendPhoto(chatId, await generarChelseaPng(m), { tag: 'resumen-gabby' })
+  await sendPhoto(chatId, await generarChelseaPng(m), { tag: opts.cierre ? 'cierre-gabby' : 'resumen-gabby' })
 }
 
 /**
