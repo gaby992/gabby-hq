@@ -614,6 +614,10 @@ ok('¿qué cerré ayer? → pregunta libre', parse('¿qué cerré ayer?').kind =
   ok('18h: el pie nombra quién y el asunto (es lo que muestra la notificación) y escapa el HTML', /^📧 <b>Helga Queen/.test(pieDeAlerta(c, { nombre: 'IM Chelsea', idioma: 'en' })) && /&lt;pre-quals&gt;/.test(pieDeAlerta(c, { nombre: 'IM Chelsea', idioma: 'en' })))
 }
 
+// ── Ajuste 19a: "reconectado, prueba otra vez" pasa los avisos al calendario ──
+for (const t of ['reconectado prueba otra vez', 'Reconectado', 'ya reconecté', 'listo, ya lo reconecté, intenta de nuevo', 'ya está reconectado', 'conecté google otra vez', 'ok reconectada prueba']) ok(`19a: ${t}`, parse(t).kind === 'mudar_alarmas', parse(t).kind)
+ok('19a: una tarea que menciona reconectar no se confunde', parse('reconectar el dominio de TOTT mañana').kind !== 'mudar_alarmas' && parse('recuérdame reconectar Google el viernes').kind !== 'mudar_alarmas')
+
 // ── Ajuste 18d: el mismo resumen para Gabby, en español y oscuro ──
 {
   const { modeloChelsea, estadoVip } = await import('@/lib/asistente/chelsea-imagen-datos')

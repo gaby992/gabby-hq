@@ -711,6 +711,11 @@ export function parseMensaje(raw: string, companies: CompanyRef[], today: string
   if (/^(?:pasa|p[aá]same|mueve|muda|manda|lleva)\s+(?:todas\s+)?(?:mis\s+|las\s+)?alarmas\s+(?:a|al|para)\s+(?:el\s+|mi\s+)?(?:google\s+)?(?:calendar|calendario|agenda)\s*[.!]*$/i.test(text)) {
     return { kind: 'mudar_alarmas' }
   }
+  // Ajuste 19a: "reconectado, prueba otra vez" — acaba de reconectar Google porque un aviso cayó a Telegram "por esta vez":
+  // lo que quiere es que esos avisos pasen ya a su calendario, no una tarea "anterior".
+  if (text.length <= 90 && /^(?:listo[,.!]?\s+|ok[,.!]?\s+|ya[,.]?\s+)*(?:ya\s+)?(?:(?:lo\s+|la\s+)?reconect[eé]|reconectad[oa]|est[aá]\s+reconectad[oa]|(?:ya\s+)?conect[eé]\s+(?:otra\s+vez\s+)?(?:a\s+)?(?:google|calendar|el\s+calendario)|google\s+(?:ya\s+)?(?:est[aá]\s+)?reconectado)(?![a-záéíóúñ])/i.test(text)) {
+    return { kind: 'mudar_alarmas' }
+  }
   // "quita todas las alarmas", "quita las alarmas de pago" (varias) · "quita alarma 2" (una).
   const quitarVarias = text.match(/^(?:quita|quitar|borra|borrar|elimina|cancela)\s+(todas\s+(?:las\s+|mis\s+)?alarmas|(?:las\s+|mis\s+)alarmas)[ \t]*([^\n]*?)[ \t]*[.!]*$/i)
   if (quitarVarias) return { kind: 'quitar_alarma', arg: `todas ${tidy(quitarVarias[2])}`.trim() }
