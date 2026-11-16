@@ -3618,3 +3618,12 @@ La alarma de la mañana manda, después de la foto del tablero y antes del texto
 
 Cada alerta de correo (VIP o urgente) llega como imagen con el estilo del resumen: cuenta, etiquetas (VIP · tipo · urgencia), quién escribe, asunto, qué pide y por qué avisó. Clara en el canal de Chelsea, oscura en el chat de Gabby. Debajo, una línea con quién y el asunto (es lo que muestra la notificación del teléfono) y los botones de siempre. Al decidir o al responderse, se edita esa línea. Si la imagen falla, sale el texto de antes.
 Archivos: `src/lib/correo/alerta-imagen.tsx`, `fichaDeAlerta` y `pieDeAlerta` en `alertas.ts`; `editMessageText` cae a `editMessageCaption` cuando el mensaje es una foto.
+
+## 20 · Cambiar el bloque de un día
+
+"Mañana el Bloque A es de PD", "el miércoles el de las 10:30 es de IM", "hoy todo el día es IM". La plantilla de la semana (`semana_bloques`) no se toca: el cambio es una fila en `semana_cambios (fecha, inicio, company_id, tema)` y vale solo esa fecha.
+
+- Ese día el bloque es de la otra empresa: toma sus tareas, suelta su rutina y sus palabras de siempre, y no le aplica la regla del mes. En las listas sale con "(solo este día)".
+- Un bloque bloqueado (comida, kínder) nunca cambia de manos.
+- **Conector**: herramienta `cambiar_bloque_del_dia {fecha, bloque, empresa, tema?, restaurar?}`. `bloque` acepta el nombre ("Bloque A", "A"), la hora de inicio ("10:30", "8 am") o "todos". Con `restaurar: true` el día vuelve a la plantilla.
+- SQL: `sql/2026-11-asistente-fase20-cambios-dia.sql`. Sin correrlo no hay cambios y la herramienta lo dice.

@@ -618,6 +618,25 @@ ok('¿qué cerré ayer? → pregunta libre', parse('¿qué cerré ayer?').kind =
 for (const t of ['reconectado prueba otra vez', 'Reconectado', 'ya reconecté', 'listo, ya lo reconecté, intenta de nuevo', 'ya está reconectado', 'conecté google otra vez', 'ok reconectada prueba']) ok(`19a: ${t}`, parse(t).kind === 'mudar_alarmas', parse(t).kind)
 ok('19a: una tarea que menciona reconectar no se confunde', parse('reconectar el dominio de TOTT mañana').kind !== 'mudar_alarmas' && parse('recuérdame reconectar Google el viernes').kind !== 'mudar_alarmas')
 
+// ── Fase 20: cambiar el bloque de un día sin tocar la plantilla ──
+{
+  const { bloquesDelDia, elegirBloques, lineaBloque } = await import('@/lib/asistente/bloques')
+  const { HERRAMIENTAS } = await import('@/lib/mcp')
+  const B = (id, inicio, fin, nombre, company_id, extra = {}) => ({ id, dia: 2, inicio, fin, nombre, tema: nombre, company_id, palabras: [], fijas: [], toma_tareas: true, bloqueado: false, activo: true, ...extra })
+  const bloques = [B('a', '08:00', '10:00', 'Bloque A', 'im', { fijas: ['Revisar correo de IM'] }), B('b', '10:30', '12:30', 'Bloque B', 'dv'), B('c', '13:00', '14:00', 'Comida', null, { bloqueado: true, toma_tareas: false })]
+  const emp = [{ id: 'im', name: 'IM' }, { id: 'pd', name: 'PD' }, { id: 'dv', name: 'DATAVIA' }]
+  const tareas = [{ id: 't1', text: 'QuickBooks', company_id: 'pd', due_date: '2026-11-17', done: false }, { id: 't2', text: 'Cashflow', company_id: 'im', due_date: '2026-11-17', done: false }]
+  const normal = bloquesDelDia({ bloques, reglas: [] }, '2026-11-17', tareas, emp, '2026-11-16')
+  const cambio = bloquesDelDia({ bloques, reglas: [], cambios: [{ fecha: '2026-11-17', inicio: '08:00', company_id: 'pd', tema: null }] }, '2026-11-17', tareas, emp, '2026-11-16')
+  const otroDia = bloquesDelDia({ bloques, reglas: [], cambios: [{ fecha: '2026-11-17', inicio: '08:00', company_id: 'pd', tema: null }] }, '2026-11-24', [], emp, '2026-11-16')
+  ok('20: sin cambio, el bloque A es de IM y lo de PD no cabe en ningún bloque', normal[0].empresa === 'IM' && normal[0].tareas.map((t) => t.id).join() === 't2' && !normal[0].cambiado)
+  ok('20: con el cambio, ese día el bloque A es de PD: toma lo de PD, suelta lo de IM y su rutina', cambio[0].empresa === 'PD' && cambio[0].cambiado === true && cambio[0].tareas.map((t) => t.id).join() === 't1' && cambio[0].fijas.length === 0 && cambio[0].tema === 'PD' && /solo este día/.test(lineaBloque(cambio[0])) && cambio[1].empresa === 'DATAVIA', JSON.stringify(cambio[0]))
+  ok('20: el cambio es de ese día nada más: la semana siguiente vuelve a la plantilla', otroDia[0].empresa === 'IM' && !otroDia[0].cambiado && otroDia[0].fijas.length === 1)
+  ok('20: "Bloque A", "a", "10:30", "8 am" y "todos" eligen bien, y nunca el bloqueado', elegirBloques(bloques, 2, 'Bloque A')[0]?.id === 'a' && elegirBloques(bloques, 2, 'a')[0]?.id === 'a' && elegirBloques(bloques, 2, '10:30')[0]?.id === 'b' && elegirBloques(bloques, 2, '8 am')[0]?.id === 'a' && elegirBloques(bloques, 2, 'todos').map((b) => b.id).join() === 'a,b' && elegirBloques(bloques, 2, 'comida').length === 0 && elegirBloques(bloques, 3, 'a').length === 0)
+  const h = HERRAMIENTAS.find((x) => x.name === 'cambiar_bloque_del_dia')
+  ok('20: el conector tiene la herramienta y no es de solo lectura', !!h && h.soloLectura === false && h.inputSchema.required.join() === 'fecha')
+}
+
 // ── Ajuste 18d: el mismo resumen para Gabby, en español y oscuro ──
 {
   const { modeloChelsea, estadoVip } = await import('@/lib/asistente/chelsea-imagen-datos')

@@ -44,9 +44,19 @@ export interface ReglaMes {
   activo: boolean
 }
 
+/** Fase 20: the company of ONE block on ONE date ("mañana el Bloque A es de PD"). The plantilla stays as it is. */
+export interface CambioDia {
+  fecha: string
+  /** 'HH:MM' — the start of the block it changes. */
+  inicio: string
+  company_id: string | null
+  tema: string | null
+}
+
 export interface Plantilla {
   bloques: Bloque[]
   reglas: ReglaMes[]
+  cambios?: CambioDia[]
 }
 
 /** A task as a block shows it. */
@@ -85,6 +95,8 @@ export interface BloqueDelDia {
   no_cabe: boolean
   /** True when a month rule changed this block today ("SEO/GEO del mes · hoy: Shift"). */
   regla_mes: boolean
+  /** Fase 20: true when this block belongs to another company just this day. */
+  cambiado?: boolean
 }
 
 /** A task with no estimate counts as half an hour: better a rough number than none. */
@@ -166,7 +178,12 @@ export async function cargarPlantilla(): Promise<Plantilla> {
           fijas: lista(x.fijas),
           activo: x.activo !== false,
         }))
-    return { bloques, reglas }
+    // Fase 20: the changes of single days, from yesterday on. No table yet (SQL not run) = no changes.
+    const c = await db.from('semana_cambios').select('fecha, inicio, company_id, tema').gte('fecha', addDays(cancunYmd(), -1))
+    const cambios: CambioDia[] = c.error
+      ? []
+      : ((c.data as Record<string, unknown>[]) ?? []).map((x) => ({ fecha: String(x.fecha).slice(0, 10), inicio: hm(String(x.inicio)), company_id: (x.company_id as string | null) ?? null, tema: (x.tema as string | null) ?? null }))
+    return { bloques, reglas, cambios }
   } catch (err) {
     console.warn(`[bloques] plantilla: ${mensajeError(err)}`)
     return { bloques: [], reglas: [] }
@@ -252,11 +269,22 @@ export function bloquesDelDia(
 ): BloqueDelDia[] {
   const dow = diaDeLaSemana(ymd)
   const nombreEmpresa = (id: string | null) => (id ? companies.find((c) => c.id === id)?.name.trim() ?? null : null)
-  const delDia = p.bloques.filter((b) => b.activo && b.dia === dow).sort((a, b) => a.inicio.localeCompare(b.inicio))
+  // Fase 20: a change of this date turns the block into another company's for the day: its own words and
+  // routine belong to the usual company, so they step aside, and so does the month rule.
+  const cambioDe = new Map((p.cambios ?? []).filter((c) => c.fecha === ymd).map((c) => [c.inicio, c]))
+  const delDia = p.bloques
+    .filter((b) => b.activo && b.dia === dow)
+    .sort((a, b) => a.inicio.localeCompare(b.inicio))
+    .map((b) => {
+      const c = b.bloqueado ? undefined : cambioDe.get(b.inicio)
+      return c ? { ...b, company_id: c.company_id, tema: c.tema?.trim() || nombreEmpresa(c.company_id) || b.tema, palabras: [], fijas: [], toma_tareas: true } : b
+    })
 
   const out: BloqueDelDia[] = delDia.map((b) => {
-    const r = b.bloqueado ? null : reglaPara(p.reglas, ymd, b.inicio)
+    const cambiado = !b.bloqueado && cambioDe.has(b.inicio)
+    const r = b.bloqueado || cambiado ? null : reglaPara(p.reglas, ymd, b.inicio)
     return {
+      cambiado,
       id: b.id,
       inicio: b.inicio,
       fin: b.fin,
@@ -318,7 +346,7 @@ export function sinBloque(bloques: BloqueDelDia[], tasks: TareaLite[], ymd: stri
 
 /** "8:15 am Bloque A · PD: cierre de la semana — 3 tareas (1 h 30)" */
 export function lineaBloque(b: BloqueDelDia): string {
-  const partes = [`${formatHoraEs(b.inicio)} ${b.nombre} · ${b.tema}`]
+  const partes = [`${formatHoraEs(b.inicio)} ${b.nombre} · ${b.tema}${b.cambiado ? ' (solo este día)' : ''}`]
   if (b.tareas.length > 0) {
     partes.push(`${b.tareas.length} ${b.tareas.length === 1 ? 'tarea' : 'tareas'} (${duracion(b.carga)}${b.no_cabe ? `, no caben en ${duracion(b.minutos)}` : ''})`)
   }
@@ -393,4 +421,43 @@ export async function hoyTeToca(
   if (p.bloques.length === 0) return { bloques: [], sin_bloque: [] }
   const bloques = bloquesDelDia(p, hoy, tasks, companies, hoy)
   return { bloques, sin_bloque: sinBloque(bloques, tasks, hoy, hoy).map((t) => ({ id: t.id, text: t.text })) }
+}
+
+// ── Fase 20: cambiar el bloque de un día ─────────────────────────────────
+
+/** Saves "on `fecha`, the block that starts at `inicio` is `company_id`'s". Throws with a readable reason. */
+export async function guardarCambioDia(c: CambioDia): Promise<void> {
+  const { error } = await createServerClient().from('semana_cambios').upsert({ fecha: c.fecha, inicio: c.inicio, company_id: c.company_id, tema: c.tema }, { onConflict: 'fecha,inicio' })
+  if (error) throw new Error(/semana_cambios|does not exist|schema cache/i.test(error.message) ? 'falta correr el SQL de la fase 20 (tabla semana_cambios) en Supabase' : `Supabase semana_cambios: ${error.message}`)
+}
+
+/** The day goes back to the plantilla: one block (`inicio`) or all of them. Returns how many changes it removed. */
+export async function quitarCambioDia(fecha: string, inicio?: string): Promise<number> {
+  let q = createServerClient().from('semana_cambios').delete().eq('fecha', fecha)
+  if (inicio) q = q.eq('inicio', inicio)
+  const { data, error } = await q.select('inicio')
+  if (error) throw new Error(/semana_cambios|does not exist|schema cache/i.test(error.message) ? 'falta correr el SQL de la fase 20 (tabla semana_cambios) en Supabase' : `Supabase semana_cambios: ${error.message}`)
+  return (data ?? []).length
+}
+
+/**
+ * Which blocks of a weekday "Bloque A", "A", "10:30", "el de la tarde"… or "todos" means.
+ * Only working blocks can change hands (never a blocked one: lunch, kínder).
+ */
+export function elegirBloques(bloques: Bloque[], dow: number, cual: string): Bloque[] {
+  const delDia = bloques.filter((b) => b.activo && b.dia === dow && !b.bloqueado).sort((a, b) => a.inicio.localeCompare(b.inicio))
+  const plano = (x: string) => x.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
+  const q = plano(cual)
+  if (/^(todos?|todo el dia|el dia|dia completo|completo)$/.test(q)) return delDia.filter((b) => b.toma_tareas)
+  const hora = q.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/)
+  if (hora) {
+    let h = Number(hora[1])
+    if (hora[3] === 'pm' && h < 12) h += 12
+    if (hora[3] === 'am' && h === 12) h = 0
+    const t = `${String(h).padStart(2, '0')}:${hora[2] ?? '00'}`
+    return delDia.filter((b) => b.inicio === t || (b.inicio <= t && t < b.fin)).slice(0, 1)
+  }
+  const sinBloque = q.replace(/^(el\s+)?bloque\s+/, '')
+  const exacto = delDia.filter((b) => plano(b.nombre) === q || plano(b.nombre).replace(/^bloque\s+/, '') === sinBloque)
+  return exacto.length > 0 ? exacto : delDia.filter((b) => plano(b.nombre).includes(q) || plano(b.tema).includes(q))
 }

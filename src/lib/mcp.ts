@@ -11,7 +11,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { createServerClient } from '@/lib/supabase-server'
 import { ejecutarAccion } from '@/lib/asistente/acciones'
-import { cargarPlantilla, hoyTeToca, semanaParaPrompt, textoHoyTeToca } from '@/lib/asistente/bloques'
+import { bloquesDelDia, cargarPlantilla, diaDeLaSemana, elegirBloques, guardarCambioDia, hoyTeToca, lineaBloque, quitarCambioDia, semanaParaPrompt, textoHoyTeToca } from '@/lib/asistente/bloques'
 import { addDays, cancunYmd, formatDiaLargoEs } from '@/lib/asistente/cancun'
 import { cargarPanorama } from '@/lib/asistente/narracion'
 import { cargarEmpresas, guardarTarea } from '@/lib/asistente/tareas'
@@ -406,6 +406,53 @@ export const HERRAMIENTAS: Herramienta[] = [
       return `Hoy es ${formatDiaLargoEs(hoy)} (${hoy}).\n${semanaParaPrompt(plantilla, hoy, dias, p.tasks, p.companies, hoy)}`
     },
   },
+  {
+    name: 'cambiar_bloque_del_dia',
+    description:
+      'Cambia de empresa UN bloque de UN día, sin tocar la plantilla de la semana: "mañana el Bloque A es de PD", "el miércoles el de las 10:30 es de IM", "hoy todo el día es IM". Las tareas de esa empresa con esa fecha caen solas en ese bloque. Con "restaurar": true el día vuelve a su plantilla. Úsala cuando Gabby diga que un día va a trabajar otra empresa en un bloque; mira antes semana_por_bloques para saber qué bloques tiene ese día.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        fecha: FECHA,
+        bloque: { type: 'string', description: 'Cuál bloque: su nombre ("Bloque A", "A"), su hora de inicio ("10:30") o "todos" para todos los bloques de trabajo del día.' },
+        empresa: { type: 'string', description: 'La empresa de ese bloque ese día: IM, PD, DATAVIA, Personal…' },
+        tema: { type: 'string', description: 'Opcional: de qué va el bloque ese día, solo si ella lo dijo ("Shift: contenido SEO").' },
+        restaurar: { type: 'boolean', description: 'true = quitar el cambio y volver a la plantilla (con "bloque", solo ese; sin él, todo el día).' },
+      },
+      required: ['fecha'],
+      additionalProperties: false,
+    },
+    soloLectura: false,
+    run: async (a) => {
+      const fecha = ymd(a.fecha)
+      if (!fecha) throw new Error('dime la fecha como YYYY-MM-DD')
+      const hoy = cancunYmd()
+      if (fecha < hoy) throw new Error(`${fecha} ya pasó (hoy es ${hoy})`)
+      const plantilla = await cargarPlantilla()
+      const cual = str(a.bloque)
+      const elegidos = cual ? elegirBloques(plantilla.bloques, diaDeLaSemana(fecha), cual) : []
+      const delDia = () => cargarPlantilla().then(async (p) => {
+        const pan = await cargarPanorama(hoy)
+        return bloquesDelDia(p, fecha, pan.tasks, pan.companies, hoy).filter((b) => !b.bloqueado).map((b) => `• ${lineaBloque(b)}`).join('\n')
+      })
+      if (a.restaurar === true) {
+        if (cual && elegidos.length === 0) throw new Error(`no encontré el bloque «${cual}» el ${formatDiaLargoEs(fecha)}`)
+        let n = 0
+        if (cual) for (const b of elegidos) n += await quitarCambioDia(fecha, b.inicio)
+        else n = await quitarCambioDia(fecha)
+        return `↩️ ${formatDiaLargoEs(fecha)}: ${n === 0 ? 'no había cambios; sigue con su plantilla' : `quité ${n} ${n === 1 ? 'cambio' : 'cambios'}; vuelve a su plantilla`}.\n${await delDia()}`
+      }
+      if (!cual) throw new Error('dime cuál bloque: su nombre ("Bloque A"), su hora ("10:30") o "todos"')
+      if (elegidos.length === 0) {
+        const hay = plantilla.bloques.filter((b) => b.activo && b.dia === diaDeLaSemana(fecha) && !b.bloqueado).map((b) => `${b.nombre} (${b.inicio})`)
+        throw new Error(`no encontré el bloque «${cual}» el ${formatDiaLargoEs(fecha)}. Ese día hay: ${hay.join(', ') || 'ningún bloque'}`)
+      }
+      const empresa = await empresaDe(str(a.empresa))
+      if (!empresa) throw new Error('dime de qué empresa es el bloque ese día')
+      for (const b of elegidos) await guardarCambioDia({ fecha, inicio: b.inicio, company_id: empresa.id, tema: str(a.tema) ?? null })
+      return `📅 ${formatDiaLargoEs(fecha)}: ${elegidos.map((b) => `${b.nombre} (${b.inicio})`).join(', ')} → ${empresa.name}, solo ese día. La plantilla de la semana no cambió.\n${await delDia()}`
+    },
+  },
 ]
 
 // ── JSON-RPC ─────────────────────────────────────────────────────────────
@@ -416,6 +463,7 @@ const INSTRUCCIONES =
   'GabbyHQ es el sistema de Gabby para sus tareas, proyectos y su semana por bloques (empresas: IM, PD, DATAVIA, Personal, Chelsea). ' +
   'Cuando te pida anotar, mover o revisar algo, hazlo aquí. Llama a "hoy" para saber la fecha en Cancún antes de calcular fechas. ' +
   'Sus reglas: toda tarea lleva empresa; lo que tiene HORA puntual va a su calendario, lo demás es tarea con fecha; todo proyecto lleva qué es "terminado", producción, pruebas y salida. ' +
+  'Si un día va a trabajar otra empresa en un bloque ("mañana el Bloque A es de PD"), usa cambiar_bloque_del_dia: cambia solo ese día, nunca la plantilla. ' +
   'No inventes tareas, pasos, fechas ni tiempos que ella no dijo: pregúntale. Después de cambiar algo, dile en una línea qué quedó.'
 
 interface Peticion {
