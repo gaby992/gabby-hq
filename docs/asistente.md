@@ -3627,3 +3627,11 @@ Archivos: `src/lib/correo/alerta-imagen.tsx`, `fichaDeAlerta` y `pieDeAlerta` en
 - Un bloque bloqueado (comida, kínder) nunca cambia de manos.
 - **Conector**: herramienta `cambiar_bloque_del_dia {fecha, bloque, empresa, tema?, restaurar?}`. `bloque` acepta el nombre ("Bloque A", "A"), la hora de inicio ("10:30", "8 am") o "todos". Con `restaurar: true` el día vuelve a la plantilla.
 - SQL: `sql/2026-11-asistente-fase20-cambios-dia.sql`. Sin correrlo no hay cambios y la herramienta lo dice.
+
+## 21 · Los correos desde el conector
+
+Tres herramientas nuevas en el conector de Claude:
+
+- `listar_correos {cuenta?, dias?}`: los pendientes (sin decidir o esperando a Chelsea), con id, cuenta, quién, asunto, hace cuánto y qué pide. `cuenta` acepta el nombre de la cuenta o de su dueña ("Chelsea" = todas las suyas).
+- `resolver_correos {ids? | cuenta?, dias?}`: los saca de los pendientes del HQ **sin tocar Gmail** y sin crear tareas (`resolverCorreos` en `decisiones.ts`: estado `archivado`, sin `quitarDeInbox`). El botón 🗄 Archivar de Telegram y de la web sigue siendo el único que saca el correo del inbox de Gmail.
+- `correo_a_tarea {id, que: tarea|yo|chelsea}`: la misma decisión de los botones.

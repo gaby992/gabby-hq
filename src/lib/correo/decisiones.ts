@@ -118,3 +118,20 @@ export async function decidirCorreo(correoId: string, accion: CorreoAccion, opts
 export function textoDecisionHtml(d: Decision): string {
   return escapeHtml(d.texto)
 }
+
+/**
+ * Fase 21: "limpia los de Chelsea" — the mails leave the pending lists of the HQ and NOTHING
+ * else happens: Gmail is not touched, no task is created. (The 🗄 button is the one that also
+ * takes a mail out of the inbox in Gmail.) Returns the mails it closed.
+ */
+export async function resolverCorreos(ids: string[]): Promise<Pick<Correo, 'id' | 'asunto' | 'de_nombre' | 'de_email'>[]> {
+  if (ids.length === 0) return []
+  const { data, error } = await createServerClient()
+    .from('correos')
+    .update({ estado: 'archivado', decidido_en: new Date().toISOString() })
+    .in('id', ids)
+    .in('estado', ['nuevo', 'para_chelsea'])
+    .select('id, asunto, de_nombre, de_email')
+  if (error) throw new Error(`Supabase correos: ${error.message}`)
+  return (data as Pick<Correo, 'id' | 'asunto' | 'de_nombre' | 'de_email'>[]) ?? []
+}

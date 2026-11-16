@@ -637,6 +637,19 @@ ok('19a: una tarea que menciona reconectar no se confunde', parse('reconectar el
   ok('20: el conector tiene la herramienta y no es de solo lectura', !!h && h.soloLectura === false && h.inputSchema.required.join() === 'fecha')
 }
 
+// ── Fase 21: los correos desde el conector ──
+{
+  const { HERRAMIENTAS, cuentasQue, lineaCorreo } = await import('@/lib/mcp')
+  const cuentas = [{ id: '1', nombre: 'IM Chelsea', duena: 'Chelsea' }, { id: '2', nombre: 'Chelsea Personal', duena: 'Chelsea' }, { id: '3', nombre: 'PD', duena: 'Gabby' }, { id: '4', nombre: 'IM', duena: 'Gabby' }]
+  let falla = ''
+  try { cuentasQue(cuentas, 'Torres') } catch (e) { falla = e.message }
+  ok('21: "Chelsea" son sus dos cuentas, "IM" es solo IM, "im chelsea" es una, y una que no existe lo dice', cuentasQue(cuentas, 'Chelsea').map((c) => c.id).join() === '1,2' && cuentasQue(cuentas, 'IM').map((c) => c.id).join() === '4' && cuentasQue(cuentas, 'im chelsea').map((c) => c.id).join() === '1' && /IM Chelsea, Chelsea Personal, PD, IM/.test(falla), falla)
+  const l = lineaCorreo({ id: 'abc', cuenta: 'IM Chelsea', de_nombre: 'Helga Queen', de_email: 'h@louisbrown.com', asunto: 'Re: Lubbock', resumen: 'Helga asks to remove entries.', recibido_en: '2026-11-11T15:00:00Z', urgencia: 'alta', estado: 'para_chelsea', vip: true }, '2026-11-16')
+  ok('21: la línea de un correo lleva id, cuenta, quién, asunto, hace cuánto, marcas y qué pide', /^\[abc\] IM Chelsea · Helga Queen/.test(l) && /Re: Lubbock · hace 5 días · VIP · urgente · esperando a Chelsea\n    Helga asks/.test(l), l)
+  const nombres = HERRAMIENTAS.map((h) => h.name)
+  ok('21: el conector tiene listar, resolver y pasar a tarea; solo listar es de lectura', ['listar_correos', 'resolver_correos', 'correo_a_tarea'].every((n) => nombres.includes(n)) && HERRAMIENTAS.find((h) => h.name === 'listar_correos').soloLectura && !HERRAMIENTAS.find((h) => h.name === 'resolver_correos').soloLectura)
+}
+
 // ── Ajuste 18d: el mismo resumen para Gabby, en español y oscuro ──
 {
   const { modeloChelsea, estadoVip } = await import('@/lib/asistente/chelsea-imagen-datos')

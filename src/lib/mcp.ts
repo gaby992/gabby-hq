@@ -17,6 +17,9 @@ import { cargarPanorama } from '@/lib/asistente/narracion'
 import { cargarEmpresas, guardarTarea } from '@/lib/asistente/tareas'
 import { elegirProyecto, guardarProyecto, listarProyectos, textoProyecto, type ProyectoEstado } from '@/lib/proyectos'
 import { mensajeError } from '@/lib/errores'
+import { cargarCuentas } from '@/lib/correo/cuentas'
+import { decidirCorreo, remitenteCorto, resolverCorreos } from '@/lib/correo/decisiones'
+import { correosPendientes, type CorreoLite } from '@/lib/correo/pendientes'
 import { agregarACalendar, sincronizarTarea, type ResultadoSync } from '@/lib/google/sync'
 import type { Cambios } from '@/lib/parser'
 import type { Priority } from '@/types'
@@ -116,6 +119,30 @@ async function mapas() {
     empresas: new Map(empresas.map((c) => [c.id, c.name.trim()])),
     proyectos: new Map((((proy.data as { id: string; nombre: string }[] | null) ?? [])).map((p) => [p.id, p.nombre])),
   }
+}
+
+// ── Correos (fase 21) ────────────────────────────────────────────────────
+
+/** The mail accounts "Chelsea", "IM Chelsea", "PD"… means: by the account's name or its owner. Throws when none matches. */
+export function cuentasQue<T extends { id: string; nombre: string; duena: string | null }>(cuentas: T[], cual: string): T[] {
+  const q = plano(cual)
+  const hits = cuentas.filter((c) => plano(c.nombre) === q)
+  const out = hits.length > 0 ? hits : cuentas.filter((c) => plano(c.nombre).includes(q) || plano(c.duena ?? '').includes(q))
+  if (out.length === 0) throw new Error(`no hay ninguna cuenta de correo «${cual}». Las que hay: ${cuentas.map((c) => c.nombre).join(', ')}`)
+  return out
+}
+
+async function pendientesDe(cual: string | undefined, dias: number): Promise<CorreoLite[]> {
+  if (!cual) return correosPendientes({ dias, max: 300 })
+  const cuentas = cuentasQue(await cargarCuentas(), cual)
+  return (await Promise.all(cuentas.map((c) => correosPendientes({ cuentaId: c.id, dias, max: 300 })))).flat()
+}
+
+export function lineaCorreo(c: Pick<CorreoLite, 'id' | 'cuenta' | 'de_nombre' | 'de_email' | 'asunto' | 'resumen' | 'recibido_en' | 'urgencia' | 'estado' | 'vip'>, hoy: string): string {
+  const dias = c.recibido_en ? Math.round((Date.parse(hoy) - Date.parse(cancunYmd(new Date(c.recibido_en)))) / 86_400_000) : null
+  const cuando = dias === null ? '' : dias <= 0 ? 'hoy' : dias === 1 ? 'ayer' : `hace ${dias} días`
+  const marcas = [c.vip ? 'VIP' : null, c.urgencia === 'alta' ? 'urgente' : null, c.estado === 'para_chelsea' ? 'esperando a Chelsea' : null].filter(Boolean).join(' · ')
+  return `[${c.id}] ${c.cuenta ?? ''} · ${remitenteCorto(c)} — ${c.asunto ?? '(sin asunto)'}${cuando ? ` · ${cuando}` : ''}${marcas ? ` · ${marcas}` : ''}${c.resumen ? `\n    ${c.resumen}` : ''}`
 }
 
 export interface Herramienta {
@@ -407,6 +434,59 @@ export const HERRAMIENTAS: Herramienta[] = [
     },
   },
   {
+    name: 'listar_correos',
+    description:
+      'Los correos PENDIENTES de GabbyHQ (los que siguen sin decidir o esperando a Chelsea), cada uno con su id entre corchetes, de quién es, el asunto y qué pide. Filtra por cuenta: "Chelsea" (todas las de Chelsea), "IM Chelsea", "PD"… Úsala antes de resolver correos o pasarlos a tarea.',
+    inputSchema: { type: 'object', properties: { cuenta: { type: 'string', description: 'Nombre de la cuenta o de su dueña, p. ej. "Chelsea". Sin esto, todas.' }, dias: { type: 'number', description: 'Cuántos días hacia atrás (por defecto 7, máximo 60).' } }, additionalProperties: false },
+    soloLectura: true,
+    run: async (a) => {
+      const hoy = cancunYmd()
+      const dias = typeof a.dias === 'number' ? Math.min(60, Math.max(1, Math.round(a.dias))) : 7
+      const lista = await pendientesDe(str(a.cuenta), dias)
+      if (lista.length === 0) return `No hay correos pendientes${str(a.cuenta) ? ` de «${str(a.cuenta)}»` : ''} en los últimos ${dias} días.`
+      return `${lista.length} ${lista.length === 1 ? 'correo pendiente' : 'correos pendientes'}${str(a.cuenta) ? ` de «${str(a.cuenta)}»` : ''} (últimos ${dias} días):\n${lista.map((c) => lineaCorreo(c, hoy)).join('\n')}`
+    },
+  },
+  {
+    name: 'resolver_correos',
+    description:
+      'Saca correos de la lista de pendientes de GabbyHQ SIN tocar Gmail y sin crear tareas ("limpia los correos de Chelsea", "ese ya lo vi"). Dale los ids (de listar_correos), o una cuenta para resolver TODOS sus pendientes. Antes de resolver una cuenta entera, dile a Gabby cuántos son y espera su OK. No se puede deshacer desde aquí.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ids: { type: 'array', items: { type: 'string' }, maxItems: 300, description: 'Los ids de los correos a resolver.' },
+        cuenta: { type: 'string', description: 'En vez de ids: resolver TODOS los pendientes de esta cuenta o dueña ("Chelsea", "IM Chelsea").' },
+        dias: { type: 'number', description: 'Con "cuenta": cuántos días hacia atrás (por defecto 60).' },
+      },
+      additionalProperties: false,
+    },
+    soloLectura: false,
+    run: async (a) => {
+      const dados = Array.isArray(a.ids) ? a.ids.map((x) => str(x)).filter((x): x is string => !!x) : []
+      const cual = str(a.cuenta)
+      if (dados.length === 0 && !cual) throw new Error('dime los ids de los correos, o la cuenta cuyos pendientes quieres resolver')
+      const dias = typeof a.dias === 'number' ? Math.min(60, Math.max(1, Math.round(a.dias))) : 60
+      const ids = dados.length > 0 ? dados : (await pendientesDe(cual, dias)).map((c) => c.id)
+      if (ids.length === 0) return `No había correos pendientes${cual ? ` de «${cual}»` : ''}.`
+      const hechos = await resolverCorreos(ids)
+      if (hechos.length === 0) return 'Ninguno de esos correos estaba pendiente; no cambié nada.'
+      const muestra = hechos.slice(0, 15).map((c) => `• ${remitenteCorto(c)} — ${c.asunto ?? '(sin asunto)'}`)
+      return `🧹 ${hechos.length} ${hechos.length === 1 ? 'correo salió' : 'correos salieron'} de los pendientes${cual ? ` de «${cual}»` : ''}. Gmail no se tocó.\n${muestra.join('\n')}${hechos.length > 15 ? `\n… y ${hechos.length - 15} más` : ''}`
+    },
+  },
+  {
+    name: 'correo_a_tarea',
+    description: 'Decide UN correo pendiente: "tarea" lo convierte en tarea, "yo" = lo hace Gabby (también crea la tarea), "chelsea" = queda esperando a Chelsea. No toca Gmail. Usa el id de listar_correos.',
+    inputSchema: { type: 'object', properties: { id: { type: 'string' }, que: { type: 'string', enum: ['tarea', 'yo', 'chelsea'] } }, required: ['id', 'que'], additionalProperties: false },
+    soloLectura: false,
+    run: async (a) => {
+      const id = str(a.id)
+      const que = a.que === 'tarea' || a.que === 'yo' || a.que === 'chelsea' ? a.que : null
+      if (!id || !que) throw new Error('dime el id del correo y qué hacer: "tarea", "yo" o "chelsea"')
+      return sinHtml((await decidirCorreo(id, que)).texto)
+    },
+  },
+  {
     name: 'cambiar_bloque_del_dia',
     description:
       'Cambia de empresa UN bloque de UN día, sin tocar la plantilla de la semana: "mañana el Bloque A es de PD", "el miércoles el de las 10:30 es de IM", "hoy todo el día es IM". Las tareas de esa empresa con esa fecha caen solas en ese bloque. Con "restaurar": true el día vuelve a su plantilla. Úsala cuando Gabby diga que un día va a trabajar otra empresa en un bloque; mira antes semana_por_bloques para saber qué bloques tiene ese día.',
@@ -463,6 +543,7 @@ const INSTRUCCIONES =
   'GabbyHQ es el sistema de Gabby para sus tareas, proyectos y su semana por bloques (empresas: IM, PD, DATAVIA, Personal, Chelsea). ' +
   'Cuando te pida anotar, mover o revisar algo, hazlo aquí. Llama a "hoy" para saber la fecha en Cancún antes de calcular fechas. ' +
   'Sus reglas: toda tarea lleva empresa; lo que tiene HORA puntual va a su calendario, lo demás es tarea con fecha; todo proyecto lleva qué es "terminado", producción, pruebas y salida. ' +
+  'Los correos pendientes se ven con listar_correos y se limpian con resolver_correos (no toca Gmail); antes de limpiar una cuenta entera, di cuántos son y espera su OK. ' +
   'Si un día va a trabajar otra empresa en un bloque ("mañana el Bloque A es de PD"), usa cambiar_bloque_del_dia: cambia solo ese día, nunca la plantilla. ' +
   'No inventes tareas, pasos, fechas ni tiempos que ella no dijo: pregúntale. Después de cambiar algo, dile en una línea qué quedó.'
 
