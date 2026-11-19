@@ -24,6 +24,8 @@ import { agregarACalendar, sincronizarTarea, type ResultadoSync } from '@/lib/go
 import type { Cambios } from '@/lib/parser'
 import type { Priority } from '@/types'
 import { sinHtml } from '@/lib/asistente/html'
+import { ejecutarNota } from '@/lib/asistente/notas-bot'
+import type { NotaEmpresa } from '@/types'
 
 // ── La llave ─────────────────────────────────────────────────────────────
 
@@ -533,6 +535,36 @@ export const HERRAMIENTAS: Herramienta[] = [
       return `📅 ${formatDiaLargoEs(fecha)}: ${elegidos.map((b) => `${b.nombre} (${b.inicio})`).join(', ')} → ${empresa.name}, solo ese día. La plantilla de la semana no cambió.\n${await delDia()}`
     },
   },
+  {
+    name: 'nota_por_donde_iba',
+    description:
+      'La nota "por dónde iba" de una empresa: la que Gabby ve dentro de cada bloque de esa empresa en "Hoy te toca" y en el mensaje de las 8. Una sola nota viva por empresa. modo "leer" la muestra; "agregar" suma una línea al final sin borrar lo que hay; "reemplazar" la cambia entera (la anterior queda en el historial); "borrar" la quita. Escribe solo lo que ella dijo.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        empresa: { type: 'string', description: 'IM, PD, DATAVIA, Personal, Chelsea…' },
+        modo: { type: 'string', enum: ['leer', 'agregar', 'reemplazar', 'borrar'] },
+        texto: { type: 'string', description: 'Lo que va en la nota (para agregar o reemplazar).' },
+      },
+      required: ['empresa', 'modo'],
+      additionalProperties: false,
+    },
+    soloLectura: false,
+    run: async (a) => {
+      const e = await empresaDe(str(a.empresa))
+      if (!e) throw new Error('dime de qué empresa es la nota')
+      const modo = str(a.modo)
+      if (modo === 'leer') {
+        const { data, error } = await createServerClient().from('notas_empresa').select('*').eq('company_id', e.id).maybeSingle<NotaEmpresa>()
+        if (error) throw new Error(`Supabase notas_empresa: ${error.message}`)
+        return data?.nota?.trim() ? `📝 Por dónde iba (${e.name}), escrita ${data.updated_at.slice(0, 10)}:\n${data.nota.trim()}` : `📝 ${e.name} no tiene nota "por dónde iba".`
+      }
+      if (modo === 'borrar') return await ejecutarNota({ company_id: e.id, company_name: e.name, modo: 'borrar', texto: '' })
+      const texto = str(a.texto)
+      if (!texto) throw new Error('dime qué escribo en la nota')
+      return await ejecutarNota({ company_id: e.id, company_name: e.name, modo: modo === 'agregar' ? 'agregar' : 'reemplazar', texto: texto.slice(0, 2000) })
+    },
+  },
 ]
 
 // ── JSON-RPC ─────────────────────────────────────────────────────────────
@@ -545,6 +577,7 @@ const INSTRUCCIONES =
   'Sus reglas: toda tarea lleva empresa; lo que tiene HORA puntual va a su calendario, lo demás es tarea con fecha; todo proyecto lleva qué es "terminado", producción, pruebas y salida. ' +
   'Los correos pendientes se ven con listar_correos y se limpian con resolver_correos (no toca Gmail); antes de limpiar una cuenta entera, di cuántos son y espera su OK. ' +
   'Si un día va a trabajar otra empresa en un bloque ("mañana el Bloque A es de PD"), usa cambiar_bloque_del_dia: cambia solo ese día, nunca la plantilla. ' +
+  'La nota "por dónde iba" de cada empresa (la que ve dentro de sus bloques) se lee y escribe con nota_por_donde_iba. ' +
   'No inventes tareas, pasos, fechas ni tiempos que ella no dijo: pregúntale. Después de cambiar algo, dile en una línea qué quedó.'
 
 interface Peticion {
