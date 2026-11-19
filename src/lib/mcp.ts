@@ -565,6 +565,83 @@ export const HERRAMIENTAS: Herramienta[] = [
       return await ejecutarNota({ company_id: e.id, company_name: e.name, modo: modo === 'agregar' ? 'agregar' : 'reemplazar', texto: texto.slice(0, 2000) })
     },
   },
+  {
+    name: 'plantilla_semana',
+    description:
+      'Cambia la PLANTILLA fija de la semana (vale para todas las semanas, no solo un día): crear un bloque nuevo en un día de la semana, cambiarle horas/nombre/tema/empresa a uno que existe, o quitarlo. Úsala solo cuando Gabby pida un cambio permanente de su horario ("los sábados el bloque es de 5 a 6:45"); para un solo día usa cambiar_bloque_del_dia. Antes de quitar un bloque dile cuál y espera su OK.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        accion: { type: 'string', enum: ['crear', 'cambiar', 'quitar'] },
+        dia: { type: 'string', description: 'lunes, martes, miércoles, jueves, viernes, sábado o domingo.' },
+        bloque: { type: 'string', description: 'Para cambiar o quitar: su nombre ("Bloque A") o su hora de inicio ("07:30").' },
+        inicio: { type: 'string', description: 'HH:MM en 24 h.' },
+        fin: { type: 'string', description: 'HH:MM en 24 h.' },
+        nombre: { type: 'string', description: 'Nombre corto del bloque ("Mañana", "Bloque A", "Noche").' },
+        tema: { type: 'string', description: 'De qué va el bloque, solo si ella lo dijo.' },
+        empresa: { type: 'string', description: 'IM, PD, DATAVIA, Personal… Vacío = recibe tareas de cualquier empresa.' },
+      },
+      required: ['accion', 'dia'],
+      additionalProperties: false,
+    },
+    soloLectura: false,
+    run: async (a) => {
+      const DIAS = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado']
+      const dia = DIAS.indexOf(plano(str(a.dia) ?? ''))
+      if (dia < 0) throw new Error('dime el día de la semana (lunes … domingo)')
+      const db = createServerClient()
+      const plantilla = await cargarPlantilla()
+      const accion = str(a.accion)
+      const inicio = hhmm(a.inicio)
+      const fin = hhmm(a.fin)
+      const e = str(a.empresa) ? await empresaDe(str(a.empresa)) : null
+      const delDia = async () => {
+        const p = await cargarPlantilla()
+        const lista = p.bloques.filter((b) => b.activo && b.dia === dia).sort((x, y) => x.inicio.localeCompare(y.inicio))
+        const empresas = await cargarEmpresas()
+        const n = (id: string | null) => (id ? empresas.find((c) => c.id === id)?.name.trim() ?? '' : '')
+        return lista.map((b) => `• ${b.inicio}–${b.fin} ${b.nombre}${b.tema ? ` · ${b.tema}` : ''}${n(b.company_id) ? ` (${n(b.company_id)})` : ''}${b.bloqueado ? ' · no disponible' : ''}`).join('\n') || '• (sin bloques)'
+      }
+      const nombreDiaTxt = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'][dia]
+      if (accion === 'crear') {
+        if (!inicio || !fin) throw new Error('dime la hora de inicio y fin (HH:MM)')
+        if (fin <= inicio) throw new Error('el bloque tiene que terminar después de empezar')
+        const choque = plantilla.bloques.find((b) => b.activo && b.dia === dia && b.inicio < fin && inicio < b.fin)
+        if (choque) throw new Error(`se cruza con «${choque.nombre}» (${choque.inicio}–${choque.fin}) del ${nombreDiaTxt}: cámbialo o quítalo primero`)
+        const { error } = await db.from('semana_bloques').insert({
+          dia, inicio, fin, nombre: (str(a.nombre) ?? 'Bloque').slice(0, 60), tema: (str(a.tema) ?? '').slice(0, 200),
+          company_id: e?.id ?? null, palabras: [], fijas: [], toma_tareas: true, bloqueado: false, activo: true, actualizado: new Date().toISOString(),
+        })
+        if (error) throw new Error(`Supabase semana_bloques: ${error.message}`)
+        return `🗓️ Plantilla del ${nombreDiaTxt}: bloque nuevo ${inicio}–${fin}. Vale para todas las semanas.\n${await delDia()}`
+      }
+      const cual = str(a.bloque)
+      if (!cual) throw new Error('dime cuál bloque: su nombre o su hora de inicio')
+      const elegido = plantilla.bloques
+        .filter((b) => b.activo && b.dia === dia)
+        .find((b) => b.inicio === (hhmm(cual) ?? '') || plano(b.nombre) === plano(cual) || plano(b.nombre).replace(/^bloque\s+/, '') === plano(cual).replace(/^bloque\s+/, ''))
+      if (!elegido) throw new Error(`no encontré «${cual}» el ${nombreDiaTxt}. Ese día hay:\n${await delDia()}`)
+      if (accion === 'quitar') {
+        const { error } = await db.from('semana_bloques').update({ activo: false, actualizado: new Date().toISOString() }).eq('id', elegido.id)
+        if (error) throw new Error(`Supabase semana_bloques: ${error.message}`)
+        return `🗓️ Plantilla del ${nombreDiaTxt}: quité «${elegido.nombre}» (${elegido.inicio}–${elegido.fin}).\n${await delDia()}`
+      }
+      const cambios: Record<string, unknown> = { actualizado: new Date().toISOString() }
+      const ni = inicio ?? elegido.inicio
+      const nf = fin ?? elegido.fin
+      if (nf <= ni) throw new Error('el bloque tiene que terminar después de empezar')
+      const choque = plantilla.bloques.find((b) => b.id !== elegido.id && b.activo && b.dia === dia && b.inicio < nf && ni < b.fin)
+      if (choque) throw new Error(`se cruzaría con «${choque.nombre}» (${choque.inicio}–${choque.fin}): cámbialo o quítalo primero`)
+      if (inicio) cambios.inicio = inicio
+      if (fin) cambios.fin = fin
+      if (str(a.nombre)) cambios.nombre = str(a.nombre)!.slice(0, 60)
+      if (a.tema !== undefined) cambios.tema = (str(a.tema) ?? '').slice(0, 200)
+      if (e) cambios.company_id = e.id
+      const { error } = await db.from('semana_bloques').update(cambios).eq('id', elegido.id)
+      if (error) throw new Error(`Supabase semana_bloques: ${error.message}`)
+      return `🗓️ Plantilla del ${nombreDiaTxt}: cambié «${elegido.nombre}». Vale para todas las semanas.\n${await delDia()}`
+    },
+  },
 ]
 
 // ── JSON-RPC ─────────────────────────────────────────────────────────────
