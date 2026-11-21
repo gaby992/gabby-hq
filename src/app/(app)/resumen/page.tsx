@@ -297,6 +297,33 @@ export default function ResumenPage() {
         ))}
       </div>
 
+      {/* ── Por dónde iba: la nota completa de cada empresa, justo debajo de los números ── */}
+      <Tarjeta titulo="📝 Por dónde iba" accion={<Enlace href="/notas">Editar notas</Enlace>}>
+        {datos.notas.length === 0 ? (
+          <p className="text-sm" style={{ color: CLARO.textoApagado }}>Sin notas. Escríbelas en Notas o dile al bot «nota IM: …».</p>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {datos.notas.map((n) => {
+              const color = COMPANY_COLORS[n.color] ?? '#888780'
+              const lineas = n.nota.split('\n').map((l) => l.trim()).filter(Boolean)
+              return (
+                <div key={n.company_id} className="rounded-lg px-3 py-2.5" style={{ border: `1px solid ${CLARO.borde}`, borderLeft: `3px solid ${color}` }}>
+                  <p className="text-[12px] font-semibold mb-1" style={{ color }}>
+                    {n.empresa}
+                    <span className="ml-1.5 text-[10px] font-normal" style={{ color: CLARO.textoApagado }}>{relativeDaysEs(n.updated_at)}</span>
+                  </p>
+                  <ul className="space-y-0.5">
+                    {lineas.map((l, i) => (
+                      <li key={i} className="text-[13px] leading-5" style={{ color: CLARO.texto }}>• {l}</li>
+                    ))}
+                  </ul>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </Tarjeta>
+
       {/* ── Fase 16: Hoy te toca — los bloques del día con lo que cae en cada uno ── */}
       {datos.bloques_hoy.length > 0 && (
         <Tarjeta titulo="Hoy te toca" accion={<Enlace href="/settings/semana">Editar mi semana</Enlace>}>
@@ -434,8 +461,8 @@ export default function ResumenPage() {
         </Tarjeta>
       </div>
 
-      {/* ── Correos · Por dónde iba ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {/* ── Correos ── */}
+      <div className="grid grid-cols-1 gap-4">
         <Tarjeta titulo="Correos que piden respuesta" accion={<Enlace href="/correo">Ver todos</Enlace>}>
           {datos.correos.length === 0 ? (
             <p className="text-sm" style={{ color: CLARO.textoApagado }}>Nadie espera respuesta ✨</p>
@@ -475,24 +502,6 @@ export default function ResumenPage() {
           )}
         </Tarjeta>
 
-        <Tarjeta titulo="Por dónde iba" accion={<Enlace href="/notas">Editar notas</Enlace>}>
-          {datos.notas.length === 0 ? (
-            <p className="text-sm" style={{ color: CLARO.textoApagado }}>Sin notas. Escríbelas en Notas o dile al bot «nota IM: …».</p>
-          ) : (
-            <ul className="space-y-2.5">
-              {datos.notas.map((n) => {
-                const color = COMPANY_COLORS[n.color] ?? '#888780'
-                return (
-                  <li key={n.company_id} className="text-[13px] leading-5">
-                    <span className="font-semibold mr-1.5" style={{ color }}>{n.empresa}</span>
-                    <span style={{ color: CLARO.texto }}>{n.nota.trim().split('\n')[0]}</span>
-                    <span className="ml-1.5 text-[10px]" style={{ color: CLARO.textoApagado }}>{relativeDaysEs(n.updated_at)}</span>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-        </Tarjeta>
       </div>
 
       {/* ── Fase 14: lo que vence (contratos, pólizas, identificaciones) ── */}
