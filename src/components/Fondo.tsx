@@ -31,7 +31,7 @@ export default function Fondo({ children }: { children: React.ReactNode }) {
   const clara = esClara(pathname)
   return (
     <main className="flex-1 w-full md:pl-56 min-h-screen" style={clara ? { backgroundColor: '#F4F5FA', color: '#1E1B3A' } : undefined}>
-      <div className="max-w-5xl mx-auto w-full px-4 py-6 md:py-8">{children}</div>
+      <div className="max-w-5xl xl:max-w-7xl 2xl:max-w-[1600px] mx-auto w-full px-4 md:px-6 py-6 md:py-8">{children}</div>
     </main>
   )
 }
