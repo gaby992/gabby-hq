@@ -21,6 +21,8 @@ export async function middleware(request: NextRequest) {
 
   if (
     pathname.startsWith('/login') ||
+    pathname === '/privacidad' ||
+    pathname === '/terminos' ||
     pathname.startsWith('/api/auth') ||
     pathname.startsWith('/api/')
   ) {
