@@ -21,6 +21,16 @@ export default function RadarPage() {
   const [estado, setEstado] = useState<RadarEstado>('idea')
   const [saving, setSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const [abierto, setAbierto] = useState<string | null>(null)
+  const [editando, setEditando] = useState<string | null>(null)
+  const [borrador, setBorrador] = useState('')
+
+  async function guardarTexto(id: string) {
+    const texto = borrador.trim() || null
+    await supabase.from('radar').update({ descripcion: texto }).eq('id', id)
+    setItems((prev) => prev.map((i) => (i.id === id ? { ...i, descripcion: texto } : i)))
+    setEditando(null)
+  }
 
   const fetchItems = useCallback(async () => {
     const { data } = await supabase
@@ -98,9 +108,9 @@ export default function RadarPage() {
           <textarea
             value={descripcion}
             onChange={(e) => setDescripcion(e.target.value)}
-            placeholder="Description (optional)"
-            rows={2}
-            className="w-full text-xs border border-[#2a2a2a] rounded px-2.5 py-1.5 text-[#888888] focus:outline-none focus:border-[#7F77DD] placeholder:text-[#444444] resize-none bg-[#0f0f0f]"
+            placeholder="Texto completo (opcional)"
+            rows={8}
+            className="w-full text-xs border border-[#2a2a2a] rounded px-2.5 py-1.5 text-[#888888] focus:outline-none focus:border-[#7F77DD] placeholder:text-[#444444] resize-y bg-[#0f0f0f]"
           />
           <div className="grid grid-cols-2 gap-2">
             <input
@@ -151,16 +161,49 @@ export default function RadarPage() {
             <div className="flex items-start gap-3">
               <div className="flex-1 min-w-0">
                 <div className="flex flex-wrap items-center gap-2 mb-1">
-                  <span className="text-sm font-medium text-[#e8e8e8]">{item.titulo}</span>
+                  <button
+                    onClick={() => setAbierto((v) => (v === item.id ? null : item.id))}
+                    className="text-sm font-medium text-[#e8e8e8] hover:text-[#a59ef0] text-left"
+                  >
+                    {abierto === item.id ? '▾' : '▸'} {item.titulo}
+                  </button>
                   {item.categoria && (
                     <span className="text-xs text-[#888888] bg-[#0f0f0f] px-1.5 py-0.5 rounded">
                       {item.categoria}
                     </span>
                   )}
                 </div>
-                {item.descripcion && (
-                  <p className="text-sm text-[#888888] mt-1">{item.descripcion}</p>
-                )}
+                {editando === item.id ? (
+                  <div className="mt-2 space-y-2">
+                    <textarea
+                      autoFocus
+                      value={borrador}
+                      onChange={(e) => setBorrador(e.target.value)}
+                      rows={16}
+                      className="w-full text-sm border border-[#2a2a2a] rounded px-3 py-2 text-[#e8e8e8] focus:outline-none focus:border-[#7F77DD] resize-y bg-[#0f0f0f]"
+                    />
+                    <div className="flex gap-2">
+                      <button onClick={() => guardarTexto(item.id)} className="px-3 py-1 bg-[#7F77DD] text-white text-xs rounded hover:bg-[#6b62d0]">Guardar</button>
+                      <button onClick={() => setEditando(null)} className="px-3 py-1 text-xs text-[#888888] hover:text-[#e8e8e8]">Cancelar</button>
+                    </div>
+                  </div>
+                ) : abierto === item.id ? (
+                  <div className="mt-2">
+                    {item.descripcion ? (
+                      <div className="text-sm text-[#cfcfcf] whitespace-pre-line leading-relaxed">{item.descripcion}</div>
+                    ) : (
+                      <p className="text-sm text-[#555555]">Sin texto todavía.</p>
+                    )}
+                    <button
+                      onClick={() => { setBorrador(item.descripcion ?? ''); setEditando(item.id) }}
+                      className="mt-3 text-xs text-[#7F77DD] hover:text-[#a59ef0]"
+                    >
+                      ✎ Editar texto
+                    </button>
+                  </div>
+                ) : item.descripcion ? (
+                  <p className="text-sm text-[#888888] mt-1 line-clamp-2 whitespace-pre-line">{item.descripcion}</p>
+                ) : null}
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
                 <select

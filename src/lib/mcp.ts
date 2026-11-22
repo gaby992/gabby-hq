@@ -642,6 +642,58 @@ export const HERRAMIENTAS: Herramienta[] = [
       return `🗓️ Plantilla del ${nombreDiaTxt}: cambié «${elegido.nombre}». Vale para todas las semanas.\n${await delDia()}`
     },
   },
+  {
+    name: 'radar',
+    description:
+      'La página Radar de GabbyHQ: fichas de ideas, planes y líneas de trabajo que Gabby abre para leer completas. "listar" muestra títulos y estado; "leer" muestra una ficha entera; "guardar" crea la ficha o, si ya existe una con ese título, le reemplaza el texto (respeta los saltos de línea tal cual ella los escribió). Escribe solo lo que ella dijo.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        accion: { type: 'string', enum: ['listar', 'leer', 'guardar'] },
+        titulo: { type: 'string', description: 'Título de la ficha (para leer o guardar). Busca por parecido.' },
+        texto: { type: 'string', description: 'Contenido completo de la ficha, con sus saltos de línea.' },
+        categoria: { type: 'string', description: 'Opcional (Personal, IM, DATAVIA…).' },
+        estado: { type: 'string', enum: ['idea', 'explorando', 'en progreso', 'descartado'] },
+      },
+      required: ['accion'],
+      additionalProperties: false,
+    },
+    soloLectura: false,
+    run: async (a) => {
+      const db = createServerClient()
+      const { data, error } = await db.from('radar').select('*').order('created_at', { ascending: false })
+      if (error) throw new Error(`Supabase radar: ${error.message}`)
+      const items = (data ?? []) as { id: string; titulo: string; descripcion: string | null; categoria: string | null; estado: string }[]
+      const accion = str(a.accion)
+      if (accion === 'listar') {
+        if (!items.length) return '📡 El Radar está vacío.'
+        return '📡 Radar:\n' + items.map((i) => `• ${i.titulo} — ${i.estado}${i.descripcion?.trim() ? '' : ' (sin texto)'}`).join('\n')
+      }
+      const titulo = str(a.titulo)
+      if (!titulo) throw new Error('dime el título de la ficha')
+      const q = plano(titulo)
+      const hallada = items.find((i) => plano(i.titulo) === q) ?? items.find((i) => plano(i.titulo).includes(q) || q.includes(plano(i.titulo)))
+      if (accion === 'leer') {
+        if (!hallada) return `📡 No encontré «${titulo}» en el Radar.`
+        return `📡 ${hallada.titulo} (${hallada.estado})\n${hallada.descripcion?.trim() || '(sin texto)'}`
+      }
+      const texto = typeof a.texto === 'string' ? a.texto.trim() : ''
+      const estado = str(a.estado)
+      const cambios: Record<string, unknown> = {}
+      if (texto) cambios.descripcion = texto.slice(0, 20000)
+      if (str(a.categoria)) cambios.categoria = str(a.categoria)!.slice(0, 60)
+      if (estado) cambios.estado = estado
+      if (hallada) {
+        if (!Object.keys(cambios).length) throw new Error('dime qué le cambio a la ficha')
+        const { error: e2 } = await db.from('radar').update(cambios).eq('id', hallada.id)
+        if (e2) throw new Error(`Supabase radar: ${e2.message}`)
+        return `📡 Actualicé «${hallada.titulo}» en el Radar.`
+      }
+      const { error: e3 } = await db.from('radar').insert({ titulo: titulo.slice(0, 200), estado: estado ?? 'idea', ...cambios })
+      if (e3) throw new Error(`Supabase radar: ${e3.message}`)
+      return `📡 Creé «${titulo}» en el Radar.`
+    },
+  },
 ]
 
 // ── JSON-RPC ─────────────────────────────────────────────────────────────
