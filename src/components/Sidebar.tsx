@@ -20,21 +20,21 @@ interface Item {
 }
 
 const PRINCIPAL: Item[] = [
-  { href: '/resumen', label: 'Resumen', icon: '⌂', activo: (p) => p === '/resumen' || p === '/' },
-  { href: '/hoy', label: 'Tablero', icon: '▦', activo: (p) => p === '/hoy' },
-  { href: '/proyectos', label: 'Proyectos', icon: '◈', activo: (p) => p === '/proyectos' },
-  { href: '/calendario', label: 'Calendario', icon: '▣', activo: (p) => p === '/calendario' },
-  { href: '/correo', label: 'Correos', icon: '✉', activo: (p) => p.startsWith('/correo') },
-  { href: '/notas', label: 'Notas', icon: '✎', activo: (p) => p === '/notas' },
-  { href: '/archivos', label: 'Archivos', icon: '🗂', activo: (p) => p === '/archivos' },
+  { href: '/resumen', label: 'Resumen', icon: '🏠', activo: (p) => p === '/resumen' || p === '/' },
+  { href: '/hoy', label: 'Tablero', icon: '📋', activo: (p) => p === '/hoy' },
+  { href: '/proyectos', label: 'Proyectos', icon: '🚀', activo: (p) => p === '/proyectos' },
+  { href: '/calendario', label: 'Calendario', icon: '📅', activo: (p) => p === '/calendario' },
+  { href: '/correo', label: 'Correos', icon: '📬', activo: (p) => p.startsWith('/correo') },
+  { href: '/notas', label: 'Notas', icon: '📝', activo: (p) => p === '/notas' },
+  { href: '/archivos', label: 'Archivos', icon: '🗂️', activo: (p) => p === '/archivos' },
   { href: '/series', label: 'Series', icon: '🍿', activo: (p) => p === '/series' },
-  { href: '/settings', label: 'Settings', icon: '⚙', activo: (p) => p.startsWith('/settings') },
+  { href: '/settings', label: 'Settings', icon: '⚙️', activo: (p) => p.startsWith('/settings') },
 ]
 
 const MAS: Item[] = [
-  { href: '/tasks', label: 'Tasks', icon: '☑', activo: (p) => p === '/tasks' },
-  { href: '/radar', label: 'Radar', icon: '◎', activo: (p) => p === '/radar' },
-  { href: '/inbox', label: 'Inbox IM', icon: '▤', activo: (p) => ['/inbox', '/chelsea', '/rules'].includes(p) },
+  { href: '/tasks', label: 'Tasks', icon: '✅', activo: (p) => p === '/tasks' },
+  { href: '/radar', label: 'Radar', icon: '📡', activo: (p) => p === '/radar' },
+  { href: '/inbox', label: 'Inbox IM', icon: '📥', activo: (p) => ['/inbox', '/chelsea', '/rules'].includes(p) },
 ]
 
 /** The palette of the menu — the reference's dark indigo with a violet active row. */
