@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { isValidSession } from '@/lib/session'
-import { cargarSeries } from '@/lib/series'
+import { cargarEnFila, cargarSeries } from '@/lib/series'
 import { ejecutarAccion } from '@/lib/asistente/acciones'
 import { createServerClient } from '@/lib/supabase-server'
 import { mensajeError } from '@/lib/errores'
@@ -15,7 +15,8 @@ export const runtime = 'nodejs'
 export async function GET() {
   if (!(await isValidSession())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
-    return NextResponse.json({ series: await cargarSeries() })
+    const [series, enFila] = await Promise.all([cargarSeries(), cargarEnFila()])
+    return NextResponse.json({ series, enFila })
   } catch (err) {
     const error = mensajeError(err)
     console.error(`[series] GET: ${error}`)

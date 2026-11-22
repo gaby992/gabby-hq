@@ -2,13 +2,14 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { CLARO } from '@/components/Fondo'
-import type { Serie } from '@/lib/series'
+import type { EnFila, Serie } from '@/lib/series'
 
 // 🍿 Series — what Gabby is watching, which episode she's on and when the next one
 // drops. Built from her "Serie: …" episode tasks; ✓ Visto completes the task.
 
 export default function SeriesPage() {
   const [series, setSeries] = useState<Serie[] | null>(null)
+  const [enFila, setEnFila] = useState<EnFila[]>([])
   const [error, setError] = useState('')
   const [ocupado, setOcupado] = useState<string | null>(null)
   const [abiertas, setAbiertas] = useState<Set<string>>(new Set())
@@ -19,6 +20,7 @@ export default function SeriesPage() {
       const j = await res.json()
       if (!res.ok) throw new Error(j.error ?? 'No pude cargar las series')
       setSeries(j.series)
+      setEnFila(j.enFila ?? [])
       setError('')
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -69,6 +71,31 @@ export default function SeriesPage() {
           <TarjetaSerie key={s.nombre} s={s} abierta={abiertas.has(s.nombre)} onAlternar={() => alternar(s.nombre)} onMarcar={marcar} ocupado={ocupado} />
         ))}
       </div>
+
+      {enFila.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold" style={{ color: CLARO.textoSuave }}>🎬 En fila para ver</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {enFila.map((f) => (
+              <article key={f.id} className="rounded-xl p-4 space-y-2" style={{ backgroundColor: CLARO.tarjeta, border: `1px dashed ${CLARO.borde}` }}>
+                <div className="flex items-start justify-between gap-2">
+                  <h3 className="text-[15px] font-semibold leading-tight" style={{ color: CLARO.texto }}>{f.nombre}</h3>
+                  {f.plataforma && <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ backgroundColor: CLARO.acentoSuave, color: CLARO.acento }}>{f.plataforma}</span>}
+                </div>
+                {f.detalle && <p className="text-xs" style={{ color: CLARO.textoSuave }}>{f.detalle}</p>}
+                <button
+                  onClick={() => marcar(f.id, true)}
+                  disabled={ocupado === f.id}
+                  className="text-xs px-3 py-1 rounded-md disabled:opacity-50"
+                  style={{ backgroundColor: CLARO.acentoSuave, color: CLARO.acento }}
+                >
+                  ▶ Ya la empecé
+                </button>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
 
       {terminadas.length > 0 && (
         <section className="space-y-3">

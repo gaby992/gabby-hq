@@ -98,3 +98,33 @@ export async function cargarSeries(): Promise<Serie[]> {
   // Still airing first, by next episode; finished ones at the end.
   return series.sort((a, b) => Number(a.terminada) - Number(b.terminada) || (a.proximo?.fecha ?? '9999').localeCompare(b.proximo?.fecha ?? '9999'))
 }
+
+// "En fila": series she wants to watch next, one task each, titled
+//   "Para ver: Taming the Husband (Viki) — Cdrama · 26 caps, van 8"
+// Starting it = completing that task (then the "Serie: …" episode tasks take over).
+export interface EnFila {
+  id: string
+  nombre: string
+  plataforma: string | null
+  detalle: string
+}
+
+const FILA = /^para ver:\s*(.+?)\s*(?:\(([^)]+)\))?\s*(?:[—–-]\s*(.*))?$/i
+
+export async function cargarEnFila(): Promise<EnFila[]> {
+  const { data, error } = await createServerClient()
+    .from('tasks')
+    .select('id, text, created_at')
+    .ilike('text', 'para ver:%')
+    .eq('done', false)
+    .order('created_at', { ascending: true })
+    .limit(100)
+  if (error) throw new Error(`Supabase tasks: ${error.message}`)
+  const out: EnFila[] = []
+  for (const t of (data ?? []) as { id: string; text: string }[]) {
+    const m = FILA.exec(t.text.trim())
+    if (!m) continue
+    out.push({ id: t.id, nombre: m[1].trim(), plataforma: m[2]?.trim() || null, detalle: (m[3] ?? '').trim() })
+  }
+  return out
+}
