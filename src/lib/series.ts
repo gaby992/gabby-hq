@@ -91,7 +91,8 @@ export async function cargarSeries(): Promise<Serie[]> {
       voy_en: voyEn,
       dia: proximo?.fecha ? diaSemana(proximo.fecha) : null,
       proximo,
-      terminada: pendientes.length === 0,
+      // Done only when nothing is left AND she reached the last episode (if we know it).
+      terminada: pendientes.length === 0 && (s.total === null || (voyEn ?? 0) >= s.total),
       caps: s.caps,
     })
   }

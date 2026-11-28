@@ -52,6 +52,7 @@ export async function POST(request: Request) {
       if (error) throw new Error(error.message)
     } else {
       await ejecutarAccion({ accion: 'listo' }, [id])
+      await siguienteCap(id)
     }
     return NextResponse.json({ ok: true })
   } catch (err) {
@@ -59,4 +60,20 @@ export async function POST(request: Request) {
     console.error(`[series] POST: ${error}`)
     return NextResponse.json({ error }, { status: 500 })
   }
+}
+
+// When she marks an episode seen and the show has no more episode tasks open
+// (series with every episode already out), the next one is created, sin fecha.
+async function siguienteCap(id: string) {
+  const db = createServerClient()
+  const { data: t } = await db.from('tasks').select('text, company_id').eq('id', id).maybeSingle<{ text: string; company_id: string | null }>()
+  if (!t) return
+  const m = /^(serie:\s*.+?)\s*[—–-]\s*cap(?:[ií]tulo)?\s+(\d+)\s+de\s+(\d+)/i.exec(t.text.trim())
+  if (!m) return
+  const [, base, n, total] = m
+  if (Number(n) >= Number(total)) return
+  const { data: abiertas } = await db.from('tasks').select('id').eq('done', false).ilike('text', `${base.replace(/[%_]/g, '')}%`).limit(1)
+  if (abiertas && abiertas.length) return
+  const sig = Number(n) + 1
+  await guardarTarea({ text: `${base} — cap ${sig} de ${total}${sig === Number(total) ? ', final' : ''}`, priority: 'cuando', importante: false, company_id: t.company_id, company_name: null, due_date: null, due_time: null })
 }
