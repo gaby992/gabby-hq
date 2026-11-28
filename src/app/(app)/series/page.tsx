@@ -28,10 +28,10 @@ export default function SeriesPage() {
   }, [])
   useEffect(() => { cargar() }, [cargar])
 
-  async function marcar(id: string, visto: boolean) {
+  async function marcar(id: string, visto: boolean, empezar = false) {
     setOcupado(id)
     try {
-      const res = await fetch('/api/series', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task_id: id, visto }) })
+      const res = await fetch('/api/series', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task_id: id, visto, empezar }) })
       if (!res.ok) throw new Error((await res.json()).error ?? 'No se pudo guardar')
       await cargar()
     } catch (e) {
@@ -84,7 +84,7 @@ export default function SeriesPage() {
                 </div>
                 {f.detalle && <p className="text-xs" style={{ color: CLARO.textoSuave }}>{f.detalle}</p>}
                 <button
-                  onClick={() => marcar(f.id, true)}
+                  onClick={() => marcar(f.id, true, true)}
                   disabled={ocupado === f.id}
                   className="text-xs px-3 py-1 rounded-md disabled:opacity-50"
                   style={{ backgroundColor: CLARO.acentoSuave, color: CLARO.acento }}
